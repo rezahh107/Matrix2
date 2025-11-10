@@ -90,10 +90,10 @@ from app.infra import cli
 window = MainWindow()
 args = [
     "build-matrix",
-    "--inspactor", "C:/data/Inspactor.xlsx",
-    "--schools", "C:/data/Schools.xlsx",
-    "--crosswalk", "C:/data/Crosswalk.xlsx",
-    "--output", "C:/out/matrix.xlsx",
+    "--inspactor", "C:\\data\\Inspactor.xlsx",
+    "--schools", "C:\\data\\Schools.xlsx",
+    "--crosswalk", "C:\\data\\Crosswalk.xlsx",
+    "--output", "C:\\out\\matrix.xlsx",
 ]
 window.run_task(partial(cli.main, args))
 ```
