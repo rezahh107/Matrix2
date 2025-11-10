@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 import pytest
@@ -118,23 +119,23 @@ def test_allocate_command_passes_through(policy_file: Path) -> None:
     }
 
 
-@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای خواندن .xlsx")
-def test_detect_reader_for_excel_coerces_alt_code(tmp_path: Path) -> None:
-    sample = tmp_path / "students.xlsx"
+@pytest.mark.parametrize(
+    ("file_format", "writer"),
+    [
+        ("xlsx", lambda df, p: df.to_excel(p, index=False)),
+        ("csv", lambda df, p: df.to_csv(p, index=False)),
+    ],
+    ids=["excel", "csv"],
+)
+def test_detect_reader_coerces_alt_code(
+    tmp_path: Path, file_format: str, writer: Callable[[pd.DataFrame, Path], None]
+) -> None:
+    if file_format == "xlsx" and not _HAS_OPENPYXL:
+        pytest.skip("openpyxl لازم است برای خواندن .xlsx")
+
+    sample = tmp_path / f"students.{file_format}"
     df = pd.DataFrame({ALT_CODE_COLUMN: [987654], "name": ["x"]})
-    df.to_excel(sample, index=False)
-
-    reader = cli._detect_reader(sample)
-    loaded = reader(sample)
-
-    assert loaded[ALT_CODE_COLUMN].dtype == object
-    assert loaded.loc[0, ALT_CODE_COLUMN] == "987654"
-
-
-def test_detect_reader_for_csv_coerces_alt_code(tmp_path: Path) -> None:
-    sample = tmp_path / "students.csv"
-    df = pd.DataFrame({ALT_CODE_COLUMN: [987654], "name": ["x"]})
-    df.to_csv(sample, index=False)
+    writer(df, sample)
 
     reader = cli._detect_reader(sample)
     loaded = reader(sample)
