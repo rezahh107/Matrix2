@@ -363,6 +363,63 @@ def build_school_maps(schools_df: pd.DataFrame) -> tuple[dict[str, str], dict[st
 def safe_int_column(df: pd.DataFrame, col: str, default: int = 0) -> pd.Series:
     return pd.to_numeric(df.get(col), errors="coerce").fillna(default).astype(int)
 
+
+def safe_int_value(value: Any, default: int = 0) -> int:
+    """تبدیل ورودی به عدد صحیح با مدیریت مقادیر خالی.
+
+    مثال ساده::
+
+        >>> safe_int_value("7")
+        7
+        >>> safe_int_value("", default=2)
+        2
+
+    Args:
+        value: مقداری که باید به int تبدیل شود.
+        default: مقدار پیش‌فرض در صورت عدم امکان تبدیل.
+
+    Returns:
+        مقدار صحیح نرمال‌شده (حداقل برابر با ``default``).
+    """
+
+    if value is None:
+        return int(default)
+    if isinstance(value, float) and math.isnan(value):
+        return int(default)
+    text = str(value).strip().replace(",", "")
+    if not text:
+        return int(default)
+    try:
+        number = float(text)
+    except (TypeError, ValueError):
+        return int(default)
+    if math.isnan(number):
+        return int(default)
+    return int(number)
+
+
+def normalize_capacity_values(current: Any, special: Any, *, default: int = 0) -> tuple[int, int, int]:
+    """نرمال‌سازی ستون‌های ظرفیت و محاسبهٔ ظرفیت باقی‌مانده.
+
+    مثال::
+
+        >>> normalize_capacity_values("5", "12")
+        (5, 12, 7)
+
+    Args:
+        current: مقدار پوشش فعلی در Inspactor.
+        special: ظرفیت ویژهٔ ثبت‌شده برای پشتیبان.
+        default: مقدار جایگزین برای ورودی‌های نامعتبر.
+
+    Returns:
+        سه‌تایی ``(covered_now, special_limit, remaining_capacity)``.
+    """
+
+    covered = max(safe_int_value(current, default=default), 0)
+    special_limit = max(safe_int_value(special, default=default), 0)
+    remaining = max(special_limit - covered, 0)
+    return covered, special_limit, remaining
+
 # =============================================================================
 # CAPACITY GATE (R0)
 # =============================================================================
@@ -577,6 +634,9 @@ def generate_row_variants(
                 "جنسیت2": gender_text(gcode),
                 "دانش آموز فارغ2": status_text(stcode),
                 "مرکز گلستان صدرا3": base["center_text"],
+                CAPACITY_CURRENT_COL: int(base.get("capacity_current", 0)),
+                CAPACITY_SPECIAL_COL: int(base.get("capacity_special", 0)),
+                "remaining_capacity": int(base.get("capacity_remaining", 0)),
             }
         )
     return rows
@@ -636,6 +696,11 @@ def _prepare_base_rows(
                 school_count = int(float(str(row.get(COL_SCHOOL_COUNT, "0")).strip() or "0"))
             except ValueError:
                 school_count = 0
+
+        covered_now, special_limit, remaining_capacity = normalize_capacity_values(
+            row.get(CAPACITY_CURRENT_COL, 0),
+            row.get(CAPACITY_SPECIAL_COL, 0),
+        )
 
         genders_raw = ensure_list([row.get(gender_col)]) if gender_col else [""]
         gender_codes: list[int | str] = []
@@ -704,6 +769,9 @@ def _prepare_base_rows(
             "alias_school": alias_school,
             "can_normal": alias_num is not None,
             "can_school": bool(school_codes) or school_count > 0,
+            "capacity_current": covered_now,
+            "capacity_special": special_limit,
+            "capacity_remaining": remaining_capacity,
         }
 
         for sc in school_codes:
@@ -778,6 +846,16 @@ def _explode_rows(
         }
     )
 
+    df[CAPACITY_CURRENT_COL] = pd.to_numeric(
+        df.get("capacity_current", 0), errors="coerce"
+    ).fillna(0).astype(int)
+    df[CAPACITY_SPECIAL_COL] = pd.to_numeric(
+        df.get("capacity_special", 0), errors="coerce"
+    ).fillna(0).astype(int)
+    df["remaining_capacity"] = (
+        pd.to_numeric(df.get("capacity_remaining", 0), errors="coerce").fillna(0).astype(int)
+    )
+
     df["مالی حکمت بنیاد"] = pd.to_numeric(df["مالی حکمت بنیاد"], errors="coerce").astype("Int64")
     df["جنسیت"] = pd.to_numeric(df["gender_code"], errors="coerce").astype("Int64")
     df["دانش آموز فارغ"] = pd.to_numeric(df["status_code"], errors="coerce").astype("Int64")
@@ -791,7 +869,17 @@ def _explode_rows(
     )
     df["مرکز گلستان صدرا3"] = df["center_text"]
 
-    df = df.drop(columns=["gender_code", "status_code", "center_text"])
+    df = df.drop(
+        columns=[
+            "gender_code",
+            "status_code",
+            "center_text",
+            "capacity_current",
+            "capacity_special",
+            "capacity_remaining",
+        ],
+        errors="ignore",
+    )
     ordered_columns = [
         "جایگزین",
         "پشتیبان",
@@ -810,6 +898,9 @@ def _explode_rows(
         "جنسیت2",
         "دانش آموز فارغ2",
         "مرکز گلستان صدرا3",
+        CAPACITY_CURRENT_COL,
+        CAPACITY_SPECIAL_COL,
+        "remaining_capacity",
     ]
     return df[ordered_columns]
 
@@ -939,6 +1030,9 @@ def build_matrix(
                 "جنسیت2",
                 "دانش آموز فارغ2",
                 "مرکز گلستان صدرا3",
+                CAPACITY_CURRENT_COL,
+                CAPACITY_SPECIAL_COL,
+                "remaining_capacity",
             ]
         )
 
