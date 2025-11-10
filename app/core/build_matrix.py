@@ -382,20 +382,17 @@ def safe_int_value(value: Any, default: int = 0) -> int:
         مقدار صحیح نرمال‌شده (حداقل برابر با ``default``).
     """
 
-    if value is None:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
         return int(default)
-    if isinstance(value, float) and math.isnan(value):
-        return int(default)
+
     text = str(value).strip().replace(",", "")
     if not text:
         return int(default)
+
     try:
-        number = float(text)
-    except (TypeError, ValueError):
+        return int(float(text))
+    except (ValueError, TypeError):
         return int(default)
-    if math.isnan(number):
-        return int(default)
-    return int(number)
 
 
 def normalize_capacity_values(current: Any, special: Any, *, default: int = 0) -> tuple[int, int, int]:
