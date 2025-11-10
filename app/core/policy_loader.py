@@ -202,7 +202,7 @@ def _normalize_trace_stages(raw: object | None, join_keys: Sequence[str]) -> Lis
             )
         stages = []
         seen_stage_names: set[str] = set()
-        for expected, item in zip(_TRACE_STAGE_ORDER, raw, strict=False):
+        for expected, item in zip(_TRACE_STAGE_ORDER, raw, strict=True):
             if not isinstance(item, Mapping):
                 raise TypeError("Each trace stage must be a mapping")
             stage_name = str(item.get("stage", "")).strip()
