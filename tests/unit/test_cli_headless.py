@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from app.infra import cli
+from app.infra.io_utils import ALT_CODE_COLUMN
+
+
+_HAS_OPENPYXL = importlib.util.find_spec("openpyxl") is not None
 
 
 @pytest.fixture()
@@ -110,3 +116,28 @@ def test_allocate_command_passes_through(policy_file: Path) -> None:
         "pool": "pool.csv",
         "capacity": "remaining_capacity",
     }
+
+
+@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای خواندن .xlsx")
+def test_detect_reader_for_excel_coerces_alt_code(tmp_path: Path) -> None:
+    sample = tmp_path / "students.xlsx"
+    df = pd.DataFrame({ALT_CODE_COLUMN: [987654], "name": ["x"]})
+    df.to_excel(sample, index=False)
+
+    reader = cli._detect_reader(sample)
+    loaded = reader(sample)
+
+    assert loaded[ALT_CODE_COLUMN].dtype == object
+    assert loaded.loc[0, ALT_CODE_COLUMN] == "987654"
+
+
+def test_detect_reader_for_csv_coerces_alt_code(tmp_path: Path) -> None:
+    sample = tmp_path / "students.csv"
+    df = pd.DataFrame({ALT_CODE_COLUMN: [987654], "name": ["x"]})
+    df.to_csv(sample, index=False)
+
+    reader = cli._detect_reader(sample)
+    loaded = reader(sample)
+
+    assert loaded[ALT_CODE_COLUMN].dtype == object
+    assert loaded.loc[0, ALT_CODE_COLUMN] == "987654"

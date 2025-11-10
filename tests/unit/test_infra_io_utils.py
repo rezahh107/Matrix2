@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import app.infra.io_utils as io_utils  # noqa: E402
-from app.infra.io_utils import write_xlsx_atomic  # noqa: E402
+from app.infra.io_utils import ALT_CODE_COLUMN, write_xlsx_atomic  # noqa: E402
 
 _HAS_OPENPYXL = importlib.util.find_spec("openpyxl") is not None
 _HAS_XLSXWRITER = importlib.util.find_spec("xlsxwriter") is not None
@@ -94,6 +94,19 @@ def test_write_xlsx_atomic_respects_env_override(tmp_path: Path, monkeypatch: py
     write_xlsx_atomic({"Sheet": pd.DataFrame({"v": [1]})}, out)
 
     assert out.exists() and out.stat().st_size > 0
+
+
+@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای خواندن .xlsx")
+def test_read_excel_first_sheet_preserves_alt_code_as_text(tmp_path: Path) -> None:
+    data = pd.DataFrame({ALT_CODE_COLUMN: [123456], "value": [1]})
+    sample = tmp_path / "sample.xlsx"
+    data.to_excel(sample, index=False)
+
+    loaded = io_utils.read_excel_first_sheet(sample)
+
+    assert ALT_CODE_COLUMN in loaded.columns
+    assert loaded[ALT_CODE_COLUMN].dtype == object
+    assert loaded.loc[0, ALT_CODE_COLUMN] == "123456"
 
 
 def test_write_xlsx_atomic_cleans_up_temp_file_on_failure(

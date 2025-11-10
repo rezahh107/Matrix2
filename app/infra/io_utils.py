@@ -15,7 +15,13 @@ from typing import Dict, Iterator, Tuple
 
 import pandas as pd
 
-__all__ = ["write_xlsx_atomic", "read_excel_first_sheet", "read_crosswalk_workbook"]
+__all__ = [
+    "write_xlsx_atomic",
+    "read_excel_first_sheet",
+    "read_crosswalk_workbook",
+]
+
+ALT_CODE_COLUMN = "کد جایگزین"
 
 _INVALID_SHEET_CHARS = re.compile(r"[\\/*?:\[\]]")
 
@@ -132,7 +138,9 @@ def read_excel_first_sheet(path: Path | str | PathLike[str]) -> pd.DataFrame:
         with pd.ExcelFile(source) as workbook:
             if not workbook.sheet_names:
                 raise ValueError(f"هیچ شیتی در فایل {source} یافت نشد.")
-            return workbook.parse(workbook.sheet_names[0])
+            return workbook.parse(
+                workbook.sheet_names[0], dtype={ALT_CODE_COLUMN: str}
+            )
     except FileNotFoundError as exc:  # pragma: no cover - propagate خوانا
         raise FileNotFoundError(f"فایل یافت نشد: {source}") from exc
     except Exception as exc:  # pragma: no cover - پیام خوانا
@@ -161,10 +169,10 @@ def read_crosswalk_workbook(
         with pd.ExcelFile(source) as workbook:
             if sheet_groups not in workbook.sheet_names:
                 raise ValueError(f"شیت «{sheet_groups}» در Crosswalk یافت نشد")
-            groups_df = workbook.parse(sheet_groups)
+            groups_df = workbook.parse(sheet_groups, dtype={ALT_CODE_COLUMN: str})
             synonyms_df = None
             if "Synonyms" in workbook.sheet_names:
-                synonyms_df = workbook.parse("Synonyms")
+                synonyms_df = workbook.parse("Synonyms", dtype={ALT_CODE_COLUMN: str})
             return groups_df, synonyms_df
     except FileNotFoundError as exc:  # pragma: no cover
         raise FileNotFoundError(f"فایل Crosswalk یافت نشد: {source}") from exc
