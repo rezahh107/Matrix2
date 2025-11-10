@@ -68,7 +68,10 @@ def test_missing_keys() -> None:
 def test_join_keys_constraints() -> None:
     payload = _valid_payload()
     payload["join_keys"] = ["a", "a", "b", "c", "d", "e"]
-    with pytest.raises(ValueError, match="join_keys must be unique"):
+    with pytest.raises(
+        ValueError,
+        match=r"join_keys must be unique\. Duplicate keys found: \['a'\]",
+    ):
         parse_policy_dict(payload)
 
 
