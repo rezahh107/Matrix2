@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+from os import PathLike
 from pathlib import Path
 from typing import Dict
 
@@ -36,6 +37,10 @@ def _safe_sheet_name(name: str, taken: set[str]) -> str:
 def _pick_engine() -> str:
     """انتخاب بهترین engine نصب‌شده برای نوشتن Excel."""
 
+    forced = os.getenv("EXCEL_ENGINE")
+    if forced in {"openpyxl", "xlsxwriter"}:
+        return forced
+
     for engine in ("openpyxl", "xlsxwriter"):
         try:
             __import__(engine)
@@ -45,7 +50,10 @@ def _pick_engine() -> str:
     raise RuntimeError("هیچ‌کدام از 'openpyxl' یا 'xlsxwriter' نصب نیستند.")
 
 
-def write_xlsx_atomic(data_dict: Dict[str, pd.DataFrame], filepath: Path) -> None:
+def write_xlsx_atomic(
+    data_dict: Dict[str, pd.DataFrame],
+    filepath: Path | str | PathLike[str],
+) -> None:
     """نوشتن امن و اتمیک Excel با مدیریت نام شیت و انتخاب engine.
 
     مثال ساده::
@@ -58,20 +66,25 @@ def write_xlsx_atomic(data_dict: Dict[str, pd.DataFrame], filepath: Path) -> Non
 
     Args:
         data_dict: نگاشت نام شیت به دیتافریم.
-        filepath: مسیر فایل خروجی.
+        filepath: مسیر فایل خروجی (``str``/``Path``). در صورت نبود پوشهٔ مقصد
+            ساخته می‌شود.
     """
 
+    target_path = Path(filepath)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
     engine = _pick_engine()
     taken: set[str] = set()
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp_path = Path(tmp.name)
+    tmp.close()
     try:
-        with pd.ExcelWriter(tmp.name, engine=engine) as writer:
+        with pd.ExcelWriter(tmp_path, engine=engine) as writer:
             for sheet_name, df in data_dict.items():
                 safe_name = _safe_sheet_name(str(sheet_name), taken)
                 df.to_excel(writer, sheet_name=safe_name, index=False)
-        os.replace(tmp.name, str(filepath))
+        os.replace(tmp_path, target_path)
     finally:
         try:
-            os.unlink(tmp.name)
+            os.unlink(tmp_path)
         except OSError:
             pass

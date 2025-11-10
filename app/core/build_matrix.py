@@ -395,7 +395,7 @@ def capacity_gate(insp: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, bool]
         keep_cols.append(COL_GROUP)
 
     removed = df.loc[removed_mask, keep_cols].copy()
-    removed.rename(
+    removed = removed.rename(
         columns={
             CAPACITY_CURRENT_COL: "تحت پوشش فعلی",
             CAPACITY_SPECIAL_COL: "ظرفیت خاص",
@@ -403,15 +403,14 @@ def capacity_gate(insp: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, bool]
             COL_MANAGER_NAME: "مدیر",
             COL_SCHOOL1: "مدرسه (خام)",
             COL_GROUP: "گروه آزمایشی (خام)",
-        },
-        inplace=True,
+        }
     )
     removed["دلیل حذف"] = "تعداد داوطلبان تحت پوشش ≥ تعداد تحت پوشش خاص"
 
     kept = df.loc[~removed_mask].copy()
-    for c in ["_cap_cur", "_cap_spec"]:
-        kept.drop(columns=[c], errors="ignore", inplace=True)
-        removed.drop(columns=[c], errors="ignore", inplace=True)
+    drop_cols = ["_cap_cur", "_cap_spec"]
+    kept = kept.drop(columns=drop_cols, errors="ignore")
+    removed = removed.drop(columns=drop_cols, errors="ignore")
 
     logger.info("Capacity gate: kept=%d, removed=%d", len(kept), len(removed))
     return kept, removed, False
@@ -790,13 +789,12 @@ def build_matrix(
             _school_sort=matrix["کد مدرسه"].apply(lambda v: _to_int_or(v, SCHOOL_CODE_NULL_SORT)),
             _alias_sort=matrix["جایگزین"].apply(lambda v: _to_int_or(v, ALIAS_FALLBACK_SORT)),
         )
-        matrix.sort_values(
+        matrix = matrix.sort_values(
             by=["مرکز گلستان صدرا", "کدرشته", "_school_sort", "_alias_sort"],
             ascending=[True, True, True, True],
-            inplace=True,
             kind="mergesort",
         )
-        matrix.drop(columns=["_school_sort", "_alias_sort"], inplace=True)
+        matrix = matrix.drop(columns=["_school_sort", "_alias_sort"])
         matrix.insert(0, "counter", range(1, len(matrix) + 1))
 
     validation = pd.DataFrame(

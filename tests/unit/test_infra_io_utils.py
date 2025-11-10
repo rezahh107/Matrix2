@@ -1,25 +1,32 @@
 from __future__ import annotations
 
+import hashlib
 import importlib
 import sys
+import warnings
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
+# مسیر پروژه برای ایمپورت ماژول
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.infra.io_utils import write_xlsx_atomic
+from app.infra.io_utils import write_xlsx_atomic  # noqa: E402
+
+_HAS_OPENPYXL = importlib.util.find_spec("openpyxl") is not None
+_HAS_XLSXWRITER = importlib.util.find_spec("xlsxwriter") is not None
+_HAS_ENGINE = _HAS_OPENPYXL or _HAS_XLSXWRITER
 
 
-@pytest.mark.skipif(importlib.util.find_spec('openpyxl') is None, reason="openpyxl لازم است")
+@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای خواندن .xlsx")
 def test_write_xlsx_atomic_sanitizes_and_deduplicates(tmp_path: Path) -> None:
     df = pd.DataFrame({"a": [1], "b": [2]})
     out = tmp_path / "out.xlsx"
 
     write_xlsx_atomic({"Sheet/1": df, "Sheet:1": df, " ": df}, out)
 
-    from openpyxl import load_workbook
+    from openpyxl import load_workbook  # local import (optional dep)
 
     wb = load_workbook(out)
     names = wb.sheetnames
@@ -27,3 +34,62 @@ def test_write_xlsx_atomic_sanitizes_and_deduplicates(tmp_path: Path) -> None:
     assert names[0] == "Sheet 1"
     assert names[1] == "Sheet 1 (2)"
     assert names[2] == "Sheet"
+
+
+@pytest.mark.skipif(not _HAS_ENGINE, reason="هیچ engine اکسل یافت نشد")
+def test_write_xlsx_atomic_replaces_existing_file_atomically(tmp_path: Path) -> None:
+    df1 = pd.DataFrame({"val": [1, 2, 3]})
+    df2 = pd.DataFrame({"val": [4, 5, 6, 7]})
+    out = tmp_path / "nested" / "out.xlsx"
+
+    write_xlsx_atomic({"S1": df1}, out)
+    h1 = hashlib.sha256(out.read_bytes()).hexdigest()
+    mtime1 = out.stat().st_mtime
+
+    write_xlsx_atomic({"S2": df2}, out)
+    h2 = hashlib.sha256(out.read_bytes()).hexdigest()
+    mtime2 = out.stat().st_mtime
+
+    assert h1 != h2, "فایل باید به‌صورت کامل جایگزین شود (hash متفاوت)"
+    assert mtime2 >= mtime1, "mtime باید جلوتر یا برابر باشد (جایگزینی)"
+
+
+@pytest.mark.skipif(not (_HAS_ENGINE and _HAS_OPENPYXL), reason="engine/openpyxl لازم است")
+def test_write_xlsx_atomic_emits_no_pandas_futurewarnings(tmp_path: Path) -> None:
+    df = pd.DataFrame({"x": [1, 2]})
+    out = tmp_path / "fw.xlsx"
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", category=FutureWarning)
+        write_xlsx_atomic({"Sheet": df}, out)
+
+        from openpyxl import load_workbook  # local import (optional dep)
+
+        wb = load_workbook(out)
+        assert "Sheet" in wb.sheetnames
+
+        fw = [w for w in caught if issubclass(w.category, FutureWarning)]
+        assert not fw, f"FutureWarnings: {[str(w.message) for w in fw]}"
+
+
+@pytest.mark.skipif(not _HAS_ENGINE, reason="هیچ engine اکسل یافت نشد")
+def test_write_xlsx_atomic_accepts_str_path_and_creates_parent(tmp_path: Path) -> None:
+    df = pd.DataFrame({"val": [42]})
+    nested = tmp_path / "nested" / "more"
+    out = nested / "out.xlsx"
+
+    write_xlsx_atomic({"Sheet": df}, str(out))
+
+    assert out.exists()
+    assert out.stat().st_size > 0
+
+
+@pytest.mark.skipif(not _HAS_ENGINE, reason="هیچ engine اکسل یافت نشد")
+def test_write_xlsx_atomic_respects_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = "openpyxl" if _HAS_OPENPYXL else "xlsxwriter"
+    monkeypatch.setenv("EXCEL_ENGINE", engine)
+    out = tmp_path / "env.xlsx"
+
+    write_xlsx_atomic({"Sheet": pd.DataFrame({"v": [1]})}, out)
+
+    assert out.exists() and out.stat().st_size > 0
