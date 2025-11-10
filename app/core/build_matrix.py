@@ -915,11 +915,15 @@ def build_matrix(
         matrix["جایگزین"] = matrix["جایگزین"].apply(
             lambda v: int(v) if str(v).strip().isdigit() else str(v).strip()
         )
-        matrix["_school_sort"] = matrix["کد مدرسه"].apply(
-            lambda v: int(v) if str(v).isdigit() else SCHOOL_CODE_NULL_SORT
+        matrix["_school_sort"] = (
+            pd.to_numeric(matrix["کد مدرسه"], errors="coerce")
+            .fillna(SCHOOL_CODE_NULL_SORT)
+            .astype(int)
         )
-        matrix["_alias_sort"] = matrix["جایگزین"].apply(
-            lambda v: int(v) if str(v).isdigit() else ALIAS_FALLBACK_SORT
+        matrix["_alias_sort"] = (
+            pd.to_numeric(matrix["جایگزین"], errors="coerce")
+            .fillna(ALIAS_FALLBACK_SORT)
+            .astype(int)
         )
         matrix = matrix.sort_values(
             by=["مرکز گلستان صدرا", "کدرشته", "_school_sort", "_alias_sort"],
