@@ -74,7 +74,9 @@ def write_xlsx_atomic(
     target_path.parent.mkdir(parents=True, exist_ok=True)
     engine = _pick_engine()
     taken: set[str] = set()
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp = tempfile.NamedTemporaryFile(
+        delete=False, suffix=".xlsx", dir=target_path.parent
+    )
     tmp_path = Path(tmp.name)
     tmp.close()
     try:
