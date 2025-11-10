@@ -4,6 +4,8 @@ import pandas as pd
 import pandas.testing as pdt
 
 from app.core.build_matrix import (
+    CAPACITY_CURRENT_COL,
+    CAPACITY_SPECIAL_COL,
     BuildConfig,
     build_matrix,
     build_school_maps,
@@ -67,6 +69,9 @@ def _build_reference_matrix(
             "row_id": record.get("mentor_row_id", ""),
             "center_code": record["center_code"],
             "center_text": record["center_text"],
+            "capacity_current": record.get("capacity_current", 0),
+            "capacity_special": record.get("capacity_special", 0),
+            "capacity_remaining": record.get("capacity_remaining", 0),
         }
         if record.get("can_normal"):
             rows.extend(
@@ -149,7 +154,14 @@ def test_vectorized_matrix_matches_reference() -> None:
     matrix_cmp = matrix_cmp.reset_index(drop=True)
     manual_cmp = manual_cmp[matrix_cmp.columns].reset_index(drop=True)
 
-    for column in ["جنسیت", "دانش آموز فارغ", "مالی حکمت بنیاد"]:
+    for column in [
+        "جنسیت",
+        "دانش آموز فارغ",
+        "مالی حکمت بنیاد",
+        CAPACITY_CURRENT_COL,
+        CAPACITY_SPECIAL_COL,
+        "remaining_capacity",
+    ]:
         matrix_cmp[column] = matrix_cmp[column].astype("Int64")
         manual_cmp[column] = manual_cmp[column].astype("Int64")
 
