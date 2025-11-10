@@ -1,0 +1,18 @@
+{
+  "version": "1.0.3",
+  "normal_statuses": [1, 0],
+  "school_statuses": [1],
+  "join_keys": [
+    "کدرشته",
+    "جنسیت",
+    "دانش آموز فارغ",
+    "مرکز گلستان صدرا",
+    "مالی حکمت بنیاد",
+    "کد مدرسه"
+  ],
+  "ranking": [
+    "min_occupancy_ratio",
+    "min_allocations_new",
+    "min_mentor_id"
+  ]
+}
