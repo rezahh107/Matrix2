@@ -270,9 +270,9 @@ def norm_gender(x: Any, strict: bool = False) -> Gender:
         return Gender.FEMALE
 
     normalized = normalize_fa(x)
-    if normalized in _GENDER_MALE_FA_NORMALIZED:
+    if any(token in normalized for token in _GENDER_MALE_FA_NORMALIZED):
         return Gender.MALE
-    if normalized in _GENDER_FEMALE_FA_NORMALIZED:
+    if any(token in normalized for token in _GENDER_FEMALE_FA_NORMALIZED):
         return Gender.FEMALE
 
     numeric = _num_to_int_safe(raw or normalized)
