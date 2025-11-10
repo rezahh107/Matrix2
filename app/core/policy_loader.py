@@ -158,7 +158,17 @@ def _normalize_join_keys(raw: object) -> List[str]:
     if any(not key for key in join_keys):
         raise ValueError("join_keys must be non-empty strings")
     if len(set(join_keys)) != len(join_keys):
-        raise ValueError("join_keys must be unique")
+        seen: set[str] = set()
+        duplicates: List[str] = []
+        for key in join_keys:
+            if key in seen and key not in duplicates:
+                duplicates.append(key)
+            else:
+                seen.add(key)
+        raise ValueError(
+            "join_keys must be unique. Duplicate keys found: "
+            f"{duplicates}"
+        )
     return join_keys
 
 
