@@ -109,6 +109,25 @@ def test_read_excel_first_sheet_preserves_alt_code_as_text(tmp_path: Path) -> No
     assert loaded.loc[0, ALT_CODE_COLUMN] == "123456"
 
 
+@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای خواندن .xlsx")
+def test_read_crosswalk_workbook_coerces_alt_code_in_all_sheets(tmp_path: Path) -> None:
+    groups = pd.DataFrame({ALT_CODE_COLUMN: [111222], "گروه": ["الف"]})
+    synonyms = pd.DataFrame({ALT_CODE_COLUMN: [333444], "کد اصلی": ["ب"]})
+    sample = tmp_path / "crosswalk.xlsx"
+
+    with pd.ExcelWriter(sample) as writer:
+        groups.to_excel(writer, sheet_name="پایه تحصیلی (گروه آزمایشی)", index=False)
+        synonyms.to_excel(writer, sheet_name="Synonyms", index=False)
+
+    groups_df, synonyms_df = io_utils.read_crosswalk_workbook(sample)
+
+    assert groups_df[ALT_CODE_COLUMN].dtype == object
+    assert groups_df.loc[0, ALT_CODE_COLUMN] == "111222"
+    assert synonyms_df is not None
+    assert synonyms_df[ALT_CODE_COLUMN].dtype == object
+    assert synonyms_df.loc[0, ALT_CODE_COLUMN] == "333444"
+
+
 def test_write_xlsx_atomic_cleans_up_temp_file_on_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -169,10 +169,11 @@ def read_crosswalk_workbook(
         with pd.ExcelFile(source) as workbook:
             if sheet_groups not in workbook.sheet_names:
                 raise ValueError(f"شیت «{sheet_groups}» در Crosswalk یافت نشد")
-            groups_df = workbook.parse(sheet_groups, dtype={ALT_CODE_COLUMN: str})
+            dtype_map = {ALT_CODE_COLUMN: str}
+            groups_df = workbook.parse(sheet_groups, dtype=dtype_map)
             synonyms_df = None
             if "Synonyms" in workbook.sheet_names:
-                synonyms_df = workbook.parse("Synonyms", dtype={ALT_CODE_COLUMN: str})
+                synonyms_df = workbook.parse("Synonyms", dtype=dtype_map)
             return groups_df, synonyms_df
     except FileNotFoundError as exc:  # pragma: no cover
         raise FileNotFoundError(f"فایل Crosswalk یافت نشد: {source}") from exc
