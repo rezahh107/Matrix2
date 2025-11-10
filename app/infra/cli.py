@@ -25,6 +25,7 @@ from app.core.allocate_students import allocate_batch
 from app.core.build_matrix import build_matrix
 from app.core.policy_loader import PolicyConfig, load_policy
 from app.infra.io_utils import (
+    ALT_CODE_COLUMN,
     read_crosswalk_workbook,
     read_excel_first_sheet,
     write_xlsx_atomic,
@@ -45,9 +46,10 @@ def _detect_reader(path: Path) -> Callable[[Path], pd.DataFrame]:
     """انتخاب تابع خواندن مناسب بر اساس پسوند فایل."""
 
     suffix = path.suffix.lower()
+    dtype_map = {ALT_CODE_COLUMN: str}
     if suffix in {".xlsx", ".xls", ".xlsm"}:
-        return lambda p: pd.read_excel(p)
-    return lambda p: pd.read_csv(p)
+        return lambda p: pd.read_excel(p, dtype=dtype_map)
+    return lambda p: pd.read_csv(p, dtype=dtype_map)
 
 
 def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn) -> int:
