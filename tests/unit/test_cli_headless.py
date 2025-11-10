@@ -22,10 +22,20 @@ def policy_file(tmp_path: Path) -> Path:
             "مالی حکمت بنیاد",
             "کد مدرسه",
         ],
-        "ranking": [
-            "min_occupancy_ratio",
-            "min_allocations_new",
-            "min_mentor_id",
+        "ranking_rules": [
+            {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
+            {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
+            {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
+        ],
+        "trace_stages": [
+            {"stage": "type", "column": "کدرشته"},
+            {"stage": "group", "column": "گروه آزمایشی"},
+            {"stage": "gender", "column": "جنسیت"},
+            {"stage": "graduation_status", "column": "دانش آموز فارغ"},
+            {"stage": "center", "column": "مرکز گلستان صدرا"},
+            {"stage": "finance", "column": "مالی حکمت بنیاد"},
+            {"stage": "school", "column": "کد مدرسه"},
+            {"stage": "capacity_gate", "column": "remaining_capacity"},
         ],
     }
     policy_path = tmp_path / "policy.json"

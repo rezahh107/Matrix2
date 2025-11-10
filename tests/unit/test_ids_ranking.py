@@ -12,30 +12,42 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.common.ids import build_mentor_id_map, ensure_ranking_columns, inject_mentor_id
 from app.core.common.ranking import apply_ranking_policy
-from app.core.policy_loader import PolicyConfig
+from app.core.policy_loader import PolicyConfig, parse_policy_dict
 
 
 @pytest.fixture()
 def _policy() -> PolicyConfig:
     """سیاست نمونه مطابق نسخهٔ 1.0.3 برای تست‌های رتبه‌بندی."""
 
-    return PolicyConfig(
-        version="1.0.3",
-        normal_statuses=[1, 0],
-        school_statuses=[1],
-        join_keys=[
-            "کدرشته",
-            "جنسیت",
-            "دانش آموز فارغ",
-            "مرکز گلستان صدرا",
-            "مالی حکمت بنیاد",
-            "کد مدرسه",
-        ],
-        ranking=[
-            "min_occupancy_ratio",
-            "min_allocations_new",
-            "min_mentor_id",
-        ],
+    return parse_policy_dict(
+        {
+            "version": "1.0.3",
+            "normal_statuses": [1, 0],
+            "school_statuses": [1],
+            "join_keys": [
+                "کدرشته",
+                "جنسیت",
+                "دانش آموز فارغ",
+                "مرکز گلستان صدرا",
+                "مالی حکمت بنیاد",
+                "کد مدرسه",
+            ],
+            "ranking_rules": [
+                {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
+                {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
+                {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
+            ],
+            "trace_stages": [
+                {"stage": "type", "column": "کدرشته"},
+                {"stage": "group", "column": "گروه آزمایشی"},
+                {"stage": "gender", "column": "جنسیت"},
+                {"stage": "graduation_status", "column": "دانش آموز فارغ"},
+                {"stage": "center", "column": "مرکز گلستان صدرا"},
+                {"stage": "finance", "column": "مالی حکمت بنیاد"},
+                {"stage": "school", "column": "کد مدرسه"},
+                {"stage": "capacity_gate", "column": "remaining_capacity"},
+            ],
+        }
     )
 
 
@@ -113,3 +125,75 @@ def test_apply_ranking_policy_natural_tie_break(_policy: PolicyConfig) -> None:
     ]
     assert "mentor_id_str" not in pool.columns
     assert "mentor_sort_key" not in pool.columns
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {
+            "version": "1.0.3",
+            "normal_statuses": [1, 0],
+            "school_statuses": [1],
+            "join_keys": [
+                "کدرشته",
+                "جنسیت",
+                "دانش آموز فارغ",
+                "مرکز گلستان صدرا",
+                "مالی حکمت بنیاد",
+                "کد مدرسه",
+            ],
+            "ranking": [
+                "min_occupancy_ratio",
+                "min_allocations_new",
+                "min_mentor_id",
+            ],
+        },
+        {
+            "version": "1.0.3",
+            "normal_statuses": [1, 0],
+            "school_statuses": [1],
+            "join_keys": [
+                "کدرشته",
+                "جنسیت",
+                "دانش آموز فارغ",
+                "مرکز گلستان صدرا",
+                "مالی حکمت بنیاد",
+                "کد مدرسه",
+            ],
+            "ranking_rules": [
+                {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
+                {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
+                {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
+            ],
+            "trace_stages": [
+                {"stage": "type", "column": "کدرشته"},
+                {"stage": "group", "column": "گروه آزمایشی"},
+                {"stage": "gender", "column": "جنسیت"},
+                {"stage": "graduation_status", "column": "دانش آموز فارغ"},
+                {"stage": "center", "column": "مرکز گلستان صدرا"},
+                {"stage": "finance", "column": "مالی حکمت بنیاد"},
+                {"stage": "school", "column": "کد مدرسه"},
+                {"stage": "capacity_gate", "column": "remaining_capacity"},
+            ],
+        },
+    ),
+    ids=["legacy", "extended"],
+)
+def test_ranking_payloads_equivalent(payload: dict[str, object]) -> None:
+    policy = parse_policy_dict(payload)
+    pool = pd.DataFrame(
+        {
+            "پشتیبان": ["الف", "ب", "ج"],
+            "کد کارمندی پشتیبان": ["EMP-010", "EMP-002", "EMP-001"],
+            "occupancy_ratio": [0.4, 0.4, 0.4],
+            "allocations_new": [2, 2, 2],
+        }
+    )
+
+    ranked = apply_ranking_policy(pool, policy=policy)
+
+    assert ranked["کد کارمندی پشتیبان"].tolist() == [
+        "EMP-001",
+        "EMP-002",
+        "EMP-010",
+    ]

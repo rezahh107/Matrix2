@@ -21,9 +21,7 @@ Policy-First حفظ گردد.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
 
 import pandas as pd
 
@@ -33,27 +31,6 @@ from .ids import ensure_ranking_columns
 __all__ = ["apply_ranking_policy"]
 
 _DEFAULT_POLICY_PATH = Path("config/policy.json")
-
-
-@dataclass(frozen=True)
-class _SortRule:
-    column: str
-    ascending: bool
-
-
-_RULE_MAP: dict[str, _SortRule] = {
-    "min_occupancy_ratio": _SortRule("occupancy_ratio", True),
-    "min_allocations_new": _SortRule("allocations_new", True),
-    "min_mentor_id": _SortRule("mentor_sort_key", True),
-}
-
-
-def _resolve_rules(order: Sequence[str]) -> Iterable[_SortRule]:
-    for item in order:
-        rule = _RULE_MAP.get(item)
-        if rule is None:
-            raise ValueError(f"Unsupported ranking rule: {item}")
-        yield rule
 
 
 def apply_ranking_policy(
@@ -82,8 +59,10 @@ def apply_ranking_policy(
         policy = load_policy(policy_path)
 
     ranked = ensure_ranking_columns(candidate_pool)
-    resolved_rules = list(_resolve_rules(policy.ranking))
-    for rule in reversed(resolved_rules):
+    rules = list(policy.ranking_rules)
+    if not rules:
+        raise ValueError("Policy must define at least one ranking rule")
+    for rule in reversed(rules):
         ranked = ranked.sort_values(
             by=rule.column,
             ascending=rule.ascending,
