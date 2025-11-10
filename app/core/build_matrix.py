@@ -843,15 +843,9 @@ def _explode_rows(
         }
     )
 
-    df[CAPACITY_CURRENT_COL] = pd.to_numeric(
-        df.get("capacity_current", 0), errors="coerce"
-    ).fillna(0).astype(int)
-    df[CAPACITY_SPECIAL_COL] = pd.to_numeric(
-        df.get("capacity_special", 0), errors="coerce"
-    ).fillna(0).astype(int)
-    df["remaining_capacity"] = (
-        pd.to_numeric(df.get("capacity_remaining", 0), errors="coerce").fillna(0).astype(int)
-    )
+    df[CAPACITY_CURRENT_COL] = safe_int_column(df, "capacity_current")
+    df[CAPACITY_SPECIAL_COL] = safe_int_column(df, "capacity_special")
+    df["remaining_capacity"] = safe_int_column(df, "capacity_remaining")
 
     df["مالی حکمت بنیاد"] = pd.to_numeric(df["مالی حکمت بنیاد"], errors="coerce").astype("Int64")
     df["جنسیت"] = pd.to_numeric(df["gender_code"], errors="coerce").astype("Int64")
