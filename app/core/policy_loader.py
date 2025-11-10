@@ -18,6 +18,7 @@ from typing import Literal
 VersionMismatchMode = Literal["raise", "warn", "ignore"]
 
 DEFAULT_POLICY_VERSION = "1.0.3"
+_EXPECTED_JOIN_KEYS_COUNT = 6
 
 _TRACE_STAGE_ORDER: tuple[str, ...] = (
     "type",
@@ -149,11 +150,13 @@ def _normalize_join_keys(raw: object) -> List[str]:
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         raise TypeError("join_keys must be a sequence of strings")
     join_keys = [str(item).strip() for item in raw]
-    if len(join_keys) != 6:
-        raise ValueError("join_keys must be 6")
+    if len(join_keys) != _EXPECTED_JOIN_KEYS_COUNT:
+        raise ValueError(
+            f"join_keys must contain exactly {_EXPECTED_JOIN_KEYS_COUNT} entries",
+        )
     if any(not key for key in join_keys):
         raise ValueError("join_keys must be non-empty strings")
-    if len(set(join_keys)) != 6:
+    if len(set(join_keys)) != len(join_keys):
         raise ValueError("join_keys must be unique")
     return join_keys
 
