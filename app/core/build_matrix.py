@@ -660,12 +660,7 @@ def _prepare_base_rows(
             if codes or invalid_codes:
                 used_included = True
             for gc in codes:
-                if gc in code_to_name:
-                    group_pairs.append((code_to_name[gc], gc))
-                else:
-                    unseen_groups.append(
-                        {"group_token": f"code:{gc}", "supporter": mentor_name, "manager": manager_name}
-                    )
+                group_pairs.append((code_to_name[gc], gc))
             for gc in invalid_codes:
                 unseen_groups.append(
                     {"group_token": f"code:{gc}", "supporter": mentor_name, "manager": manager_name}
