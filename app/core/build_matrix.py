@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum, auto
 from functools import lru_cache, wraps
 from itertools import product
-from typing import Any, Callable, Dict, Iterable, List, Tuple
+from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -455,16 +455,52 @@ def progress(it, total: int | None = None):
 # =============================================================================
 # GROUP CODE PARSING
 # =============================================================================
-def parse_group_code_spec(spec: Any) -> list[int]:
+def parse_group_code_spec(
+    spec: Any,
+    *,
+    valid_codes: Collection[int] | None = None,
+    invalid_collector: list[int] | None = None,
+) -> list[int]:
+    """تبدیل رشتهٔ ورودی به فهرست کد گروه‌های معتبر.
+
+    مثال::
+
+        >>> parse_group_code_spec("27,31:35", valid_codes={27, 31, 33, 35})
+        [27, 31, 33, 35]
+
+    Args:
+        spec: ورودی خام از ستون «شامل گروه های آزمایشی».
+        valid_codes: مجموعهٔ کدهای مجاز برای فیلتر کردن خروجی.
+        invalid_collector: لیست اختیاری برای ثبت کدهای نامعتبر.
+
+    Returns:
+        لیست یکتا از کدهای معتبر به ترتیب مشاهده‌شده.
+    """
+
     if spec is None or (isinstance(spec, float) and math.isnan(spec)):
         return []
+
     s = str(spec).strip()
     if not s:
         return []
+
     s = s.translate(_TRANS_PERSIAN_DIGITS)
     parts = _RE_SPLIT_ITEMS.split(s)
     out: list[int] = []
     seen: set[int] = set()
+    valid_set = set(valid_codes) if valid_codes is not None else None
+    invalid_seen: set[int] = set()
+
+    def _register(value: int) -> None:
+        if valid_set is not None and value not in valid_set:
+            if invalid_collector is not None and value not in invalid_seen:
+                invalid_collector.append(value)
+                invalid_seen.add(value)
+            return
+        if value not in seen:
+            out.append(value)
+            seen.add(value)
+
     for tok in parts:
         tok = tok.strip()
         if not tok:
@@ -474,16 +510,12 @@ def parse_group_code_spec(spec: Any) -> list[int]:
             a, b = int(m.group(1)), int(m.group(2))
             if a > b:
                 a, b = b, a
-            for v in range(a, b + 1):
-                if v not in seen:
-                    out.append(v)
-                    seen.add(v)
+            for value in range(a, b + 1):
+                _register(value)
             continue
         if tok.isdigit():
-            v = int(tok)
-            if v not in seen:
-                out.append(v)
-                seen.add(v)
+            _register(int(tok))
+
     return out
 
 # =============================================================================
@@ -619,16 +651,25 @@ def _prepare_base_rows(
         group_pairs: list[tuple[str, int]] = []
         used_included = False
         if included_col:
-            codes = parse_group_code_spec(row.get(included_col))
-            if codes:
+            invalid_codes: list[int] = []
+            codes = parse_group_code_spec(
+                row.get(included_col),
+                valid_codes=code_to_name.keys(),
+                invalid_collector=invalid_codes,
+            )
+            if codes or invalid_codes:
                 used_included = True
-                for gc in codes:
-                    if gc in code_to_name:
-                        group_pairs.append((code_to_name[gc], gc))
-                    else:
-                        unseen_groups.append(
-                            {"group_token": f"code:{gc}", "supporter": mentor_name, "manager": manager_name}
-                        )
+            for gc in codes:
+                if gc in code_to_name:
+                    group_pairs.append((code_to_name[gc], gc))
+                else:
+                    unseen_groups.append(
+                        {"group_token": f"code:{gc}", "supporter": mentor_name, "manager": manager_name}
+                    )
+            for gc in invalid_codes:
+                unseen_groups.append(
+                    {"group_token": f"code:{gc}", "supporter": mentor_name, "manager": manager_name}
+                )
 
         if not used_included:
             expanded: list[tuple[str, int]] = []
