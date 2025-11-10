@@ -26,6 +26,8 @@ __all__ = [
     "MentorRow",
     "AllocationErrorLiteral",
     "AllocationLogRecord",
+    "TraceStageLiteral",
+    "TraceStageRecord",
 ]
 
 
@@ -64,6 +66,7 @@ class StudentRow(TypedDict, total=False):
     مرکز_گلستان_صدرا: int
     مالی_حکمت_بنیاد: int
     کد_مدرسه: int
+    گروه_آزمایشی: str
     نام: str
 
 
@@ -103,3 +106,26 @@ class AllocationLogRecord(TypedDict, total=False):
     error_type: Optional[AllocationErrorLiteral]
     detailed_reason: Optional[str]
     suggested_actions: List[str]
+
+
+TraceStageLiteral = Literal[
+    "type",
+    "group",
+    "gender",
+    "graduation_status",
+    "center",
+    "finance",
+    "school",
+    "capacity_gate",
+]
+
+
+class TraceStageRecord(TypedDict):
+    """نتایج هر مرحلهٔ تریس تخصیص برای مقاصد Explainability."""
+
+    stage: TraceStageLiteral
+    column: str
+    expected_value: Any
+    total_before: int
+    total_after: int
+    matched: bool
