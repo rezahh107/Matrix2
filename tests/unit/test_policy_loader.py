@@ -79,7 +79,16 @@ def test_ranking_constraints() -> None:
         {"name": "dup", "column": "allocations_new", "ascending": True},
         {"name": "ok", "column": "mentor_sort_key", "ascending": True},
     ]
-    with pytest.raises(ValueError, match="ranking rule names must be unique"):
+    with pytest.raises(ValueError, match="ranking items must be unique"):
+        parse_policy_dict(payload)
+
+
+def test_ranking_must_have_three_items() -> None:
+    payload = _valid_payload()
+    payload["ranking_rules"].append(
+        {"name": "extra", "column": "mentor_extra", "ascending": True}
+    )
+    with pytest.raises(ValueError, match="ranking must contain exactly 3 items"):
         parse_policy_dict(payload)
 
 

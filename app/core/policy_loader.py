@@ -19,6 +19,7 @@ VersionMismatchMode = Literal["raise", "warn", "ignore"]
 
 DEFAULT_POLICY_VERSION = "1.0.3"
 _EXPECTED_JOIN_KEYS_COUNT = 6
+_EXPECTED_RANKING_ITEMS_COUNT = 3
 
 _TRACE_STAGE_ORDER: tuple[str, ...] = (
     "type",
@@ -164,11 +165,16 @@ def _normalize_join_keys(raw: object) -> List[str]:
 def _normalize_ranking_rules(raw: object) -> List[Mapping[str, object]]:
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         raise TypeError("ranking must be a sequence of rules")
-    if not raw:
+    ranking_items = list(raw)
+    if not ranking_items:
         raise ValueError("ranking must contain at least one rule")
+    if len(ranking_items) != _EXPECTED_RANKING_ITEMS_COUNT:
+        raise ValueError(
+            f"ranking must contain exactly {_EXPECTED_RANKING_ITEMS_COUNT} items",
+        )
     normalized: List[Mapping[str, object]] = []
-    seen_names: set[str] = set()
-    for item in raw:
+    ranking_names: List[str] = []
+    for item in ranking_items:
         if isinstance(item, Mapping):
             if "name" not in item or "column" not in item:
                 raise ValueError("Ranking rule must define 'name' and 'column'")
@@ -183,10 +189,10 @@ def _normalize_ranking_rules(raw: object) -> List[Mapping[str, object]]:
             if name not in _RANKING_RULE_LIBRARY:
                 raise ValueError(f"Unknown ranking rule '{name}'")
             column, ascending = _RANKING_RULE_LIBRARY[name]
-        if name in seen_names:
-            raise ValueError("ranking rule names must be unique")
-        seen_names.add(name)
+        ranking_names.append(name)
         normalized.append({"name": name, "column": column, "ascending": ascending})
+    if len(set(ranking_names)) != len(ranking_names):
+        raise ValueError("ranking items must be unique")
     return normalized
 
 
