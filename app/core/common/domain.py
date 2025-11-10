@@ -6,14 +6,12 @@ Deterministic and fail-safe, adhering to Policy v1.0.3.
 """
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Mapping, Literal, TypedDict, final, TypeGuard
 
+from .errors import DataMissingError, InvalidCenterMappingError, InvalidGenderValueError
 from .normalization import normalize_fa, to_numlike_str
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Type Aliases
@@ -23,28 +21,6 @@ StudentRow = Mapping[str, Any]
 JoinKeyDict = dict[str, int]
 MentorDict = dict[str, Any]
 
-
-# ---------------------------------------------------------------------------
-# Custom Exceptions
-# ---------------------------------------------------------------------------
-class DomainError(Exception):
-    """Base exception for domain logic errors."""
-    pass
-
-
-class InvalidFinanceCodeError(DomainError):
-    """Raised when a finance code is not in the allowed variants."""
-    pass
-
-
-class InvalidPostalCodeError(DomainError):
-    """Raised when a postal code is out of the valid range."""
-    pass
-
-
-class InvalidGenderValueError(DomainError):
-    """Raised when a gender value cannot be normalized to MALE or FEMALE."""
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -115,91 +91,66 @@ _GENDER_MALE_EN = frozenset({"1", "male", "m", "boy", "♂"})
 _GENDER_FEMALE_EN = frozenset({"2", "female", "f", "girl", "♀"})
 _GENDER_MALE_FA = frozenset({"پسر", "مذکر"})
 _GENDER_FEMALE_FA = frozenset({"دختر", "مونث"})
+_GENDER_MALE_FA_NORMALIZED = frozenset(normalize_fa(tok) for tok in _GENDER_MALE_FA)
+_GENDER_FEMALE_FA_NORMALIZED = frozenset(normalize_fa(tok) for tok in _GENDER_FEMALE_FA)
 
 
 def _num_to_int_safe(x: Any) -> int:
+    """تبدیل امن مقدار به int بدون ایجاد استثناء غیرمنتظره.
+
+    مثال::
+
+        >>> _num_to_int_safe("12.7")
+        12
+
     """
-    Convert any value to int safely using to_numlike_str.
-    Empty/invalid → 0. Decimals → truncate to integer part.
-    """
-    try:
-        s = to_numlike_str(x)
-        if not s or s == "-":
-            return 0
-        # Handle negative numbers
-        if s.startswith("-"):
-            sign = -1
-            s = s[1:]
-        else:
-            sign = 1
-        # Take integer part only
-        if "." in s:
-            s = s.split(".")[0]
-        if not s:
-            return 0
-        return sign * int(s)
-    except Exception:
-        logger.exception(f"Error converting value to int: {x}")
+
+    s = to_numlike_str(x)
+    if not s or s == "-":
         return 0
+    sign = -1 if s.startswith("-") else 1
+    digits = s[1:] if sign == -1 else s
+    int_part = digits.split(".")[0]
+    if not int_part:
+        return 0
+    if int_part.isdigit():
+        return sign * int(int_part)
+    return 0
 
 
 def _coerce_center_id(val: Any, default_zero: int = 0) -> int:
-    """
-    Coerce value to non-negative center ID.
-    Only accept non-negative integers; error → default_zero.
-    """
-    try:
-        n = _num_to_int_safe(val)
-        return n if n >= 0 else default_zero
-    except Exception:
-        logger.exception(f"Error coercing center ID from value: {val}")
-        return default_zero
+    """تبدیل مقدار ورودی به شناسهٔ مرکز غیرمنفی."""
+
+    n = _num_to_int_safe(val)
+    return n if n >= 0 else default_zero
 
 
 def _coerce_finance(val: Any, *, cfg: BuildConfig) -> int:
-    """
-    Coerce finance value to a valid code from cfg.finance_variants.
-    If not in variants, return the first variant (typically 0) or 0 if empty.
-    """
+    """بازگرداندن کد مالی معتبر مطابق تنظیمات."""
+
     v = _num_to_int_safe(val)
     if v in cfg.finance_variants:
         return v
-    logger.warning(f"Invalid finance code: {val}. Coercing to default: {cfg.finance_variants[0]}")
     return cfg.finance_variants[0] if cfg.finance_variants else 0
 
 
 def _normalize_map_keys(m: Mapping[str, int]) -> dict[str, int]:
-    """
-    Normalize all keys in mapping using normalize_fa.
-    Preserves "*" wildcard key. Values are safely coerced to int.
-    """
-    try:
-        out: dict[str, int] = {}
-        for k, v in m.items():
-            # More robust handling of non-string keys for k
-            nk = "*" if k == "*" else normalize_fa(k)
-            if nk:
-                out[nk] = _num_to_int_safe(v)
-        return out
-    except Exception:
-        logger.exception(f"Error normalizing map keys: {dict(m)}")
-        return {}
+    """نرمال‌سازی کلیدهای نگاشت مراکز با رعایت wildcard."""
+
+    out: dict[str, int] = {}
+    for k, v in m.items():
+        normalized_key = "*" if k == "*" else normalize_fa(k)
+        if normalized_key:
+            out[normalized_key] = _num_to_int_safe(v)
+    return out
 
 
 def _postal_valid(num_str: str, *, cfg: BuildConfig) -> bool:
-    """
-    Check if postal code string is in valid range.
-    Uses cfg.postal_valid_range.
-    """
-    try:
-        n = _num_to_int_safe(num_str)
-        min_val, max_val = cfg.postal_valid_range
-        is_valid = min_val <= n <= max_val
-        logger.debug(f"Postal code validation: '{num_str}' (int: {n}) -> {is_valid} (range: {min_val}-{max_val})")
-        return is_valid
-    except Exception:
-        logger.exception(f"Error validating postal code: {num_str}")
-        return False
+    """اعتبارسنجی بازهٔ کدپستی مطابق پیکربندی."""
+
+    n = _num_to_int_safe(num_str)
+    min_val, max_val = cfg.postal_valid_range
+    return min_val <= n <= max_val
 
 
 def is_valid_postal_code(postal_code: Any) -> TypeGuard[str]:
@@ -211,26 +162,18 @@ def is_valid_postal_code(postal_code: Any) -> TypeGuard[str]:
 
 
 def _compute_school_alias(mentor_id: Any) -> str:
-    """
-    Compute alias for SCHOOL mentors: always mentor_id.
-    """
-    alias = to_numlike_str(mentor_id) or normalize_fa(mentor_id) or ""
-    logger.debug(f"Computed SCHOOL alias for mentor_id '{mentor_id}': '{alias}'")
-    return alias
+    """تولید کد جایگزین برای ردیف‌های مدرسه‌ای (همیشه شناسهٔ پشتیبان)."""
+
+    return to_numlike_str(mentor_id) or normalize_fa(mentor_id) or ""
 
 
 def _compute_normal_or_dual_alias(postal_code: Any, mentor_id: Any, cfg: BuildConfig) -> str:
-    """
-    Compute alias for NORMAL/DUAL mentors: postal if valid, else mentor_id.
-    """
+    """کد جایگزین برای ردیف‌های عادی یا دوگانه (کدپستی معتبر یا شناسهٔ پشتیبان)."""
+
     postal_str = to_numlike_str(postal_code)
     if _postal_valid(postal_str, cfg=cfg):
-        logger.debug(f"Using valid postal code as alias: '{postal_str}'")
         return postal_str
-    else:
-        alias = to_numlike_str(mentor_id) or normalize_fa(mentor_id) or ""
-        logger.debug(f"Postal code '{postal_str}' invalid. Using mentor_id as alias: '{alias}'")
-        return alias
+    return to_numlike_str(mentor_id) or normalize_fa(mentor_id) or ""
 
 
 # ---------------------------------------------------------------------------
@@ -281,243 +224,154 @@ class BuildConfig:
 # ---------------------------------------------------------------------------
 
 def norm_status(x: Any) -> int:
+    """نرمال‌سازی وضعیت تحصیلی به کد ۰/۱.
+
+    مثال::
+
+        >>> norm_status("فارغ")
+        0
+
     """
-    Normalize status value to Status enum (0=graduate, 1=student).
-    Supports both English tokens and Persian equivalents.
-    Default on ambiguity: 1 (STUDENT).
 
-    Args:
-        x: The input value to normalize.
-
-    Returns:
-        The corresponding Status enum value (1 for STUDENT, 0 for GRADUATE).
-        Defaults to 1 (STUDENT) if normalization fails.
-    """
-    try:
-        # Path 1: English/numeric tokens on raw lowercased string
-        raw = str(x).strip().lower()
-        if raw in _STATUS_GRADUATE_EN:
-            logger.debug(f"Normalized status '{x}' to GRADUATE (0) using English token.")
-            return 0
-        if raw in _STATUS_STUDENT_EN:
-            logger.debug(f"Normalized status '{x}' to STUDENT (1) using English token.")
-            return 1
-
-        # Path 2: Persian equivalents on normalized string
-        s = normalize_fa(x)
-        for token in _STATUS_GRADUATE_FA:
-            if token in s:
-                logger.debug(f"Normalized status '{x}' to GRADUATE (0) using Persian token '{token}'.")
-                return 0
-        for token in _STATUS_STUDENT_FA:
-            if token in s:
-                logger.debug(f"Normalized status '{x}' to STUDENT (1) using Persian token '{token}'.")
-                return 1
-
-        # Default
-        logger.warning(f"Could not normalize status '{x}'. Defaulting to STUDENT (1).")
-        return 1
-    except Exception:
-        logger.exception(f"Error normalizing status value: {x}")
+    raw = str(x or "").strip().lower()
+    if raw in _STATUS_GRADUATE_EN:
+        return 0
+    if raw in _STATUS_STUDENT_EN:
         return 1
 
+    normalized = normalize_fa(x)
+    if any(token in normalized for token in _STATUS_GRADUATE_FA):
+        return 0
+    if any(token in normalized for token in _STATUS_STUDENT_FA):
+        return 1
+    return 1
 
-def norm_gender(x: Any, strict: bool = False) -> int:
-    """
-    Normalize gender value to Gender enum (1=male, 2=female).
-    Supports both English tokens and Persian equivalents.
-    Default on ambiguity: 1 (MALE).
+
+def norm_gender(x: Any, strict: bool = False) -> Gender:
+    """نرمال‌سازی جنسیت به مقادیر دامنه‌ای.
 
     Args:
-        x: The input value to normalize.
-        strict: If True, raises InvalidGenderValueError on unrecognized values.
+        x: مقدار خام ورودی.
+        strict: در صورت `True` برای مقادیر ناشناخته استثناء می‌اندازد.
 
     Returns:
-        The corresponding Gender enum value (1 for MALE, 2 for FEMALE).
-        Defaults to 1 (MALE) if normalization fails and strict is False.
+        عضو :class:`Gender` متناظر. در حالت غیرسخت‌گیر مقدار پیش‌فرض
+        :data:`Gender.MALE` برگردانده می‌شود.
 
     Raises:
-        InvalidGenderValueError: If strict is True and the gender value cannot be normalized.
+        InvalidGenderValueError: اگر `strict=True` و مقدار ورودی قابل نگاشت
+            نباشد.
     """
-    try:
-        # Path 1: English/numeric tokens on raw lowercased string
-        raw = str(x).strip().lower()
-        if raw in _GENDER_MALE_EN:
-            logger.debug(f"Normalized gender '{x}' to MALE (1) using English token.")
-            return 1
-        if raw in _GENDER_FEMALE_EN:
-            logger.debug(f"Normalized gender '{x}' to FEMALE (2) using English token.")
-            return 2
 
-        # Path 2: Persian equivalents on normalized string
-        s = normalize_fa(x)
-        # Use 'any' for more flexible matching (contains check)
-        if any(tok in s for tok in _GENDER_MALE_FA):
-            logger.debug(f"Normalized gender '{x}' to MALE (1) using Persian token.")
-            return 1
-        if any(tok in s for tok in _GENDER_FEMALE_FA):
-            logger.debug(f"Normalized gender '{x}' to FEMALE (2) using Persian token.")
-            return 2
+    raw = str(x or "").strip().lower()
+    if raw in _GENDER_MALE_EN:
+        return Gender.MALE
+    if raw in _GENDER_FEMALE_EN:
+        return Gender.FEMALE
 
-        # Path 3: Try numeric conversion
-        n = _num_to_int_safe(raw or s)
-        result = 2 if n == 2 else 1
-        logger.debug(f"Normalized gender '{x}' to {result} using numeric conversion.")
+    normalized = normalize_fa(x)
+    if normalized in _GENDER_MALE_FA_NORMALIZED:
+        return Gender.MALE
+    if normalized in _GENDER_FEMALE_FA_NORMALIZED:
+        return Gender.FEMALE
 
-        if strict and result == 1: # If default was returned
-            # Check if it was truly invalid
-            all_known_tokens = _GENDER_MALE_EN | _GENDER_FEMALE_EN | {normalize_fa(tok) for tok in _GENDER_MALE_FA | _GENDER_FEMALE_FA}
-            if normalize_fa(x) not in all_known_tokens and raw not in all_known_tokens:
-                logger.error(f"Strict gender normalization failed for value: {x}")
-                raise InvalidGenderValueError(f"Invalid gender value: {x}")
-        return result
-    except InvalidGenderValueError:
-        logger.error(f"Strict gender normalization failed for value: {x}")
-        raise # Re-raise if we raised it ourselves
-    except Exception:
-        if strict:
-            logger.exception(f"Unexpected error in strict gender normalization for value: {x}")
-            raise InvalidGenderValueError(f"Invalid gender value: {x}")
-        logger.exception(f"Error normalizing gender value: {x}")
-        return 1 # In non-strict mode, still return default
+    numeric = _num_to_int_safe(raw or normalized)
+    if numeric == int(Gender.FEMALE):
+        return Gender.FEMALE
+
+    if strict:
+        raise InvalidGenderValueError(
+            func="norm_gender",
+            column=COL_GENDER,
+            value=x,
+        )
+
+    return Gender.MALE
 
 
 def center_from_manager(name: Any, *, cfg: BuildConfig) -> int:
+    """استخراج شناسهٔ مرکز از نام مدیر با استفاده از نگاشت پیکربندی.
+
+    مثال::
+
+        >>> cfg = BuildConfig(center_map={"مدیر الف": 2, "*": 0})
+        >>> center_from_manager("مدیر الف", cfg=cfg)
+        2
+
     """
-    Extract center ID from manager name using cfg.center_map_norm().
-    First tries exact match, then contains match, then "*" wildcard, else 0.
 
-    Args:
-        name: The manager's name.
-        cfg: The BuildConfig instance containing the center map.
+    s = normalize_fa(name)
+    cmap = cfg.center_map_norm()
+    if not s:
+        wildcard = cmap.get('*')
+        if wildcard is None:
+            raise InvalidCenterMappingError(func='center_from_manager', value=name)
+        return wildcard
 
-    Returns:
-        The corresponding center ID (0, 1, 2, ...).
-    """
-    try:
-        s = normalize_fa(name)
-        if not s:
-            logger.warning(f"Manager name '{name}' normalizes to empty string. Using wildcard center ID.")
-            return cfg.center_map_norm().get("*", 0)
+    if s in cmap:
+        return cmap[s]
 
-        cmap = cfg.center_map_norm()
-        logger.debug(f"Looking for center ID for manager name: '{s}' in map: {cmap}")
+    for key, val in cmap.items():
+        if key != '*' and key in s:
+            return val
 
-        # Exact match
-        if s in cmap:
-            center_id = cmap[s]
-            logger.debug(f"Found exact match for manager '{s}': center ID {center_id}")
-            return center_id
-
-        # Contains match
-        for key, val in cmap.items():
-            if key != "*" and key in s:
-                logger.debug(f"Found partial match for manager '{s}' with key '{key}': center ID {val}")
-                return val
-
-        # Wildcard
-        wildcard_id = cmap.get("*", 0)
-        logger.debug(f"No match found for manager '{s}'. Using wildcard center ID: {wildcard_id}")
-        return wildcard_id
-    except Exception:
-        logger.exception(f"Error extracting center ID from manager name: {name}")
-        return 0
+    wildcard = cmap.get('*')
+    if wildcard is None:
+        raise InvalidCenterMappingError(func='center_from_manager', value=name)
+    return wildcard
 
 
 def mentor_type(postal_code: Any, school_count: int | None, *, cfg: BuildConfig) -> MentorType:
+    """تعیین نوع پشتیبان بر اساس کدپستی و تعداد مدارس.
+
+    مثال::
+
+        >>> mentor_type('12345', 0, cfg=BuildConfig())
+        <MentorType.NORMAL: 'normal'>
+
     """
-    Determine mentor type based on postal code validity and school count.
 
-    - Valid postal → NORMAL
-    - school_count > 0 → SCHOOL
-    - Both → DUAL
-    - Neither → NORMAL (default)
+    has_postal = _postal_valid(to_numlike_str(postal_code), cfg=cfg)
+    has_school = (school_count or 0) > 0
 
-    Args:
-        postal_code: The mentor's postal code.
-        school_count: The number of schools the mentor covers.
-        cfg: The BuildConfig instance.
-
-    Returns:
-        The corresponding MentorType.
-    """
-    try:
-        postal_str = to_numlike_str(postal_code)
-        has_postal = _postal_valid(postal_str, cfg=cfg)
-        # More robust handling of school_count
-        has_school = (_num_to_int_safe(school_count) > 0) if (school_count is not None) else False
-
-        logger.debug(f"Evaluating mentor type: postal='{postal_code}' (valid: {has_postal}), school_count={school_count} (has_school: {has_school})")
-
-        if has_postal and has_school:
-            logger.debug("Mentor type determined as DUAL.")
-            return MentorType.DUAL
-        if has_school:
-            logger.debug("Mentor type determined as SCHOOL.")
-            return MentorType.SCHOOL
-        # has_postal or neither → NORMAL
-        logger.debug("Mentor type determined as NORMAL.")
-        return MentorType.NORMAL
-    except Exception:
-        logger.exception(f"Error determining mentor type for postal: {postal_code}, school_count: {school_count}")
-        return MentorType.NORMAL
+    if has_postal and has_school:
+        return MentorType.DUAL
+    if has_school:
+        return MentorType.SCHOOL
+    return MentorType.NORMAL
 
 
 def compute_alias(row_type: MentorType, postal_code: Any, mentor_id: Any, *, cfg: BuildConfig) -> str:
+    """تولید مقدار ستون «جایگزین» براساس نوع ردیف.
+
+    مثال::
+
+        >>> compute_alias(MentorType.NORMAL, '12345', 'EMP-1', cfg=BuildConfig())
+        '12345'
+
     """
-    Compute alias for a mentor row.
 
-    Rules:
-    - SCHOOL: always mentor_id
-    - NORMAL/DUAL: use postal if valid, else mentor_id
-
-    Output is stable ASCII string. Falls back to normalized text if numeric conversion fails.
-
-    Args:
-        row_type: The MentorType (SCHOOL, NORMAL, DUAL).
-        postal_code: The mentor's postal code.
-        mentor_id: The mentor's ID.
-        cfg: The BuildConfig instance.
-
-    Returns:
-        The computed alias string.
-    """
-    try:
-        logger.debug(f"Computing alias for row_type: {row_type}, postal: {postal_code}, mentor_id: {mentor_id}")
-        if row_type == MentorType.SCHOOL:
-            alias = _compute_school_alias(mentor_id)
-            logger.debug(f"Computed SCHOOL alias: '{alias}'")
-            return alias
-
-        # NORMAL or DUAL: prefer postal if valid
-        alias = _compute_normal_or_dual_alias(postal_code, mentor_id, cfg)
-        logger.debug(f"Computed {row_type.value} alias: '{alias}'")
-        return alias
-    except Exception:
-        logger.exception(f"Error computing alias for row_type: {row_type}, postal: {postal_code}, mentor_id: {mentor_id}")
-        return ""
+    if row_type is MentorType.SCHOOL:
+        return _compute_school_alias(mentor_id)
+    return _compute_normal_or_dual_alias(postal_code, mentor_id, cfg)
 
 
 def compute_mentor_type_str(row_type: MentorType) -> str:
-    """
-    Convert MentorType enum to its string representation for output schema.
+    """تبدیل نوع پشتیبان به متن فارسی استاندارد.
 
-    Args:
-        row_type: The MentorType enum value.
+    مثال::
 
-    Returns:
-        The string representation ('عادی', 'مدرسه ای', 'دوقلو').
+        >>> compute_mentor_type_str(MentorType.SCHOOL)
+        'مدرسه‌ای'
+
     """
-    # Note: Using 'مدرسه ای' with a space for consistency with the spec's column name
-    # Adjust the mapping if the exact output string format is different.
-    type_map = {
+
+    mapping = {
         MentorType.NORMAL: "عادی",
-        MentorType.SCHOOL: "مدرسه ای", # Matches column name COL_MENTOR_TYPE
-        MentorType.DUAL: "دوقلو"
+        MentorType.SCHOOL: "مدرسه‌ای",
+        MentorType.DUAL: "دوگانه",
     }
-    result = type_map.get(row_type, "نامشخص")
-    logger.debug(f"Converted MentorType '{row_type}' to string '{result}'")
-    return result
+    return mapping.get(row_type, "عادی")
 
 
 # ---------------------------------------------------------------------------
@@ -548,58 +402,53 @@ class JoinKey:
 
     @staticmethod
     def from_student_row(row: StudentRow, *, cfg: BuildConfig) -> "JoinKey":
+        """ساخت کلید الحاق از سطر دانش‌آموز.
+
+        مثال::
+
+            >>> row = {
+            ...     "کدرشته": 1201,
+            ...     "جنسیت": 1,
+            ...     "دانش آموز فارغ": 0,
+            ...     "مرکز گلستان صدرا": 1,
+            ...     "مالی حکمت بنیاد": 0,
+            ...     "کد مدرسه": 3581,
+            ... }
+            >>> JoinKey.from_student_row(row, cfg=BuildConfig())
+            JoinKey(major=1201, gender=1, status=1, center=1, finance=0, school_code=3581)
+
         """
-        Build JoinKey from student row mapping.
 
-        - All numeric fields converted safely via to_numlike_str → int
-        - gender normalized via norm_gender
-        - status normalized via norm_status
-        - center: if empty/invalid, extract from manager using cfg.center_map_norm()
-        - school_code: empty/invalid → 0
-        - finance: coerced to valid variant using _coerce_finance
+        required = {COL_GROUP, COL_GENDER, COL_STATUS, COL_FINANCE}
+        missing = [col for col in required if col not in row]
+        if missing:
+            raise DataMissingError(func='JoinKey.from_student_row', column=','.join(missing), value=None)
 
-        Args:
-            row: A mapping representing a student row.
-            cfg: The BuildConfig instance.
+        major = _num_to_int_safe(row.get(COL_GROUP, 0))
+        gender = norm_gender(row.get(COL_GENDER, 1))
+        status = norm_status(row.get(COL_STATUS, 1))
 
-        Returns:
-            A JoinKey instance.
-        """
-        try:
-            major = _num_to_int_safe(row.get(COL_GROUP, 0))
-            gender = norm_gender(row.get(COL_GENDER, 1))
-            status = norm_status(row.get(COL_STATUS, 1))
+        center_val = row.get(COL_CENTER, "")
+        center = _coerce_center_id(center_val, default_zero=0)
+        if center == 0:
+            manager_name = row.get(COL_MANAGER, "")
+            center = center_from_manager(manager_name, cfg=cfg)
 
-            # Center: try direct value first, else extract from manager
-            center_val = row.get(COL_CENTER, "")
-            center = _coerce_center_id(center_val, default_zero=0)
-            if center == 0:
-                manager_name = row.get(COL_MANAGER, "")
-                center = center_from_manager(manager_name, cfg=cfg)
+        finance = _coerce_finance(row.get(COL_FINANCE, 0), cfg=cfg)
 
-            # Finance: coerce to valid variant
-            finance = _coerce_finance(row.get(COL_FINANCE, 0), cfg=cfg)
+        school_val = row.get(COL_SCHOOL, "")
+        school_str = to_numlike_str(school_val)
+        school_code = _num_to_int_safe(school_str) if school_str and school_str != '0' else 0
 
-            # School code: empty/invalid → 0
-            school_val = row.get(COL_SCHOOL, "")
-            school_str = to_numlike_str(school_val)
-            if not school_str or school_str == "0":
-                school_code = 0
-            else:
-                school_code = _num_to_int_safe(school_str)
+        return JoinKey(
+            major=major,
+            gender=gender,
+            status=status,
+            center=center,
+            finance=finance,
+            school_code=school_code,
+        )
 
-            logger.debug(f"Created JoinKey from row: {dict(row)} -> {JoinKey(major=major, gender=gender, status=status, center=center, finance=finance, school_code=school_code)}")
-            return JoinKey(
-                major=major,
-                gender=gender,
-                status=status,
-                center=center,
-                finance=finance,
-                school_code=school_code
-            )
-        except Exception:
-            logger.exception(f"Error creating JoinKey from row: {dict(row)}")
-            return JoinKey(major=0, gender=1, status=1, center=0, finance=0, school_code=0)
 
     def as_dict(self) -> JoinKeyDict:
         """
@@ -664,22 +513,11 @@ class Capacity:
         return f"Capacity(covered_now={self.covered_now}, special_limit={self.special_limit}, allocations_new={self.allocations_new})"
 
     def occupancy_ratio(self) -> float:
-        """
-        Calculate occupancy ratio as (covered_now + allocations_new) / max(1, special_limit).
-        Fail-safe: denominator always >= 1.
+        """نسبت اشغال فعلی را محاسبه می‌کند."""
 
-        Returns:
-            float in [0.0, inf), typically [0.0, 1.0+]
-        """
-        try:
-            den = max(int(self.special_limit), 1)
-            num = max(int(self.covered_now) + int(self.allocations_new), 0)
-            ratio = float(num) / float(den)
-            logger.debug(f"Calculated occupancy ratio for capacity {self}: {ratio}")
-            return ratio
-        except Exception:
-            logger.exception(f"Error calculating occupancy ratio for capacity: {self}")
-            return 0.0
+        denominator = max(1, int(self.special_limit))
+        numerator = max(int(self.covered_now) + int(self.allocations_new), 0)
+        return float(numerator) / float(denominator)
 
 
 @final
@@ -767,6 +605,5 @@ __all__ = [
     "BuildConfig", "JoinKey", "MentorIdentity", "Capacity", "MatrixRow", "ImportToSabtRow",
     "norm_status", "norm_gender", "center_from_manager", "mentor_type", "compute_alias", "compute_mentor_type_str",
     "DecisionReason", "TraceDict",
-    "DomainError", "InvalidFinanceCodeError", "InvalidPostalCodeError", "InvalidGenderValueError",
     "StudentRow", "JoinKeyDict", "MentorDict",
 ]

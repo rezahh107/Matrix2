@@ -549,26 +549,13 @@ def generate_row_variants(
     return rows
 
 # =============================================================================
-# BUILD MATRIX HELPERS
+# VECTORIZED MATRIX ASSEMBLY HELPERS
 # =============================================================================
-def extract_base_data(r: pd.Series, cfg: BuildConfig, alias_int: int | None, center_code: int) -> dict:
-    supporter = str(r.get(COL_MENTOR_NAME, "")).strip()
-    manager = str(r.get(COL_MANAGER_NAME, "")).strip()
-    mentor_id = r.get(COL_MENTOR_ID, "")
-    row_id = r.get(COL_MENTOR_ROWID, r.name + 1)
-    return {
-        "supporter": supporter,
-        "manager": manager,
-        "mentor_id": mentor_id,
-        "row_id": row_id,
-        "alias": alias_int if alias_int is not None else "",
-        "center_code": center_code,
-        "center_text": center_text(center_code),
-    }
 
 
-def process_row(
-    r: pd.Series,
+def _prepare_base_rows(
+    insp: pd.DataFrame,
+    *,
     cfg: BuildConfig,
     name_to_code: dict[str, int],
     code_to_name: dict[int, str],
@@ -580,123 +567,209 @@ def process_row(
     school_cols: list[str],
     gender_col: str | None,
     included_col: str | None,
-) -> tuple[list[dict], list[dict], list[dict]]:
-    rows: list[dict] = []
-    unseen_groups: list[dict] = []
-    unmatched_schools: list[dict] = []
+) -> tuple[pd.DataFrame, list[dict], list[dict]]:
+    records: list[dict[str, Any]] = []
+    unseen_groups: list[dict[str, Any]] = []
+    unmatched_schools: list[dict[str, Any]] = []
 
-    # Optional "can allocate"
-    if COL_CAN_ALLOC in r and str(r.get(COL_CAN_ALLOC, "")).strip() not in cfg.can_allocate_truthy:
-        return rows, unseen_groups, unmatched_schools
+    finance_variants = list(cfg.finance_variants)
 
-    # Must have mentor employee code
-    if pd.isna(r[COL_MENTOR_ID]) or str(r[COL_MENTOR_ID]).strip() == "":
-        return rows, unseen_groups, unmatched_schools
+    for row in insp.to_dict(orient="records"):
+        mentor_id_raw = row.get(COL_MENTOR_ID, "")
+        mentor_id = str(mentor_id_raw).strip()
+        if not mentor_id:
+            continue
 
-    # ----- groups
-    group_pairs: list[tuple[str, int]] = []
-    used_included = False
-    if included_col:
-        raw_spec = r.get(included_col)
-        codes = parse_group_code_spec(raw_spec)
-        if codes:
-            used_included = True
-            for gc in codes:
-                if gc in code_to_name:
-                    group_pairs.append((code_to_name[gc], gc))
-                else:
+        if COL_CAN_ALLOC in row:
+            can_alloc = str(row.get(COL_CAN_ALLOC, "")).strip() in cfg.can_allocate_truthy
+            if not can_alloc:
+                continue
+
+        mentor_name = str(row.get(COL_MENTOR_NAME, "")).strip()
+        manager_name = str(row.get(COL_MANAGER_NAME, "")).strip()
+
+        alias_val = row.get(COL_POSTAL, "")
+        alias_num = None
+        alias_str = to_numlike_str(alias_val)
+        if alias_str.isdigit():
+            alias_int = int(alias_str)
+            if MIN_POSTAL_CODE <= alias_int <= MAX_POSTAL_CODE:
+                alias_num = alias_int
+
+        school_codes = collect_school_codes_from_row(pd.Series(row), school_name_to_code, school_cols)
+        school_count = 0
+        if COL_SCHOOL_COUNT in row:
+            try:
+                school_count = int(float(str(row.get(COL_SCHOOL_COUNT, "0")).strip() or "0"))
+            except ValueError:
+                school_count = 0
+
+        genders_raw = ensure_list([row.get(gender_col)]) if gender_col else [""]
+        gender_codes: list[int | str] = []
+        for token in genders_raw:
+            token_str = str(token).strip()
+            if not token_str:
+                gender_codes.append("")
+                continue
+            normalized = norm_gender(token_str)
+            gender_codes.append(int(normalized))
+
+        raw_groups = ensure_list([row[c] for c in group_cols]) if group_cols else []
+        group_pairs: list[tuple[str, int]] = []
+        used_included = False
+        if included_col:
+            codes = parse_group_code_spec(row.get(included_col))
+            if codes:
+                used_included = True
+                for gc in codes:
+                    if gc in code_to_name:
+                        group_pairs.append((code_to_name[gc], gc))
+                    else:
+                        unseen_groups.append(
+                            {"group_token": f"code:{gc}", "supporter": mentor_name, "manager": manager_name}
+                        )
+
+        if not used_included:
+            expanded: list[tuple[str, int]] = []
+            for tok in raw_groups or []:
+                ex = expand_group_token(tok, name_to_code, buckets, synonyms)
+                if not ex:
                     unseen_groups.append(
-                        {"group_token": f"code:{gc}", "supporter": r[COL_MENTOR_NAME], "manager": r[COL_MANAGER_NAME]}
+                        {"group_token": str(tok), "supporter": mentor_name, "manager": manager_name}
                     )
+                expanded.extend(ex)
+            seen_codes: set[int] = set()
+            for name, code in expanded:
+                if code not in seen_codes:
+                    group_pairs.append((name, code))
+                    seen_codes.add(code)
 
-    if not used_included:
-        raw_groups = ensure_list([r[c] for c in group_cols]) if group_cols else []
-        expanded: list[tuple[str, int]] = []
-        for tok in raw_groups or []:
-            ex = expand_group_token(tok, name_to_code, buckets, synonyms)
-            if not ex:
-                unseen_groups.append(
-                    {"group_token": str(tok), "supporter": r[COL_MENTOR_NAME], "manager": r[COL_MANAGER_NAME]}
+        if not group_pairs:
+            continue
+
+        alias_school = to_numlike_str(mentor_id_raw) or normalize_fa(mentor_id_raw) or mentor_id
+        center = center_from_manager(manager_name, cfg=cfg)
+        base = {
+            "supporter": mentor_name,
+            "manager": manager_name,
+            "mentor_id": mentor_id,
+            "mentor_row_id": row.get(COL_MENTOR_ROWID, ""),
+            "center_code": int(center),
+            "center_text": center_text(int(center)),
+            "group_pairs": group_pairs,
+            "genders": gender_codes or [""],
+            "school_codes": school_codes,
+            "schools_normal": [""],
+            "finance": finance_variants,
+            "statuses_normal": [Status.STUDENT, Status.GRADUATE],
+            "statuses_school": [Status.STUDENT],
+            "alias_normal": alias_num,
+            "alias_school": alias_school,
+            "can_normal": alias_num is not None,
+            "can_school": bool(school_codes) or school_count > 0,
+        }
+
+        for sc in school_codes:
+            if sc not in code_to_name_school:
+                unmatched_schools.append(
+                    {"raw_school": str(sc), "supporter": mentor_name, "manager": manager_name}
                 )
-            expanded.extend(ex)
-        seen_codes = set()
-        for name, code in expanded:
-            if code not in seen_codes:
-                group_pairs.append((name, code))
-                seen_codes.add(code)
 
-    if not group_pairs:
-        return rows, unseen_groups, unmatched_schools
+        records.append(base)
 
-    # ----- gender
-    genders = ensure_list([r.get(gender_col)]) if gender_col else [""]
+    base_df = pd.DataFrame(records)
+    return base_df, unseen_groups, unmatched_schools
 
-    # ----- schools & alias
-    school_codes = collect_school_codes_from_row(r, school_name_to_code, school_cols)
 
-    alias_val = r.get(COL_POSTAL, "")
-    alias_int = None
-    try:
-        ai = int(float(str(alias_val).strip()))
-        if MIN_POSTAL_CODE <= ai <= MAX_POSTAL_CODE:
-            alias_int = ai
-    except Exception:
-        pass
+def _explode_rows(
+    base: pd.DataFrame,
+    *,
+    alias_col: str,
+    status_col: str,
+    school_col: str,
+    type_label: str,
+    code_to_name_school: dict[str, str],
+) -> pd.DataFrame:
+    if base.empty:
+        return pd.DataFrame()
 
-    # detect capabilities
-    school_count = 0
-    if COL_SCHOOL_COUNT in r:
-        try:
-            school_count = int(float(str(r.get(COL_SCHOOL_COUNT, "0")).strip() or "0"))
-        except Exception:
-            pass
-    can_accept_school = (school_count > 0) or (len(school_codes) > 0)
-    can_accept_normal = alias_int is not None
+    df = base.copy()
+    df = df.loc[df[alias_col].notna()]
+    if df.empty:
+        return pd.DataFrame()
 
-    center_code = center_from_manager(r[COL_MANAGER_NAME], cfg)
-    base = extract_base_data(r, cfg, alias_int, center_code)
+    df = df.assign(finance_list=df["finance"], school_list=df[school_col])
+    df = df.drop(columns=["finance", school_col])
+    df = df.explode("group_pairs")
+    gp = pd.DataFrame(df.pop("group_pairs").tolist(), columns=["group_name", "group_code"], index=df.index)
+    df = df.join(gp)
+    df = df.explode("genders").explode(status_col).explode("school_list").explode("finance_list")
 
-    # *******************************
-    # STATUS POLICY (SSoT §8.3)
-    # Normal rows => BOTH statuses [1,0]
-    # School rows => ONLY [1]
-    statuses_normal: List[Any] = [1, 0]
-    statuses_school: List[Any] = [1]
-    # *******************************
+    if df.empty:
+        return pd.DataFrame()
 
-    if can_accept_normal:
-        rows.extend(
-            generate_row_variants(
-                base=base,
-                group_pairs=group_pairs,
-                genders=genders,
-                statuses=statuses_normal,   # ← force both statuses
-                schools_raw=[""],
-                finance_variants=cfg.finance_variants,
-                code_to_name_school=code_to_name_school,
-            )
-        )
+    gender_series = df["genders"].fillna("")
+    df["gender_code"] = (
+        pd.to_numeric(gender_series, errors="coerce").fillna(0).astype(int).where(gender_series != "", "")
+    )
+    status_series = df[status_col]
+    df["status_code"] = pd.to_numeric(status_series, errors="coerce").fillna("")
 
-    if can_accept_school and school_codes:
-        rows.extend(
-            generate_row_variants(
-                base=base,
-                group_pairs=group_pairs,
-                genders=genders,
-                statuses=statuses_school,   # ← force student-only
-                schools_raw=school_codes,
-                finance_variants=cfg.finance_variants,
-                code_to_name_school=code_to_name_school,
-            )
-        )
+    school_raw = df["school_list"].fillna("")
+    is_blank = school_raw.eq("")
+    school_numeric = pd.to_numeric(school_raw, errors="coerce")
+    df["کد مدرسه"] = school_numeric.fillna(0).astype(int)
+    df.loc[is_blank, "کد مدرسه"] = 0
+    df["نام مدرسه"] = df["کد مدرسه"].astype(str).map(code_to_name_school).fillna("")
 
-    for sc in (school_codes or []):
-        if sc not in code_to_name_school:
-            unmatched_schools.append(
-                {"raw_school": str(sc), "supporter": r[COL_MENTOR_NAME], "manager": r[COL_MANAGER_NAME]}
-            )
+    alias_series = df[alias_col]
+    df["جایگزین"] = alias_series.apply(lambda v: int(v) if str(v).isdigit() else str(v))
 
-    return rows, unseen_groups, unmatched_schools
+    df = df.drop(columns=["genders", status_col, "school_list", alias_col])
+    df["عادی مدرسه"] = type_label
+
+    df = df.rename(
+        columns={
+            "supporter": "پشتیبان",
+            "manager": "مدیر",
+            "mentor_row_id": "ردیف پشتیبان",
+            "group_name": "نام رشته",
+            "group_code": "کدرشته",
+            "center_code": "مرکز گلستان صدرا",
+            "finance_list": "مالی حکمت بنیاد",
+        }
+    )
+
+    df["مالی حکمت بنیاد"] = pd.to_numeric(df["مالی حکمت بنیاد"], errors="coerce").astype("Int64")
+    df["جنسیت"] = pd.to_numeric(df["gender_code"], errors="coerce").astype("Int64")
+    df["دانش آموز فارغ"] = pd.to_numeric(df["status_code"], errors="coerce").astype("Int64")
+    df["جنسیت"] = df["جنسیت"].where(df["جنسیت"].notna(), pd.NA)
+    df["دانش آموز فارغ"] = df["دانش آموز فارغ"].where(df["دانش آموز فارغ"].notna(), pd.NA)
+    df["جنسیت2"] = df["جنسیت"].apply(lambda v: gender_text(v) if v != "" else "")
+    df["دانش آموز فارغ2"] = df["دانش آموز فارغ"].apply(lambda v: status_text(v) if v != "" else "")
+    df["مرکز گلستان صدرا3"] = df["center_text"]
+
+    df = df.drop(columns=["gender_code", "status_code", "center_text"])
+    ordered_columns = [
+        "جایگزین",
+        "پشتیبان",
+        "مدیر",
+        "ردیف پشتیبان",
+        "نام رشته",
+        "کدرشته",
+        "جنسیت",
+        "دانش آموز فارغ",
+        "مرکز گلستان صدرا",
+        "مالی حکمت بنیاد",
+        "کد مدرسه",
+        "نام مدرسه",
+        "عادی مدرسه",
+        "جنسیت2",
+        "دانش آموز فارغ2",
+        "مرکز گلستان صدرا3",
+    ]
+    return df[ordered_columns]
+
 
 # =============================================================================
 # BUILD MATRIX
@@ -753,65 +826,104 @@ def build_matrix(
     school_cols = [c for c in [COL_SCHOOL1, COL_SCHOOL2, COL_SCHOOL3, COL_SCHOOL4] if c in insp.columns]
 
     # generate rows
-    progress(30, "generating matrix rows")
-    results = insp.apply(
-        lambda r: process_row(
-            r,
-            cfg,
-            name_to_code,
-            code_to_name,
-            buckets,
-            synonyms,
-            school_name_to_code,
-            code_to_name_school,
-            group_cols,
-            school_cols,
-            gender_col,
-            included_col,
-        ),
-        axis=1,
-    )
-
-    all_rows: list[dict] = []
-    all_unseen_groups: list[dict] = []
-    all_unmatched_schools: list[dict] = []
-    invalid_mentors = insp[insp[COL_MENTOR_ID].isna() | (insp[COL_MENTOR_ID].astype(str).str.strip() == "")]
+    progress(30, "preparing vectorized base rows")
+    mentor_id_series = insp[COL_MENTOR_ID].astype(str).str.strip()
+    invalid_mask = mentor_id_series.eq("") | insp[COL_MENTOR_ID].isna()
     invalid_mentors_df = pd.DataFrame(
         {
-            "row_index": invalid_mentors.index + 1,
-            "پشتیبان": invalid_mentors[COL_MENTOR_NAME],
-            "مدیر": invalid_mentors[COL_MANAGER_NAME],
+            "row_index": (insp.index[invalid_mask] + 1),
+            "پشتیبان": insp.loc[invalid_mask, COL_MENTOR_NAME],
+            "مدیر": insp.loc[invalid_mask, COL_MANAGER_NAME],
             "reason": "missing mentor employee code",
         }
     )
+    if invalid_mentors_df.empty:
+        invalid_mentors_df = pd.DataFrame(columns=["row_index", "پشتیبان", "مدیر", "reason"])
 
-    for rows, unseen, unmatched in results:
-        all_rows.extend(rows)
-        all_unseen_groups.extend(unseen)
-        all_unmatched_schools.extend(unmatched)
+    insp_valid = insp.loc[~invalid_mask].copy()
 
-    matrix = pd.DataFrame(all_rows)
+    base_df, unseen_groups, unmatched_schools = _prepare_base_rows(
+        insp_valid,
+        cfg=cfg,
+        name_to_code=name_to_code,
+        code_to_name=code_to_name,
+        buckets=buckets,
+        synonyms=synonyms,
+        school_name_to_code=school_name_to_code,
+        code_to_name_school=code_to_name_school,
+        group_cols=group_cols,
+        school_cols=school_cols,
+        gender_col=gender_col,
+        included_col=included_col,
+    )
 
-    # stable ordering + counter
+    progress(55, "assembling matrix variants")
+    normal_df = _explode_rows(
+        base_df.loc[base_df["can_normal"]],
+        alias_col="alias_normal",
+        status_col="statuses_normal",
+        school_col="schools_normal",
+        type_label="عادی",
+        code_to_name_school=code_to_name_school,
+    )
+    school_df = _explode_rows(
+        base_df.loc[base_df["can_school"]],
+        alias_col="alias_school",
+        status_col="statuses_school",
+        school_col="school_codes",
+        type_label="مدرسه‌ای",
+        code_to_name_school=code_to_name_school,
+    )
+
+    matrix = pd.concat([normal_df, school_df], ignore_index=True, sort=False)
+    if matrix.empty:
+        matrix = pd.DataFrame(
+            columns=[
+                "جایگزین",
+                "پشتیبان",
+                "مدیر",
+                "ردیف پشتیبان",
+                "نام رشته",
+                "کدرشته",
+                "جنسیت",
+                "دانش آموز فارغ",
+                "مرکز گلستان صدرا",
+                "مالی حکمت بنیاد",
+                "کد مدرسه",
+                "عادی مدرسه",
+                "نام مدرسه",
+                "جنسیت2",
+                "دانش آموز فارغ2",
+                "مرکز گلستان صدرا3",
+            ]
+        )
+
+    unseen_groups_df = pd.DataFrame(unseen_groups).drop_duplicates() if unseen_groups else pd.DataFrame()
+    unmatched_schools_df = (
+        pd.DataFrame(unmatched_schools).drop_duplicates() if unmatched_schools else pd.DataFrame()
+    )
+
     if not matrix.empty:
-
-        def _to_int_or(val: Any, default: int) -> int:
-            try:
-                return int(val)
-            except Exception:
-                return default
-
-        matrix = matrix.assign(
-            _school_sort=matrix["کد مدرسه"].apply(lambda v: _to_int_or(v, SCHOOL_CODE_NULL_SORT)),
-            _alias_sort=matrix["جایگزین"].apply(lambda v: _to_int_or(v, ALIAS_FALLBACK_SORT)),
+        matrix["ردیف پشتیبان"] = matrix["ردیف پشتیبان"].apply(
+            lambda v: int(v) if str(v).strip().isdigit() else str(v).strip()
+        )
+        matrix["کد مدرسه"] = pd.to_numeric(matrix["کد مدرسه"], errors="coerce").fillna(0).astype(int)
+        matrix["جایگزین"] = matrix["جایگزین"].apply(
+            lambda v: int(v) if str(v).strip().isdigit() else str(v).strip()
+        )
+        matrix["_school_sort"] = matrix["کد مدرسه"].apply(
+            lambda v: int(v) if str(v).isdigit() else SCHOOL_CODE_NULL_SORT
+        )
+        matrix["_alias_sort"] = matrix["جایگزین"].apply(
+            lambda v: int(v) if str(v).isdigit() else ALIAS_FALLBACK_SORT
         )
         matrix = matrix.sort_values(
             by=["مرکز گلستان صدرا", "کدرشته", "_school_sort", "_alias_sort"],
-            ascending=[True, True, True, True],
             kind="stable",
         )
         matrix = matrix.drop(columns=["_school_sort", "_alias_sort"])
-        matrix.insert(0, "counter", range(1, len(matrix) + 1))
+
+    matrix.insert(0, "counter", range(1, len(matrix) + 1))
 
     validation = pd.DataFrame(
         [
@@ -829,9 +941,6 @@ def build_matrix(
     )
 
     removed_df = removed_mentors
-    unmatched_schools_df = pd.DataFrame(all_unmatched_schools).drop_duplicates()
-    unseen_groups_df = pd.DataFrame(all_unseen_groups).drop_duplicates()
-
     progress(90, "matrix assembly complete")
     return matrix, validation, removed_df, unmatched_schools_df, unseen_groups_df, invalid_mentors_df
 
