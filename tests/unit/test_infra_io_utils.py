@@ -12,6 +12,7 @@ import pytest
 # مسیر پروژه برای ایمپورت ماژول
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+import app.infra.io_utils as io_utils  # noqa: E402
 from app.infra.io_utils import write_xlsx_atomic  # noqa: E402
 
 _HAS_OPENPYXL = importlib.util.find_spec("openpyxl") is not None
@@ -93,3 +94,26 @@ def test_write_xlsx_atomic_respects_env_override(tmp_path: Path, monkeypatch: py
     write_xlsx_atomic({"Sheet": pd.DataFrame({"v": [1]})}, out)
 
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_write_xlsx_atomic_cleans_up_temp_file_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(io_utils, "_pick_engine", lambda: "openpyxl")
+
+    class ExplodingWriter:
+        def __enter__(self) -> "ExplodingWriter":
+            raise RuntimeError("boom")
+
+        def __exit__(self, exc_type, exc, tb) -> bool:  # pragma: no cover - interface
+            return False
+
+    monkeypatch.setattr(pd, "ExcelWriter", lambda *args, **kwargs: ExplodingWriter())
+
+    target = tmp_path / "failure" / "out.xlsx"
+
+    with pytest.raises(RuntimeError):
+        write_xlsx_atomic({"Sheet": pd.DataFrame({"v": [1]})}, target)
+
+    assert not target.exists()
+    assert list(target.parent.glob("*.xlsx")) == []

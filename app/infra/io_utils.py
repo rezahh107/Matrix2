@@ -5,12 +5,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import tempfile
 from os import PathLike
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Iterator, Tuple
 
 import pandas as pd
 
@@ -32,6 +33,34 @@ def _safe_sheet_name(name: str, taken: set[str]) -> str:
         index += 1
     taken.add(candidate)
     return candidate
+
+
+@contextlib.contextmanager
+def _temporary_file_path(*, suffix: str = "", directory: Path | None = None) -> Iterator[Path]:
+    """مدیریت مسیر فایل موقتی با پاک‌سازی خودکار پس از اتمام کار.
+
+    مثال ساده::
+
+        >>> from pathlib import Path
+        >>> from app.infra.io_utils import _temporary_file_path
+        >>> with _temporary_file_path(suffix=".tmp", directory=Path("/tmp")) as tmp:  # doctest: +SKIP
+        ...     _ = tmp.exists()
+
+    Args:
+        suffix: پسوند دلخواه برای فایل موقتی.
+        directory: مسیر ساخت فایل موقتی (در صورت ``None`` از مقدار پیش‌فرض سیستم استفاده می‌شود).
+
+    Yields:
+        مسیر فایل موقتی که در پایان بلاک پاک می‌شود (در صورت موجود بودن).
+    """
+
+    fd, name = tempfile.mkstemp(suffix=suffix, dir=directory)
+    os.close(fd)
+    path = Path(name)
+    try:
+        yield path
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def _pick_engine() -> str:
@@ -74,22 +103,12 @@ def write_xlsx_atomic(
     target_path.parent.mkdir(parents=True, exist_ok=True)
     engine = _pick_engine()
     taken: set[str] = set()
-    tmp = tempfile.NamedTemporaryFile(
-        delete=False, suffix=".xlsx", dir=target_path.parent
-    )
-    tmp_path = Path(tmp.name)
-    tmp.close()
-    try:
+    with _temporary_file_path(suffix=".xlsx", directory=target_path.parent) as tmp_path:
         with pd.ExcelWriter(tmp_path, engine=engine) as writer:
             for sheet_name, df in data_dict.items():
                 safe_name = _safe_sheet_name(str(sheet_name), taken)
                 df.to_excel(writer, sheet_name=safe_name, index=False)
         os.replace(tmp_path, target_path)
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
 
 
 def read_excel_first_sheet(path: Path | str | PathLike[str]) -> pd.DataFrame:
