@@ -64,7 +64,7 @@ def natural_key(text: Any) -> tuple[object, ...]:
     for token in _NUMERIC_RE.split(s):
         if token.isdigit():
             parts.append(int(token))
-        else:
+        elif token:
             parts.append(token.lower())
     return tuple(parts)
 
@@ -147,15 +147,17 @@ def inject_mentor_id(pool: pd.DataFrame, id_map: Mapping[str, str]) -> pd.DataFr
 
 
 def ensure_ranking_columns(pool: pd.DataFrame) -> pd.DataFrame:
-    """تضمین وجود ستون‌های رتبه‌بندی و افزودن ستون مشتق «mentor_id_str».
+    """تضمین وجود ستون‌های رتبه‌بندی و افزودن ستون‌های مشتق طبیعی.
 
-    این تابع دیتافریم جدیدی برمی‌گرداند تا ورودی تغییری نکند.
+    این تابع دیتافریم جدیدی برمی‌گرداند تا ورودی تغییری نکند. علاوه بر
+    «mentor_id_str» که نسخهٔ رشته‌ای نرمال‌شده است، ستون «mentor_sort_key» نیز
+    محاسبه می‌شود تا کلید طبیعی (tuple) برای sort پایدار آماده باشد.
 
     Args:
         pool: دیتافریم کاندید با ستون‌های مورد نیاز.
 
     Returns:
-        pd.DataFrame: کپی با ستون اضافهٔ ``mentor_id_str`` برای sort طبیعی.
+        pd.DataFrame: کپی با ستون‌های اضافه برای مرتب‌سازی طبیعی.
 
     Raises:
         KeyError: اگر ستون‌های ضروری وجود نداشته باشند.
@@ -168,4 +170,5 @@ def ensure_ranking_columns(pool: pd.DataFrame) -> pd.DataFrame:
 
     result = pool.copy()
     result["mentor_id_str"] = result["کد کارمندی پشتیبان"].map(to_numlike_str)
+    result["mentor_sort_key"] = result["کد کارمندی پشتیبان"].map(natural_key)
     return result

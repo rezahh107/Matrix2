@@ -23,35 +23,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Iterable, Sequence
 
 import pandas as pd
 
 from ..policy_loader import PolicyConfig, load_policy
-from .ids import ensure_ranking_columns, natural_key
+from .ids import ensure_ranking_columns
 
 __all__ = ["apply_ranking_policy"]
 
 _DEFAULT_POLICY_PATH = Path("config/policy.json")
 
 
-def _natural_sort_series(series: pd.Series) -> pd.Series:
-    """تبدیل سری mentor_id به کلیدهای قابل sort طبیعی."""
-
-    return series.fillna("").map(natural_key)
-
-
 @dataclass(frozen=True)
 class _SortRule:
     column: str
     ascending: bool
-    key: Callable[[pd.Series], pd.Series] | None = None
 
 
 _RULE_MAP: dict[str, _SortRule] = {
-    "min_occupancy_ratio": _SortRule("occupancy_ratio", True, None),
-    "min_allocations_new": _SortRule("allocations_new", True, None),
-    "min_mentor_id": _SortRule("mentor_id_str", True, _natural_sort_series),
+    "min_occupancy_ratio": _SortRule("occupancy_ratio", True),
+    "min_allocations_new": _SortRule("allocations_new", True),
+    "min_mentor_id": _SortRule("mentor_sort_key", True),
 }
 
 
@@ -89,18 +82,12 @@ def apply_ranking_policy(
         policy = load_policy(policy_path)
 
     ranked = ensure_ranking_columns(candidate_pool)
-    for rule in reversed(list(_resolve_rules(policy.ranking))):
-        if rule.key is not None:
-            ranked = ranked.sort_values(
-                by=rule.column,
-                ascending=rule.ascending,
-                kind="stable",
-                key=rule.key,
-            )
-        else:
-            ranked = ranked.sort_values(
-                by=rule.column,
-                ascending=rule.ascending,
-                kind="stable",
-            )
-    return ranked
+    resolved_rules = list(_resolve_rules(policy.ranking))
+    for rule in reversed(resolved_rules):
+        ranked = ranked.sort_values(
+            by=rule.column,
+            ascending=rule.ascending,
+            kind="stable",
+        )
+    # پس از اجرای همهٔ قوانین، ایندکس بازتنظیم می‌شود تا بازتولیدپذیری کامل حفظ گردد.
+    return ranked.reset_index(drop=True)
