@@ -1,0 +1,182 @@
+"""رابط خط فرمان headless برای ماتریس و تخصیص مطابق Policy.
+
+این ماژول کلیهٔ مسئولیت‌های I/O را بر عهده دارد و با تزریق progress به
+توابع Core، اصل Policy-First و جداسازی لایه‌ها را حفظ می‌کند.
+
+مثال::
+
+    >>> from app.infra import cli
+    >>> cli.main(["build-matrix", "--inspactor", "insp.xlsx", "--schools", "sch.xlsx",
+    ...           "--crosswalk", "cross.xlsx", "--output", "out.xlsx", "--policy",
+    ...           "config/policy.json"])  # doctest: +SKIP
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Callable, Sequence
+
+import pandas as pd
+
+from app.core.allocate_students import allocate_batch
+from app.core.build_matrix import build_matrix
+from app.core.policy_loader import PolicyConfig, load_policy
+from app.infra.io_utils import write_xlsx_atomic
+
+ProgressFn = Callable[[int, str], None]
+
+_DEFAULT_POLICY_PATH = Path("config/policy.json")
+
+
+def _default_progress(pct: int, message: str) -> None:
+    """چاپ سادهٔ وضعیت پیشرفت در حالت headless."""
+
+    print(f"{pct:3d}% | {message}")
+
+
+def _detect_reader(path: Path) -> Callable[[Path], pd.DataFrame]:
+    """انتخاب تابع خواندن مناسب بر اساس پسوند فایل."""
+
+    suffix = path.suffix.lower()
+    if suffix in {".xlsx", ".xls", ".xlsm"}:
+        return lambda p: pd.read_excel(p)
+    return lambda p: pd.read_csv(p)
+
+
+def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn) -> int:
+    """اجرای فرمان ساخت ماتریس با چاپ پیشرفت و خروجی Excel."""
+
+    inspactor = Path(args.inspactor)
+    schools = Path(args.schools)
+    crosswalk = Path(args.crosswalk)
+    output = Path(args.output)
+
+    progress(0, f"policy {policy.version} loaded")
+    (
+        matrix,
+        validation,
+        removed,
+        unmatched_schools,
+        unseen_groups,
+        invalid_mentors,
+        meta,
+    ) = build_matrix(inspactor, schools, crosswalk)
+
+    progress(70, "building sheets")
+    meta_row = dict(meta)
+    meta_row.setdefault("policy_version", policy.version)
+    sheets = {
+        "matrix": matrix,
+        "validation": validation,
+        "removed": removed,
+        "unmatched_schools": unmatched_schools,
+        "unseen_groups": unseen_groups,
+        "invalid_mentors": invalid_mentors,
+        "meta": pd.json_normalize([meta_row]),
+    }
+    write_xlsx_atomic(sheets, output)
+    progress(100, "done")
+    return 0
+
+
+def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn) -> int:
+    """اجرای فرمان تخصیص دانش‌آموزان با خروجی Excel."""
+
+    students_path = Path(args.students)
+    pool_path = Path(args.pool)
+    output = Path(args.output)
+    capacity_column = args.capacity_column
+
+    reader_students = _detect_reader(students_path)
+    reader_pool = _detect_reader(pool_path)
+
+    progress(0, "loading inputs")
+    students_df = reader_students(students_path)
+    pool_df = reader_pool(pool_path)
+
+    allocations_df, updated_pool_df, logs_df, trace_df = allocate_batch(
+        students_df,
+        pool_df,
+        policy=policy,
+        progress=progress,
+        capacity_column=capacity_column,
+    )
+
+    progress(90, "writing outputs")
+    sheets = {
+        "allocations": allocations_df,
+        "updated_pool": updated_pool_df,
+        "logs": logs_df,
+        "trace": trace_df,
+    }
+    write_xlsx_atomic(sheets, output)
+    progress(100, "done")
+    return 0
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """ایجاد پارسر دستورات با زیرفرمان‌های build و allocate."""
+
+    parser = argparse.ArgumentParser(description="Eligibility Matrix CLI")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    build_cmd = sub.add_parser("build-matrix", help="ساخت ماتریس اهلیت")
+    build_cmd.add_argument("--inspactor", required=True, help="مسیر فایل inspactor")
+    build_cmd.add_argument("--schools", required=True, help="مسیر فایل schools")
+    build_cmd.add_argument("--crosswalk", required=True, help="مسیر فایل crosswalk")
+    build_cmd.add_argument("--output", required=True, help="مسیر Excel خروجی")
+    build_cmd.add_argument(
+        "--policy",
+        default=str(_DEFAULT_POLICY_PATH),
+        help="مسیر فایل policy.json",
+    )
+
+    alloc_cmd = sub.add_parser("allocate", help="تخصیص دانش‌آموزان به منتورها")
+    alloc_cmd.add_argument("--students", required=True, help="مسیر فایل دانش‌آموزان")
+    alloc_cmd.add_argument("--pool", required=True, help="مسیر استخر منتورها")
+    alloc_cmd.add_argument("--output", required=True, help="مسیر Excel خروجی تخصیص")
+    alloc_cmd.add_argument(
+        "--capacity-column",
+        default="remaining_capacity",
+        help="نام ستون ظرفیت باقی‌مانده در استخر",
+    )
+    alloc_cmd.add_argument(
+        "--policy",
+        default=str(_DEFAULT_POLICY_PATH),
+        help="مسیر فایل policy.json",
+    )
+
+    return parser
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    progress_factory: Callable[[], ProgressFn] | None = None,
+    build_runner: Callable[[argparse.Namespace, PolicyConfig, ProgressFn], int] | None = None,
+    allocate_runner: Callable[[argparse.Namespace, PolicyConfig, ProgressFn], int] | None = None,
+) -> int:
+    """نقطهٔ ورود CLI؛ خروجی ۰ به معنای موفقیت است."""
+
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    policy_path = Path(args.policy)
+    policy = load_policy(policy_path)
+
+    progress = progress_factory() if progress_factory is not None else _default_progress
+
+    if args.command == "build-matrix":
+        runner = build_runner or _run_build_matrix
+        return runner(args, policy, progress)
+
+    if args.command == "allocate":
+        runner = allocate_runner or _run_allocate
+        return runner(args, policy, progress)
+
+    raise RuntimeError(f"Unsupported command: {args.command}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

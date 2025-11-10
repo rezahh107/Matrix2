@@ -72,7 +72,7 @@ def test_inject_mentor_id_preserves_original_dataframe() -> None:
     assert "mentor_id_str" not in pool.columns
 
 
-def test_ensure_ranking_columns_adds_mentor_id_str() -> None:
+def test_ensure_ranking_columns_adds_mentor_columns() -> None:
     pool = pd.DataFrame(
         {
             "پشتیبان": ["زهرا"],
@@ -86,7 +86,10 @@ def test_ensure_ranking_columns_adds_mentor_id_str() -> None:
 
     assert "mentor_id_str" in prepared.columns
     assert prepared.loc[0, "mentor_id_str"] == "EMP-001"
+    assert "mentor_sort_key" in prepared.columns
+    assert prepared.loc[0, "mentor_sort_key"] == ("emp-", 1)
     assert "mentor_id_str" not in pool.columns
+    assert "mentor_sort_key" not in pool.columns
 
 
 def test_apply_ranking_policy_natural_tie_break(_policy: PolicyConfig) -> None:
@@ -103,4 +106,10 @@ def test_apply_ranking_policy_natural_tie_break(_policy: PolicyConfig) -> None:
 
     assert ranked["کد کارمندی پشتیبان"].tolist() == ["EMP-001", "EMP-002", "EMP-010"]
     assert ranked["mentor_id_str"].tolist() == ["EMP-001", "EMP-002", "EMP-010"]
+    assert ranked["mentor_sort_key"].tolist() == [
+        ("emp-", 1),
+        ("emp-", 2),
+        ("emp-", 10),
+    ]
     assert "mentor_id_str" not in pool.columns
+    assert "mentor_sort_key" not in pool.columns
