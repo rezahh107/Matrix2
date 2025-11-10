@@ -530,6 +530,7 @@ def generate_row_variants(
             {
                 "جایگزین": int(alias_val) if str(alias_val).strip().isdigit() else str(alias_val),
                 "پشتیبان": base["supporter"],
+                "کد کارمندی پشتیبان": base["mentor_id"],
                 "مدیر": base["manager"],
                 "ردیف پشتیبان": int(base["row_id"]) if str(base["row_id"]).strip().isdigit() else "",
                 "نام رشته": g_name,
@@ -731,6 +732,7 @@ def _explode_rows(
     df = df.rename(
         columns={
             "supporter": "پشتیبان",
+            "mentor_id": "کد کارمندی پشتیبان",
             "manager": "مدیر",
             "mentor_row_id": "ردیف پشتیبان",
             "group_name": "نام رشته",
@@ -757,6 +759,7 @@ def _explode_rows(
     ordered_columns = [
         "جایگزین",
         "پشتیبان",
+        "کد کارمندی پشتیبان",
         "مدیر",
         "ردیف پشتیبان",
         "نام رشته",
@@ -885,6 +888,7 @@ def build_matrix(
             columns=[
                 "جایگزین",
                 "پشتیبان",
+                "کد کارمندی پشتیبان",
                 "مدیر",
                 "ردیف پشتیبان",
                 "نام رشته",
