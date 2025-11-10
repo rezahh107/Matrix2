@@ -14,6 +14,8 @@
 from __future__ import annotations
 
 import argparse
+import platform
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -22,7 +24,11 @@ import pandas as pd
 from app.core.allocate_students import allocate_batch
 from app.core.build_matrix import build_matrix
 from app.core.policy_loader import PolicyConfig, load_policy
-from app.infra.io_utils import write_xlsx_atomic
+from app.infra.io_utils import (
+    read_crosswalk_workbook,
+    read_excel_first_sheet,
+    write_xlsx_atomic,
+)
 
 ProgressFn = Callable[[int, str], None]
 
@@ -53,6 +59,21 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
     output = Path(args.output)
 
     progress(0, f"policy {policy.version} loaded")
+    insp_df = read_excel_first_sheet(inspactor)
+    schools_df = read_excel_first_sheet(schools)
+    crosswalk_groups_df, crosswalk_synonyms_df = read_crosswalk_workbook(crosswalk)
+
+    inputs = {
+        "inspactor": str(inspactor),
+        "schools": str(schools),
+        "crosswalk": str(crosswalk),
+    }
+    inputs_mtime = {
+        "inspactor": inspactor.stat().st_mtime,
+        "schools": schools.stat().st_mtime,
+        "crosswalk": crosswalk.stat().st_mtime,
+    }
+
     (
         matrix,
         validation,
@@ -60,12 +81,27 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         unmatched_schools,
         unseen_groups,
         invalid_mentors,
-        meta,
-    ) = build_matrix(inspactor, schools, crosswalk)
+    ) = build_matrix(
+        insp_df,
+        schools_df,
+        crosswalk_groups_df,
+        crosswalk_synonyms_df=crosswalk_synonyms_df,
+        progress=progress,
+    )
 
     progress(70, "building sheets")
-    meta_row = dict(meta)
-    meta_row.setdefault("policy_version", policy.version)
+    meta = {
+        "policy_version": policy.version,
+        "ssot_version": "1.0.2",
+        "build_time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "build_host": platform.node(),
+        "inputs": inputs,
+        "inputs_mtime": inputs_mtime,
+        "rowcounts": {
+            "inspactor": int(len(insp_df)),
+            "schools": int(len(schools_df)),
+        },
+    }
     sheets = {
         "matrix": matrix,
         "validation": validation,
@@ -73,7 +109,7 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         "unmatched_schools": unmatched_schools,
         "unseen_groups": unseen_groups,
         "invalid_mentors": invalid_mentors,
-        "meta": pd.json_normalize([meta_row]),
+        "meta": pd.json_normalize([meta]),
     }
     write_xlsx_atomic(sheets, output)
     progress(100, "done")

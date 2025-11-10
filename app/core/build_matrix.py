@@ -12,22 +12,14 @@ Summary
 """
 from __future__ import annotations
 
-import argparse
-import json
-import logging
 import math
-import os
-import platform  # ← added
 import re
-import sys
 import unicodedata
-from dataclasses import dataclass, asdict, field
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
 from enum import IntEnum, auto
 from functools import lru_cache, wraps
 from itertools import product
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -86,9 +78,14 @@ BUILTIN_SYNONYMS = {
 }
 
 # =============================================================================
-# LOGGING
+# PROGRESS API
 # =============================================================================
-logger = logging.getLogger("eligibility_matrix")
+ProgressFn = Callable[[int, str], None]
+
+
+def noop_progress(_: int, __: str) -> None:
+    """تابع پیش‌فرض پیشرفت که هیچ کاری انجام نمی‌دهد."""
+
 
 # =============================================================================
 # ENUMS
@@ -234,47 +231,57 @@ def validate_dataframe_columns(*required_cols: str):
     return decorator
 
 
-def load_crosswalk_groups(
-    crosswalk_path: Path,
+def prepare_crosswalk_mappings(
+    crosswalk_groups_df: pd.DataFrame,
+    synonyms_df: pd.DataFrame | None = None,
 ) -> tuple[dict[str, int], dict[int, str], dict[str, list[tuple[str, int]]], dict[str, str]]:
-    try:
-        with pd.ExcelFile(crosswalk_path) as xls:
-            sheet_name = "پایه تحصیلی (گروه آزمایشی)"
-            if sheet_name not in xls.sheet_names:
-                raise ValueError(f"شیت «{sheet_name}» در Crosswalk یافت نشد")
-            df = xls.parse(sheet_name)
-            name_to_code: dict[str, int] = {}
-            code_to_name: dict[int, str] = {}
-            buckets: dict[str, list[tuple[str, int]]] = {}
-            for _, row in df.iterrows():
-                gname = str(row["گروه آزمایشی"])
-                gcode = int(row["کد گروه"])
-                level = str(row["مقطع تحصیلی"])
-                name_to_code[normalize_fa(gname)] = gcode
-                code_to_name[gcode] = gname  # display name
-                buckets.setdefault(level, []).append((gname, gcode))
+    """ساخت نگاشت‌های موردنیاز از دیتافریم Crosswalk.
 
-            synonyms = {normalize_fa(k): v for k, v in BUILTIN_SYNONYMS.items()}
-            if "Synonyms" in xls.sheet_names:
-                syn_df = xls.parse("Synonyms")
-                src_col = next(
-                    (c for c in syn_df.columns if "from" in normalize_fa(c) or "alias" in normalize_fa(c)),
-                    syn_df.columns[0],
-                )
-                dst_col = next(
-                    (c for c in syn_df.columns if "to" in normalize_fa(c) or "target" in normalize_fa(c)),
-                    syn_df.columns[1] if len(syn_df.columns) > 1 else syn_df.columns[0],
-                )
-                for _, r in syn_df.iterrows():
-                    src = normalize_fa(r.get(src_col, ""))
-                    dst = str(r.get(dst_col, "")).strip()
-                    if src and dst:
-                        synonyms[src] = dst
-            return name_to_code, code_to_name, buckets, synonyms
-    except FileNotFoundError:
-        raise FileNotFoundError(f"فایل Crosswalk یافت نشد: {crosswalk_path}")
-    except Exception as exc:
-        raise ValueError(f"خطا در باز کردن Crosswalk: {exc}")
+    مثال ساده::
+
+        >>> mappings = prepare_crosswalk_mappings(groups_df)  # doctest: +SKIP
+
+    Args:
+        crosswalk_groups_df: دیتافریم شیت «پایه تحصیلی (گروه آزمایشی)».
+        synonyms_df: دیتافریم شیت «Synonyms» در صورت وجود.
+
+    Returns:
+        چهارتایی ``(name_to_code, code_to_name, buckets, synonyms)``.
+    """
+
+    required_columns = {"گروه آزمایشی", "کد گروه", "مقطع تحصیلی"}
+    missing = required_columns.difference(crosswalk_groups_df.columns)
+    if missing:
+        raise ValueError(f"ستون‌های الزامی Crosswalk یافت نشد: {sorted(missing)}")
+
+    name_to_code: dict[str, int] = {}
+    code_to_name: dict[int, str] = {}
+    buckets: dict[str, list[tuple[str, int]]] = {}
+    for _, row in crosswalk_groups_df.iterrows():
+        gname = str(row["گروه آزمایشی"])
+        gcode = int(row["کد گروه"])
+        level = str(row["مقطع تحصیلی"])
+        name_to_code[normalize_fa(gname)] = gcode
+        code_to_name[gcode] = gname
+        buckets.setdefault(level, []).append((gname, gcode))
+
+    synonyms = {normalize_fa(k): v for k, v in BUILTIN_SYNONYMS.items()}
+    if synonyms_df is not None:
+        src_col = next(
+            (c for c in synonyms_df.columns if "from" in normalize_fa(c) or "alias" in normalize_fa(c)),
+            synonyms_df.columns[0],
+        )
+        dst_col = next(
+            (c for c in synonyms_df.columns if "to" in normalize_fa(c) or "target" in normalize_fa(c)),
+            synonyms_df.columns[1] if len(synonyms_df.columns) > 1 else synonyms_df.columns[0],
+        )
+        for _, row in synonyms_df.iterrows():
+            src = normalize_fa(row.get(src_col, ""))
+            dst = str(row.get(dst_col, "")).strip()
+            if src and dst:
+                synonyms[src] = dst
+
+    return name_to_code, code_to_name, buckets, synonyms
 
 # -----------------------------------------------------------------------------
 def expand_group_token(
@@ -335,18 +342,8 @@ def expand_group_token(
     return uniq
 
 # =============================================================================
-# I/O
+# SCHOOL MAPPINGS
 # =============================================================================
-def load_first_sheet(path: Path) -> pd.DataFrame:
-    try:
-        with pd.ExcelFile(path) as xls:
-            return xls.parse(xls.sheet_names[0])
-    except FileNotFoundError:
-        raise FileNotFoundError(f"فایل یافت نشد: {path}")
-    except Exception as exc:
-        raise ValueError(f"خطا در خواندن فایل {path}: {exc}")
-
-
 @validate_dataframe_columns(COL_SCHOOL_CODE)
 def build_school_maps(schools_df: pd.DataFrame) -> tuple[dict[str, str], dict[str, str]]:
     name_cols = [c for c in schools_df.columns if "نام مدرسه" in c]
@@ -363,23 +360,19 @@ def build_school_maps(schools_df: pd.DataFrame) -> tuple[dict[str, str], dict[st
     return code_to_name, name_to_code
 
 
-def write_xlsx_atomic(path: Path, sheets: dict[str, pd.DataFrame]) -> None:
-    tmp = path.with_suffix(path.suffix + ".part")
-    with pd.ExcelWriter(tmp, engine="xlsxwriter") as w:
-        for name, df in sheets.items():
-            df.to_excel(w, index=False, sheet_name=name)
-    os.replace(tmp, path)
-
-
 def safe_int_column(df: pd.DataFrame, col: str, default: int = 0) -> pd.Series:
     return pd.to_numeric(df.get(col), errors="coerce").fillna(default).astype(int)
 
 # =============================================================================
 # CAPACITY GATE (R0)
 # =============================================================================
-def capacity_gate(insp: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, bool]:
+def capacity_gate(
+    insp: pd.DataFrame,
+    *,
+    progress: ProgressFn = noop_progress,
+) -> tuple[pd.DataFrame, pd.DataFrame, bool]:
     if CAPACITY_CURRENT_COL not in insp.columns or CAPACITY_SPECIAL_COL not in insp.columns:
-        logger.warning("Capacity columns not found; skipping capacity gate")
+        progress(10, "capacity columns missing; skipping capacity gate")
         return insp.copy(), pd.DataFrame(), True
 
     df = insp.copy()
@@ -412,7 +405,7 @@ def capacity_gate(insp: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, bool]
     kept = kept.drop(columns=drop_cols, errors="ignore")
     removed = removed.drop(columns=drop_cols, errors="ignore")
 
-    logger.info("Capacity gate: kept=%d, removed=%d", len(kept), len(removed))
+    progress(20, f"capacity gate kept={len(kept)} removed={len(removed)}")
     return kept, removed, False
 
 # =============================================================================
@@ -709,23 +702,46 @@ def process_row(
 # BUILD MATRIX
 # =============================================================================
 def build_matrix(
-    inspactor_xlsx: Path,
-    schools_xlsx: Path,
-    crosswalk_xlsx: Path,
+    insp_df: pd.DataFrame,
+    schools_df: pd.DataFrame,
+    crosswalk_groups_df: pd.DataFrame,
+    *,
+    crosswalk_synonyms_df: pd.DataFrame | None = None,
     cfg: BuildConfig = BuildConfig(),
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
-    logger.info("Loading inputs...")
-    insp = load_first_sheet(inspactor_xlsx)
-    schools = load_first_sheet(schools_xlsx)
-    name_to_code, code_to_name, buckets, synonyms = load_crosswalk_groups(crosswalk_xlsx)
-    code_to_name_school, school_name_to_code = build_school_maps(schools)
+    progress: ProgressFn = noop_progress,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """ساخت ماتریس اهلیت بر مبنای دیتافریم‌های ورودی.
+
+    مثال ساده::
+
+        >>> matrix, *_ = build_matrix(insp_df, schools_df, crosswalk_df)  # doctest: +SKIP
+
+    Args:
+        insp_df: دیتافریم خام گزارش Inspactor.
+        schools_df: دیتافریم نگاشت مدارس.
+        crosswalk_groups_df: دیتافریم گروه‌های آزمایشی.
+        crosswalk_synonyms_df: دیتافریم نگاشت نام‌های مترادف.
+        cfg: پیکربندی ساخت ماتریس.
+        progress: تابع پیشرفت تزریق‌شده از لایهٔ زیرساخت.
+
+    Returns:
+        شش‌تایی دیتافریم شامل ماتریس و جداول کنترلی.
+    """
+    progress(5, "preparing crosswalk mappings")
+    name_to_code, code_to_name, buckets, synonyms = prepare_crosswalk_mappings(
+        crosswalk_groups_df,
+        crosswalk_synonyms_df,
+    )
+    code_to_name_school, school_name_to_code = build_school_maps(schools_df)
+
+    insp = insp_df.copy()
 
     if cfg.enable_capacity_gate:
-        insp, removed_mentors, r0_skipped = capacity_gate(insp)
+        insp, removed_mentors, r0_skipped = capacity_gate(insp, progress=progress)
     else:
         removed_mentors = pd.DataFrame()
         r0_skipped = True
-        logger.warning("Capacity gate disabled by config.")
+        progress(15, "capacity gate disabled by config")
 
     # detect columns
     gender_col = COL_GENDER if COL_GENDER in insp.columns else None
@@ -737,7 +753,7 @@ def build_matrix(
     school_cols = [c for c in [COL_SCHOOL1, COL_SCHOOL2, COL_SCHOOL3, COL_SCHOOL4] if c in insp.columns]
 
     # generate rows
-    logger.info("Generating matrix rows...")
+    progress(30, "generating matrix rows")
     results = insp.apply(
         lambda r: process_row(
             r,
@@ -792,7 +808,7 @@ def build_matrix(
         matrix = matrix.sort_values(
             by=["مرکز گلستان صدرا", "کدرشته", "_school_sort", "_alias_sort"],
             ascending=[True, True, True, True],
-            kind="mergesort",
+            kind="stable",
         )
         matrix = matrix.drop(columns=["_school_sort", "_alias_sort"])
         matrix.insert(0, "counter", range(1, len(matrix) + 1))
@@ -816,33 +832,15 @@ def build_matrix(
     unmatched_schools_df = pd.DataFrame(all_unmatched_schools).drop_duplicates()
     unseen_groups_df = pd.DataFrame(all_unseen_groups).drop_duplicates()
 
-    meta = {
-        "ssot_version": "1.0.2",
-        "build_time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "build_host": platform.node(),
-        "inputs": {
-            "inspactor": str(inspactor_xlsx),
-            "schools": str(schools_xlsx),
-            "crosswalk": str(crosswalk_xlsx),
-        },
-        "inputs_mtime": {
-            "inspactor": inspactor_xlsx.stat().st_mtime,
-            "schools": schools_xlsx.stat().st_mtime,
-            "crosswalk": crosswalk_xlsx.stat().st_mtime,
-        },
-        "rowcounts": {"inspactor": int(len(insp)), "schools": int(len(schools))},
-        "config": asdict(cfg),
-    }
-    meta_df = pd.DataFrame([meta])  # kept for potential downstream use
-
-    return matrix, validation, removed_df, unmatched_schools_df, unseen_groups_df, invalid_mentors_df, meta
+    progress(90, "matrix assembly complete")
+    return matrix, validation, removed_df, unmatched_schools_df, unseen_groups_df, invalid_mentors_df
 
 
 # =============================================================================
 # VALIDATION vs StudentReport (optional)
 # =============================================================================
-def infer_students_gender_from_path(path: Path) -> int | None:
-    s = str(path)
+def infer_students_gender_from_hint(source: str | None) -> int | None:
+    s = str(source or "")
     if "3570" in s:
         return Gender.MALE
     if "3730" in s:
@@ -850,14 +848,19 @@ def infer_students_gender_from_path(path: Path) -> int | None:
     return None
 
 
-def resolve_students_gender_series(stud_df: pd.DataFrame, students_xlsx: Path, mode: str) -> pd.Series:
+def resolve_students_gender_series(
+    stud_df: pd.DataFrame,
+    *,
+    source_hint: str | None = None,
+    mode: str = "auto",
+) -> pd.Series:
     mode = (mode or "auto").lower()
     n = len(stud_df)
     if mode == "male":
         return pd.Series([Gender.MALE] * n, index=stud_df.index)
     if mode == "female":
         return pd.Series([Gender.FEMALE] * n, index=stud_df.index)
-    hint = infer_students_gender_from_path(students_xlsx)
+    hint = infer_students_gender_from_hint(source_hint)
     if hint is not None:
         return pd.Series([hint] * n, index=stud_df.index)
     if "جنسیت" in stud_df.columns:
@@ -866,31 +869,22 @@ def resolve_students_gender_series(stud_df: pd.DataFrame, students_xlsx: Path, m
 
 
 def validate_with_students(
-    students_xlsx: Path,
+    students_df: pd.DataFrame,
     matrix_df: pd.DataFrame,
-    schools_xlsx: Path,
-    crosswalk_xlsx: Path,
+    schools_df: pd.DataFrame,
+    crosswalk_groups_df: pd.DataFrame,
+    *,
+    crosswalk_synonyms_df: pd.DataFrame | None = None,
     students_gender_mode: str = "auto",
+    students_source_hint: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
-    stud_raw = load_first_sheet(students_xlsx)
-    schools = load_first_sheet(schools_xlsx)
-    with pd.ExcelFile(crosswalk_xlsx) as xls:
-        cross = xls.parse("پایه تحصیلی (گروه آزمایشی)")
-    group_map = {
-        normalize_fa(n): int(c)
-        for n, c in zip(cross["گروه آزمایشی"], cross["کد گروه"])
-        if pd.notna(n) and pd.notna(c)
-    }
-
-    # School name → code
-    name_cols = [c for c in schools.columns if "نام مدرسه" in c]
-    name_to_code: Dict[str, str] = {}
-    for _, row in schools.iterrows():
-        code = str(row[COL_SCHOOL_CODE])
-        for col in name_cols:
-            nm = normalize_fa(row[col])
-            if nm:
-                name_to_code.setdefault(nm, code)
+    stud_raw = students_df.copy()
+    schools = schools_df.copy()
+    _, school_name_to_code = build_school_maps(schools)
+    name_to_code, _, _, _ = prepare_crosswalk_mappings(
+        crosswalk_groups_df,
+        crosswalk_synonyms_df,
+    )
 
     # Support "کد پستی" OR "کد جایگزین"
     std_alias_col = "کد پستی" if "کد پستی" in stud_raw.columns else ("کد جایگزین" if "کد جایگزین" in stud_raw.columns else None)
@@ -903,16 +897,20 @@ def validate_with_students(
             "alias_norm": stud_raw[std_alias_col].apply(to_numlike_str),
             "mentor_name": stud_raw["نام پشتیبان"].astype(str).str.strip(),
             "manager": stud_raw["مدیر"].astype(str).str.strip(),
-            "group_code": stud_raw["گروه آزمایشی"].apply(lambda x: group_map.get(normalize_fa(x), None)),
+            "group_code": stud_raw["گروه آزمایشی"].apply(lambda x: name_to_code.get(normalize_fa(x), None)),
             "school_code": stud_raw[COL_SCHOOL1].apply(
-                lambda x: name_to_code.get(normalize_fa(x), "")
+                lambda x: school_name_to_code.get(normalize_fa(x), "")
             )
             if COL_SCHOOL1 in stud_raw.columns
             else "",
         }
     )
     stud["status_code"] = Status.STUDENT
-    stud["gender_code"] = resolve_students_gender_series(stud_raw, students_xlsx, students_gender_mode).values
+    stud["gender_code"] = resolve_students_gender_series(
+        stud_raw,
+        source_hint=students_source_hint,
+        mode=students_gender_mode,
+    ).values
 
     mat = matrix_df.copy()
     mat["alias_norm"] = mat["جایگزین"].apply(to_numlike_str)
@@ -987,107 +985,5 @@ def validate_with_students(
     breakdown.columns = ["reason", "count"]
     summary = {"total": int(len(stud)), "matched": int(stud["match"].sum()), "unmatched": int((~stud["match"]).sum())}
 
-    logger.info("Validation summary: %s", summary)
     return stud, breakdown, summary
 
-# =============================================================================
-# CLI
-# =============================================================================
-def parse_args(argv: List[str]) -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="Build Eligibility Matrix (+ optional StudentReport validation)")
-    ap.add_argument("--inspactor", required=True, type=Path, help="Path to InspactorReport.xlsx")
-    ap.add_argument("--schools", required=True, type=Path, help="Path to SchoolReport.xlsx")
-    ap.add_argument("--crosswalk", required=True, type=Path, help="Path to Crosswalk.xlsx")
-    ap.add_argument("--outdir", required=True, type=Path, help="Output directory")
-    ap.add_argument("--students", required=False, type=Path, help="Optional StudentReport.xlsx for validation")
-    ap.add_argument(
-        "--students-gender",
-        choices=["auto", "male", "female"],
-        default="auto",
-        help="Gender policy for validation. 'auto' infers 3570=male, 3730=female, else column 'جنسیت' or male.",
-    )
-    ap.add_argument("--log-level", default="INFO", help="DEBUG|INFO|WARNING|ERROR|CRITICAL")
-    ap.add_argument("--no-capacity-gate", action="store_true", help="Disable capacity gate (for debugging)")
-    return ap.parse_args(argv)
-
-
-def main(argv: List[str] | None = None) -> None:
-    args = parse_args(argv or sys.argv[1:])
-    logging.basicConfig(
-        level=getattr(logging, args.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-
-    cfg = BuildConfig(enable_capacity_gate=(not args.no_capacity_gate))
-    args.outdir.mkdir(parents=True, exist_ok=True)
-
-    matrix, validation, removed, unmatched_schools, unseen_groups, invalid_mentors, meta_dict = build_matrix(
-        args.inspactor, args.schools, args.crosswalk, cfg
-    )
-
-    # Write matrix (CSV + XLSX atomic)
-    out_csv = args.outdir / "eligibility_matrix.csv"
-    out_xlsx = args.outdir / "eligibility_matrix.xlsx"
-    matrix.to_csv(out_csv, index=False, encoding="utf-8-sig")
-
-    sheets: Dict[str, pd.DataFrame] = {"matrix": matrix, "validation": validation}
-    if not removed.empty:
-        sheets["removed_mentors"] = removed.sort_values(["مدیر", "پشتیبان"])
-    if not unmatched_schools.empty:
-        sheets["unmatched_schools"] = unmatched_schools
-    if not unseen_groups.empty:
-        sheets["unseen_groups"] = unseen_groups
-    if not invalid_mentors.empty:
-        sheets["invalid_mentors"] = invalid_mentors
-    sheets["meta"] = pd.DataFrame([meta_dict])
-
-    write_xlsx_atomic(out_xlsx, sheets)
-    logger.info("Matrix written: %s (and CSV: %s)", out_xlsx, out_csv)
-
-    outputs = {"matrix_csv": str(out_csv), "matrix_xlsx": str(out_xlsx)}
-
-    # Optional validation vs StudentReport
-    if args.students and args.students.exists():
-        checks, breakdown, summary = validate_with_students(
-            args.students, matrix, args.schools, args.crosswalk, students_gender_mode=args.students_gender
-        )
-        out_v = args.outdir / "matrix_vs_students_validation.xlsx"
-        write_xlsx_atomic(
-            out_v,
-            {
-                "checks": checks,
-                "breakdown": breakdown,
-                "summary": pd.DataFrame([summary]),
-                "meta": pd.DataFrame([{"students_file": str(args.students), "gender_mode": args.students_gender}]),
-            },
-        )
-        outputs["validation_xlsx"] = str(out_v)
-        if summary["unmatched"] > 0:
-            cols = ["alias_norm", "mentor_name", "manager", "group_code", "school_code", "reason"]
-            unmatched_csv = args.outdir / "unmatched_students.csv"
-            checks.loc[~checks["match"], cols].to_csv(unmatched_csv, index=False, encoding="utf-8-sig")
-            outputs["unmatched_csv"] = str(unmatched_csv)
-
-    print(
-        json.dumps(
-            {
-                "version": __version__,
-                "outputs": outputs,
-                "matrix_rows": int(len(matrix)),
-                "supporters": int(matrix["پشتیبان"].nunique()) if not matrix.empty else 0,
-                "school_based_rows": int((matrix["عادی مدرسه"] == "مدرسه‌ای").sum()) if not matrix.empty else 0,
-                "finance_rows": {
-                    "0": int((matrix["مالی حکمت بنیاد"] == Finance.NORMAL).sum()) if not matrix.empty else 0,
-                    "1": int((matrix["مالی حکمت بنیاد"] == Finance.BONYAD).sum()) if not matrix.empty else 0,
-                    "3": int((matrix["مالی حکمت بنیاد"] == Finance.HEKMAT).sum()) if not matrix.empty else 0,
-                },
-                "removed_mentors": int(len(removed)),
-                "r0_skipped": int(validation.iloc[0]["r0_skipped"]),
-            },
-            ensure_ascii=False,
-        )
-    )
-
-
-if __name__ == "__main__":
-    main()

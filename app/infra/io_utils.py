@@ -1,4 +1,4 @@
-"""توابع اتمیک نوشتن Excel در لایهٔ زیرساخت (بدون منطق دامنه).
+"""توابع ورودی/خروجی Excel در لایهٔ زیرساخت (بدون منطق دامنه).
 
 این ماژول فقط عملیات فایل را مدیریت می‌کند و در Core فراخوانی نمی‌شود.
 """
@@ -10,11 +10,11 @@ import re
 import tempfile
 from os import PathLike
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Tuple
 
 import pandas as pd
 
-__all__ = ["write_xlsx_atomic"]
+__all__ = ["write_xlsx_atomic", "read_excel_first_sheet", "read_crosswalk_workbook"]
 
 _INVALID_SHEET_CHARS = re.compile(r"[\\/*?:\[\]]")
 
@@ -88,3 +88,63 @@ def write_xlsx_atomic(
             os.unlink(tmp_path)
         except OSError:
             pass
+
+
+def read_excel_first_sheet(path: Path | str | PathLike[str]) -> pd.DataFrame:
+    """خواندن شیت اول فایل Excel به‌صورت DataFrame.
+
+    مثال ساده::
+
+        >>> from pathlib import Path
+        >>> df = read_excel_first_sheet(Path("/tmp/sample.xlsx"))  # doctest: +SKIP
+
+    Args:
+        path: مسیر فایل Excel ورودی.
+
+    Returns:
+        DataFrame مربوط به اولین شیت موجود در فایل.
+    """
+
+    source = Path(path)
+    try:
+        with pd.ExcelFile(source) as workbook:
+            if not workbook.sheet_names:
+                raise ValueError(f"هیچ شیتی در فایل {source} یافت نشد.")
+            return workbook.parse(workbook.sheet_names[0])
+    except FileNotFoundError as exc:  # pragma: no cover - propagate خوانا
+        raise FileNotFoundError(f"فایل یافت نشد: {source}") from exc
+    except Exception as exc:  # pragma: no cover - پیام خوانا
+        raise ValueError(f"خطا در خواندن فایل {source}: {exc}") from exc
+
+
+def read_crosswalk_workbook(
+    path: Path | str | PathLike[str],
+) -> Tuple[pd.DataFrame, pd.DataFrame | None]:
+    """خواندن شیت‌های موردنیاز Crosswalk.
+
+    مثال ساده::
+
+        >>> groups_df, synonyms_df = read_crosswalk_workbook("crosswalk.xlsx")  # doctest: +SKIP
+
+    Args:
+        path: مسیر فایل Crosswalk.
+
+    Returns:
+        دوگانهٔ `(groups_df, synonyms_df)` که دومی می‌تواند ``None`` باشد.
+    """
+
+    source = Path(path)
+    sheet_groups = "پایه تحصیلی (گروه آزمایشی)"
+    try:
+        with pd.ExcelFile(source) as workbook:
+            if sheet_groups not in workbook.sheet_names:
+                raise ValueError(f"شیت «{sheet_groups}» در Crosswalk یافت نشد")
+            groups_df = workbook.parse(sheet_groups)
+            synonyms_df = None
+            if "Synonyms" in workbook.sheet_names:
+                synonyms_df = workbook.parse("Synonyms")
+            return groups_df, synonyms_df
+    except FileNotFoundError as exc:  # pragma: no cover
+        raise FileNotFoundError(f"فایل Crosswalk یافت نشد: {source}") from exc
+    except Exception as exc:  # pragma: no cover
+        raise ValueError(f"خطا در باز کردن Crosswalk: {exc}") from exc
