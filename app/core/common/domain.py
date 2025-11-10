@@ -302,23 +302,20 @@ def center_from_manager(name: Any, *, cfg: BuildConfig) -> int:
 
     s = normalize_fa(name)
     cmap = cfg.center_map_norm()
-    if not s:
-        wildcard = cmap.get('*')
-        if wildcard is None:
-            raise InvalidCenterMappingError(func='center_from_manager', value=name)
+    wildcard = cmap.get('*')
+
+    if s:
+        if s in cmap:
+            return cmap[s]
+
+        for key, val in cmap.items():
+            if key != '*' and key in s:
+                return val
+
+    if wildcard is not None:
         return wildcard
 
-    if s in cmap:
-        return cmap[s]
-
-    for key, val in cmap.items():
-        if key != '*' and key in s:
-            return val
-
-    wildcard = cmap.get('*')
-    if wildcard is None:
-        raise InvalidCenterMappingError(func='center_from_manager', value=name)
-    return wildcard
+    raise InvalidCenterMappingError(func='center_from_manager', value=name)
 
 
 def mentor_type(postal_code: Any, school_count: int | None, *, cfg: BuildConfig) -> MentorType:
