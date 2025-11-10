@@ -34,14 +34,44 @@ __all__ = ["MainWindow", "run_demo", "FilePicker"]
 
 class FilePicker(QWidget):
     def __init__(self, parent=None, save=False, placeholder=""):
-        super().__init__(parent); self.save=save; self.edit=QLineEdit(self); self.edit.setPlaceholderText(placeholder)
-        self.btn=QPushButton("انتخاب…", self); self.btn.clicked.connect(self._pick)
-        lay=QHBoxLayout(self); lay.setContentsMargins(0,0,0,0); lay.addWidget(self.edit); lay.addWidget(self.btn)
-    def text(self)->str: return self.edit.text().strip()
-    def setText(self,s:str)->None: self.edit.setText(s)
-    def _pick(self)->None:
-        fn=QFileDialog.getSaveFileName if self.save else QFileDialog.getOpenFileName; p,_=fn(self,"ذخیره خروجی" if self.save else "انتخاب فایل","","All Files (*.*)")
-        if p: self.edit.setText(p)
+        super().__init__(parent)
+        self.save = save
+
+        self.edit = QLineEdit(self)
+        self.edit.setPlaceholderText(placeholder)
+
+        self.btn = QPushButton("انتخاب…", self)
+        self.btn.clicked.connect(self._pick)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.edit)
+        layout.addWidget(self.btn)
+
+    def text(self) -> str:
+        return self.edit.text().strip()
+
+    def setText(self, s: str) -> None:
+        self.edit.setText(s)
+
+    def _pick(self) -> None:
+        if self.save:
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "ذخیره خروجی",
+                "",
+                "All Files (*.*)",
+            )
+        else:
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "انتخاب فایل",
+                "",
+                "All Files (*.*)",
+            )
+
+        if path:
+            self.edit.setText(path)
 
 
 class MainWindow(QMainWindow):
