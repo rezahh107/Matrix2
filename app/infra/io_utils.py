@@ -36,7 +36,7 @@ def _safe_sheet_name(name: str, taken: set[str]) -> str:
 
 
 @contextlib.contextmanager
-def _temporary_file_path(*, suffix: str = "", directory: Path | None = None) -> Iterator[Path]:
+def _temporary_file_path(*, suffix: str = "", directory: Path | str | None = None) -> Iterator[Path]:
     """مدیریت مسیر فایل موقتی با پاک‌سازی خودکار پس از اتمام کار.
 
     مثال ساده::
