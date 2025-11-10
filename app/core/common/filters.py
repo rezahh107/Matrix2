@@ -3,6 +3,8 @@
 این ماژول هیچ I/O انجام نمی‌دهد و تنها عملیات برداری روی DataFrameهای
 pandas را اجرا می‌کند. هر تابع یکی از مراحل «Allocation 7-Pack» را پوشش
 می‌دهد و در نهایت `apply_join_filters` ترتیب استاندارد را اعمال می‌کند.
+نام ستون‌ها به‌طور کامل از Policy خوانده می‌شود تا تغییرات بدون دستکاری
+کد اعمال شوند.
 
 مثال ساده::
 
@@ -36,7 +38,9 @@ from typing import Callable, Mapping, Sequence
 
 import pandas as pd
 
-FilterFunc = Callable[[pd.DataFrame, Mapping[str, object]], pd.DataFrame]
+from ..policy_loader import PolicyConfig, load_policy
+
+FilterFunc = Callable[[pd.DataFrame, Mapping[str, object], PolicyConfig], pd.DataFrame]
 
 __all__ = [
     "filter_by_type",
@@ -67,54 +71,114 @@ def _eq_filter(frame: pd.DataFrame, column: str, value: object) -> pd.DataFrame:
     return frame.loc[frame[column] == value]
 
 
-def filter_by_type(pool: pd.DataFrame, student: Mapping[str, object]) -> pd.DataFrame:
-    """فیلتر مرحلهٔ type بر اساس ستون «کدرشته»."""
-
-    return _eq_filter(pool, "کدرشته", _student_value(student, "کدرشته"))
-
-
-def filter_by_group(pool: pd.DataFrame, student: Mapping[str, object]) -> pd.DataFrame:
-    """فیلتر مرحلهٔ group بر اساس ستون «گروه آزمایشی» در DataFrame."""
-
-    return _eq_filter(pool, "گروه آزمایشی", _student_value(student, "گروه آزمایشی"))
+def _filter_by_stage(
+    pool: pd.DataFrame,
+    student: Mapping[str, object],
+    policy: PolicyConfig,
+    stage: str,
+) -> pd.DataFrame:
+    column = policy.stage_column(stage)
+    return _eq_filter(pool, column, _student_value(student, column))
 
 
-def filter_by_gender(pool: pd.DataFrame, student: Mapping[str, object]) -> pd.DataFrame:
-    """فیلتر مرحلهٔ gender بر اساس ستون «جنسیت»"""
+def filter_by_type(
+    pool: pd.DataFrame,
+    student: Mapping[str, object],
+    policy: PolicyConfig | None = None,
+) -> pd.DataFrame:
+    """فیلتر مرحلهٔ type بر اساس ستون اعلام‌شده در Policy."""
 
-    return _eq_filter(pool, "جنسیت", _student_value(student, "جنسیت"))
-
-
-def filter_by_graduation_status(pool: pd.DataFrame, student: Mapping[str, object]) -> pd.DataFrame:
-    """فیلتر مرحلهٔ graduation_status بر اساس ستون «دانش آموز فارغ»"""
-
-    return _eq_filter(pool, "دانش آموز فارغ", _student_value(student, "دانش آموز فارغ"))
-
-
-def filter_by_center(pool: pd.DataFrame, student: Mapping[str, object]) -> pd.DataFrame:
-    """فیلتر مرحلهٔ center بر اساس ستون «مرکز گلستان صدرا»"""
-
-    return _eq_filter(pool, "مرکز گلستان صدرا", _student_value(student, "مرکز گلستان صدرا"))
+    if policy is None:
+        policy = load_policy()
+    return _filter_by_stage(pool, student, policy, "type")
 
 
-def filter_by_finance(pool: pd.DataFrame, student: Mapping[str, object]) -> pd.DataFrame:
-    """فیلتر مرحلهٔ finance بر اساس ستون «مالی حکمت بنیاد»"""
+def filter_by_group(
+    pool: pd.DataFrame,
+    student: Mapping[str, object],
+    policy: PolicyConfig | None = None,
+) -> pd.DataFrame:
+    """فیلتر مرحلهٔ group با ستون پویا از Policy."""
 
-    return _eq_filter(pool, "مالی حکمت بنیاد", _student_value(student, "مالی حکمت بنیاد"))
+    if policy is None:
+        policy = load_policy()
+    return _filter_by_stage(pool, student, policy, "group")
 
 
-def filter_by_school(pool: pd.DataFrame, student: Mapping[str, object]) -> pd.DataFrame:
-    """فیلتر مرحلهٔ school بر اساس ستون «کد مدرسه»"""
+def filter_by_gender(
+    pool: pd.DataFrame,
+    student: Mapping[str, object],
+    policy: PolicyConfig | None = None,
+) -> pd.DataFrame:
+    """فیلتر gender با ستون تعریف‌شده در Policy."""
 
-    return _eq_filter(pool, "کد مدرسه", _student_value(student, "کد مدرسه"))
+    if policy is None:
+        policy = load_policy()
+    return _filter_by_stage(pool, student, policy, "gender")
 
 
-def apply_join_filters(pool: pd.DataFrame, student: Mapping[str, object]) -> pd.DataFrame:
+def filter_by_graduation_status(
+    pool: pd.DataFrame,
+    student: Mapping[str, object],
+    policy: PolicyConfig | None = None,
+) -> pd.DataFrame:
+    """فیلتر graduation_status با ستون پویا."""
+
+    if policy is None:
+        policy = load_policy()
+    return _filter_by_stage(pool, student, policy, "graduation_status")
+
+
+def filter_by_center(
+    pool: pd.DataFrame,
+    student: Mapping[str, object],
+    policy: PolicyConfig | None = None,
+) -> pd.DataFrame:
+    """فیلتر center با ستون پویا."""
+
+    if policy is None:
+        policy = load_policy()
+    return _filter_by_stage(pool, student, policy, "center")
+
+
+def filter_by_finance(
+    pool: pd.DataFrame,
+    student: Mapping[str, object],
+    policy: PolicyConfig | None = None,
+) -> pd.DataFrame:
+    """فیلتر finance با ستون پویا."""
+
+    if policy is None:
+        policy = load_policy()
+    return _filter_by_stage(pool, student, policy, "finance")
+
+
+def filter_by_school(
+    pool: pd.DataFrame,
+    student: Mapping[str, object],
+    policy: PolicyConfig | None = None,
+) -> pd.DataFrame:
+    """فیلتر school با ستون پویا."""
+
+    if policy is None:
+        policy = load_policy()
+    return _filter_by_stage(pool, student, policy, "school")
+
+
+def apply_join_filters(
+    pool: pd.DataFrame,
+    student: Mapping[str, object],
+    *,
+    policy: PolicyConfig | None = None,
+) -> pd.DataFrame:
     """اجرای ترتیبی هفت فیلتر join روی استخر کاندید بدون mutate کردن ورودی."""
+
+    if policy is None:
+        policy = load_policy()
 
     current = pool
     for fn in _FILTER_SEQUENCE:
-        current = fn(current, student)
+        current = fn(current, student, policy)
         if current.empty:
             break
     return current

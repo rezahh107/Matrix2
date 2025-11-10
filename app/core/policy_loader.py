@@ -17,6 +17,36 @@ from typing import Literal
 
 VersionMismatchMode = Literal["raise", "warn", "ignore"]
 
+DEFAULT_POLICY_VERSION = "1.0.3"
+
+_TRACE_STAGE_ORDER: tuple[str, ...] = (
+    "type",
+    "group",
+    "gender",
+    "graduation_status",
+    "center",
+    "finance",
+    "school",
+    "capacity_gate",
+)
+
+_LEGACY_TRACE_DEFAULTS: Mapping[str, str] = {
+    "type": "کدرشته",
+    "group": "گروه آزمایشی",
+    "gender": "جنسیت",
+    "graduation_status": "دانش آموز فارغ",
+    "center": "مرکز گلستان صدرا",
+    "finance": "مالی حکمت بنیاد",
+    "school": "کد مدرسه",
+    "capacity_gate": "remaining_capacity",
+}
+
+_RANKING_RULE_LIBRARY: Mapping[str, tuple[str, bool]] = {
+    "min_occupancy_ratio": ("occupancy_ratio", True),
+    "min_allocations_new": ("allocations_new", True),
+    "min_mentor_id": ("mentor_sort_key", True),
+}
+
 
 @dataclass(frozen=True)
 class PolicyConfig:
@@ -26,41 +56,186 @@ class PolicyConfig:
     normal_statuses: List[int]
     school_statuses: List[int]
     join_keys: List[str]
-    ranking: List[str]
+    ranking_rules: List["RankingRule"]
+    trace_stages: List["TraceStageDefinition"]
+
+    @property
+    def ranking(self) -> List[str]:
+        """ترتیب قوانین رتبه‌بندی بر اساس نام قانون."""
+
+        return [rule.name for rule in self.ranking_rules]
+
+    @property
+    def trace_stage_names(self) -> tuple[str, ...]:
+        """نام مراحل تریس به‌ترتیب تعریف Policy."""
+
+        return tuple(stage.stage for stage in self.trace_stages)
+
+    def stage_column(self, stage: str) -> str:
+        """نام ستون متناظر با مرحلهٔ تریس را برمی‌گرداند."""
+
+        for item in self.trace_stages:
+            if item.stage == stage:
+                return item.column
+        raise KeyError(f"Stage '{stage}' is not defined in policy trace stages")
+
+    @property
+    def capacity_column(self) -> str:
+        """ستون ظرفیت را از روی تعریف مرحلهٔ capacity_gate استخراج می‌کند."""
+
+        return self.stage_column("capacity_gate")
+
+    @property
+    def join_stage_columns(self) -> List[str]:
+        """لیست ستون‌های فیلتر join به ترتیب تعریف‌شده در Policy."""
+
+        return [item.column for item in self.trace_stages if item.stage != "capacity_gate"]
 
 
-def _validate_policy_dict(data: Mapping[str, object]) -> None:
-    """اعتبارسنجی حداقلی بدون هاردکد قواعد دامنه."""
+@dataclass(frozen=True)
+class RankingRule:
+    """تعریف قانون مرتب‌سازی از روی Policy."""
 
-    required = ("version", "normal_statuses", "school_statuses", "join_keys", "ranking")
+    name: str
+    column: str
+    ascending: bool
+
+
+@dataclass(frozen=True)
+class TraceStageDefinition:
+    """تعریف مرحلهٔ تریس به‌صورت فقط‌خواندنی."""
+
+    stage: str
+    column: str
+
+
+def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object]:
+    required = ["version", "normal_statuses", "school_statuses", "join_keys"]
     missing = [key for key in required if key not in data]
+    if "ranking_rules" not in data and "ranking" not in data:
+        missing.append("ranking")
     if missing:
         raise ValueError(f"Policy keys missing: {missing}")
 
-    join_keys = data["join_keys"]
-    if not isinstance(join_keys, Sequence) or isinstance(join_keys, (str, bytes)):
+    version = str(data["version"])
+    normal_statuses = _ensure_int_sequence("normal_statuses", data["normal_statuses"])
+    school_statuses = _ensure_int_sequence("school_statuses", data["school_statuses"])
+    join_keys = _normalize_join_keys(data["join_keys"])
+    ranking_rules = _normalize_ranking_rules(data["ranking_rules"] if "ranking_rules" in data else data["ranking"])
+    trace_stages = _normalize_trace_stages(data.get("trace_stages"), join_keys)
+
+    return {
+        "version": version,
+        "normal_statuses": normal_statuses,
+        "school_statuses": school_statuses,
+        "join_keys": join_keys,
+        "ranking_rules": ranking_rules,
+        "trace_stages": trace_stages,
+    }
+
+
+def _ensure_int_sequence(name: str, value: object) -> List[int]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise TypeError(f"{name} must be a sequence of ints")
+    result: List[int] = []
+    for item in value:
+        if not isinstance(item, int):
+            raise TypeError(f"All {name} items must be int")
+        result.append(int(item))
+    return result
+
+
+def _normalize_join_keys(raw: object) -> List[str]:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         raise TypeError("join_keys must be a sequence of strings")
-    join_keys_list = [str(item) for item in join_keys]
-    if len(join_keys_list) != 6:
+    join_keys = [str(item).strip() for item in raw]
+    if len(join_keys) != 6:
         raise ValueError("join_keys must be 6")
-    if len(set(join_keys_list)) != 6:
+    if any(not key for key in join_keys):
+        raise ValueError("join_keys must be non-empty strings")
+    if len(set(join_keys)) != 6:
         raise ValueError("join_keys must be unique")
+    return join_keys
 
-    ranking = data["ranking"]
-    if not isinstance(ranking, Sequence) or isinstance(ranking, (str, bytes)):
-        raise TypeError("ranking must be a sequence of strings")
-    ranking_list = [str(item) for item in ranking]
-    if len(ranking_list) != 3:
-        raise ValueError("ranking must have exactly 3 items")
-    if len(set(ranking_list)) != 3:
-        raise ValueError("ranking must be unique")
 
-    for key in ("normal_statuses", "school_statuses"):
-        value = data[key]
-        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-            raise TypeError(f"{key} must be a sequence of ints")
-        if not all(isinstance(item, int) for item in value):
-            raise TypeError(f"All {key} items must be int")
+def _normalize_ranking_rules(raw: object) -> List[Mapping[str, object]]:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise TypeError("ranking must be a sequence of rules")
+    if not raw:
+        raise ValueError("ranking must contain at least one rule")
+    normalized: List[Mapping[str, object]] = []
+    seen_names: set[str] = set()
+    for item in raw:
+        if isinstance(item, Mapping):
+            if "name" not in item or "column" not in item:
+                raise ValueError("Ranking rule must define 'name' and 'column'")
+            name = str(item["name"])
+            column = str(item["column"])
+            ascending_value = item.get("ascending", True)
+            if not isinstance(ascending_value, bool):
+                raise TypeError("ranking rule 'ascending' must be boolean")
+            ascending = bool(ascending_value)
+        else:
+            name = str(item)
+            if name not in _RANKING_RULE_LIBRARY:
+                raise ValueError(f"Unknown ranking rule '{name}'")
+            column, ascending = _RANKING_RULE_LIBRARY[name]
+        if name in seen_names:
+            raise ValueError("ranking rule names must be unique")
+        seen_names.add(name)
+        normalized.append({"name": name, "column": column, "ascending": ascending})
+    return normalized
+
+
+def _normalize_trace_stages(raw: object | None, join_keys: Sequence[str]) -> List[Mapping[str, str]]:
+    if raw is None:
+        stages = [
+            {"stage": stage, "column": _LEGACY_TRACE_DEFAULTS[stage]}
+            for stage in _TRACE_STAGE_ORDER
+        ]
+    else:
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+            raise TypeError("trace_stages must be a sequence of mappings")
+        if len(raw) != len(_TRACE_STAGE_ORDER):
+            raise ValueError(
+                "trace_stages must define exactly eight stages including capacity_gate",
+            )
+        stages = []
+        seen_stage_names: set[str] = set()
+        for expected, item in zip(_TRACE_STAGE_ORDER, raw, strict=False):
+            if not isinstance(item, Mapping):
+                raise TypeError("Each trace stage must be a mapping")
+            stage_name = str(item.get("stage", "")).strip()
+            column_value = item.get("column")
+            if not stage_name:
+                raise ValueError("Trace stage missing 'stage' value")
+            if stage_name in seen_stage_names:
+                raise ValueError("Trace stage names must be unique")
+            if stage_name != expected:
+                raise ValueError(
+                    f"Trace stage order mismatch: expected '{expected}' got '{stage_name}'",
+                )
+            if not isinstance(column_value, (str, bytes)) or not str(column_value).strip():
+                raise ValueError("Trace stage 'column' must be a non-empty string")
+            seen_stage_names.add(stage_name)
+            stages.append({"stage": stage_name, "column": str(column_value)})
+
+    stage_columns = {stage["column"] for stage in stages}
+    missing_from_trace = [key for key in join_keys if key not in stage_columns]
+    if missing_from_trace:
+        raise ValueError(
+            "All join_keys must appear in trace_stages columns: "
+            + ", ".join(missing_from_trace),
+        )
+    return stages
+
+
+def _parse_semver(value: str) -> tuple[int, int, int]:
+    try:
+        major, minor, patch = value.split(".")
+        return int(major), int(minor), int(patch)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise ValueError(f"Invalid semantic version: '{value}'") from exc
 
 
 def _version_gate(
@@ -73,14 +248,20 @@ def _version_gate(
     if loaded_version == expected_version:
         return
 
+    loaded_semver = _parse_semver(loaded_version)
+    expected_semver = _parse_semver(expected_version)
     message = (
         f"Policy version mismatch: loaded='{loaded_version}' "
         f"expected='{expected_version}'"
     )
+
+    if loaded_semver[0] != expected_semver[0]:
+        raise ValueError(message + " (major incompatible)")
+
     if on_version_mismatch == "raise":
         raise ValueError(message)
     if on_version_mismatch == "warn":
-        warnings.warn(message, RuntimeWarning, stacklevel=2)
+        warnings.warn(message, RuntimeWarning, stacklevel=3)
 
 
 def _to_config(data: Mapping[str, object]) -> PolicyConfig:
@@ -89,27 +270,58 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         normal_statuses=[int(item) for item in data["normal_statuses"]],  # type: ignore[index]
         school_statuses=[int(item) for item in data["school_statuses"]],  # type: ignore[index]
         join_keys=[str(item) for item in data["join_keys"]],  # type: ignore[index]
-        ranking=[str(item) for item in data["ranking"]],  # type: ignore[index]
+        ranking_rules=[_to_ranking_rule(item) for item in data["ranking_rules"]],
+        trace_stages=[_to_trace_stage(item) for item in data["trace_stages"]],
     )
+
+
+def _to_ranking_rule(item: Mapping[str, object]) -> RankingRule:
+    return RankingRule(
+        name=str(item["name"]),
+        column=str(item["column"]),
+        ascending=bool(item.get("ascending", True)),
+    )
+
+
+def _to_trace_stage(item: Mapping[str, object]) -> TraceStageDefinition:
+    return TraceStageDefinition(stage=str(item["stage"]), column=str(item["column"]))
 
 
 def parse_policy_dict(
     data: Mapping[str, object],
-    expected_version: Optional[str] = None,
+    expected_version: Optional[str] = DEFAULT_POLICY_VERSION,
     on_version_mismatch: VersionMismatchMode = "raise",
 ) -> PolicyConfig:
     """مسیر خالص برای تبدیل dict به :class:`PolicyConfig`."""
 
-    _validate_policy_dict(data)
-    _version_gate(str(data["version"]), expected_version, on_version_mismatch)
-    return _to_config(data)
+    normalized = _normalize_policy_payload(data)
+    config = _to_config(normalized)
+    _version_gate(config.version, expected_version, on_version_mismatch)
+    return config
 
 
 @lru_cache(maxsize=8)
+def _load_policy_cached(
+    resolved_path: str,
+    raw: str,
+    mtime_ns: int,
+    expected_version: Optional[str],
+    on_version_mismatch: VersionMismatchMode,
+) -> PolicyConfig:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in policy file: {resolved_path}") from exc
+    normalized = _normalize_policy_payload(data)
+    config = _to_config(normalized)
+    _version_gate(config.version, expected_version, on_version_mismatch)
+    return config
+
+
 def load_policy(
     path: str | Path = "config/policy.json",
     *,
-    expected_version: Optional[str] = None,
+    expected_version: Optional[str] = DEFAULT_POLICY_VERSION,
     on_version_mismatch: VersionMismatchMode = "raise",
 ) -> PolicyConfig:
     """بارگذاری سیاست از فایل JSON و بازگشت ساختار کش‌شونده."""
@@ -121,12 +333,19 @@ def load_policy(
         raise FileNotFoundError(f"Policy file not found: {policy_path}") from exc
 
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON in policy file: {policy_path}") from exc
+        mtime_ns = policy_path.stat().st_mtime_ns
+    except FileNotFoundError as exc:  # pragma: no cover - race condition guard
+        raise FileNotFoundError(f"Policy file not found: {policy_path}") from exc
 
-    return parse_policy_dict(
-        data,
-        expected_version=expected_version,
-        on_version_mismatch=on_version_mismatch,
+    resolved = str(policy_path.resolve())
+    return _load_policy_cached(
+        resolved,
+        raw,
+        mtime_ns,
+        expected_version,
+        on_version_mismatch,
     )
+
+
+load_policy.cache_clear = _load_policy_cached.cache_clear  # type: ignore[attr-defined]
+load_policy.cache_info = _load_policy_cached.cache_info  # type: ignore[attr-defined]

@@ -29,7 +29,21 @@ def test_policy_join_keys_must_have_six_entries(tmp_path: Path) -> None:
         "normal_statuses": [1, 0],
         "school_statuses": [1],
         "join_keys": ["a", "b", "c", "d", "e"],
-        "ranking": ["min_occupancy_ratio", "min_allocations_new", "min_mentor_id"],
+        "ranking_rules": [
+            {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
+            {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
+            {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
+        ],
+        "trace_stages": [
+            {"stage": "type", "column": "کدرشته"},
+            {"stage": "group", "column": "گروه آزمایشی"},
+            {"stage": "gender", "column": "جنسیت"},
+            {"stage": "graduation_status", "column": "دانش آموز فارغ"},
+            {"stage": "center", "column": "مرکز گلستان صدرا"},
+            {"stage": "finance", "column": "مالی حکمت بنیاد"},
+            {"stage": "school", "column": "کد مدرسه"},
+            {"stage": "capacity_gate", "column": "remaining_capacity"},
+        ],
     }
     policy_path = _write_policy(tmp_path, bad_policy)
     with pytest.raises(ValueError):

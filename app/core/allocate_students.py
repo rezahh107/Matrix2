@@ -57,7 +57,12 @@ from .common.filters import apply_join_filters
 from .common.ids import build_mentor_id_map, inject_mentor_id
 from .common.ranking import apply_ranking_policy
 from .common.trace import TraceStagePlan, build_allocation_trace, build_trace_plan
-from .common.types import AllocationLogRecord, StudentRow, TraceStageRecord
+from .common.types import (
+    AllocationLogRecord,
+    JoinKeyValues,
+    StudentRow,
+    TraceStageRecord,
+)
 from .policy_loader import PolicyConfig, load_policy
 
 ProgressFn = Callable[[int, str], None]
@@ -102,21 +107,20 @@ def _int_value(student: Mapping[str, object], column: str) -> int:
     return int(float(text))
 
 
-def _build_log_base(student: Mapping[str, object]) -> AllocationLogRecord:
+def _build_log_base(student: Mapping[str, object], policy: PolicyConfig) -> AllocationLogRecord:
+    join_key_values = JoinKeyValues(
+        {
+            column.replace(" ", "_"): _int_value(student, column)
+            for column in policy.join_keys
+        }
+    )
     log: AllocationLogRecord = {
         "row_index": -1,
         "student_id": str(student.get("student_id", "")),
         "mentor_selected": None,
         "mentor_id": None,
         "occupancy_ratio": None,
-        "join_keys": {
-            "کدرشته": _int_value(student, "کدرشته"),
-            "جنسیت": _int_value(student, "جنسیت"),
-            "دانش_آموز_فارغ": _int_value(student, "دانش آموز فارغ"),
-            "مرکز_گلستان_صدرا": _int_value(student, "مرکز گلستان صدرا"),
-            "مالی_حکمت_بنیاد": _int_value(student, "مالی حکمت بنیاد"),
-            "کد_مدرسه": _int_value(student, "کد مدرسه"),
-        },
+        "join_keys": join_key_values,
         "candidate_count": 0,
         "selection_reason": None,
         "tie_breakers": {},
@@ -144,7 +148,7 @@ def allocate_student(
         trace_plan = build_trace_plan(policy, capacity_column=capacity_column)
 
     progress(5, "prefilter")
-    eligible_after_join = apply_join_filters(candidate_pool, student)
+    eligible_after_join = apply_join_filters(candidate_pool, student, policy=policy)
     trace = build_allocation_trace(
         student,
         candidate_pool,
@@ -154,7 +158,7 @@ def allocate_student(
     )
 
     if eligible_after_join.empty:
-        log = _build_log_base(student)
+        log = _build_log_base(student, policy)
         log.update(
             {
                 "allocation_status": "failed",
@@ -170,7 +174,7 @@ def allocate_student(
     capacity_filtered = eligible_after_join.loc[capacity_mask]
 
     if capacity_filtered.empty:
-        log = _build_log_base(student)
+        log = _build_log_base(student, policy)
         log.update(
             {
                 "allocation_status": "failed",
@@ -186,7 +190,7 @@ def allocate_student(
     ranked = apply_ranking_policy(capacity_filtered, policy=policy)
     top_row = ranked.iloc[0]
 
-    log = _build_log_base(student)
+    log = _build_log_base(student, policy)
     log.update(
         {
             "row_index": int(top_row.name) if hasattr(top_row, "name") else 0,

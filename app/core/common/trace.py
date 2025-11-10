@@ -34,7 +34,8 @@ from .types import StudentRow, TraceStageLiteral, TraceStageRecord
 
 __all__ = ["TraceStagePlan", "build_trace_plan", "build_allocation_trace"]
 
-_DEFAULT_TRACE_NAMES: tuple[TraceStageLiteral, ...] = (
+
+_CANONICAL_TRACE_ORDER: tuple[TraceStageLiteral, ...] = (
     "type",
     "group",
     "gender",
@@ -44,16 +45,6 @@ _DEFAULT_TRACE_NAMES: tuple[TraceStageLiteral, ...] = (
     "school",
     "capacity_gate",
 )
-
-_STAGE_HINTS = {
-    "type": "کدرشته",
-    "group": "گروه آزمایشی",
-    "gender": "جنسیت",
-    "graduation_status": "دانش آموز فارغ",
-    "center": "مرکز گلستان صدرا",
-    "finance": "مالی حکمت بنیاد",
-    "school": "کد مدرسه",
-}
 
 
 @dataclass(frozen=True)
@@ -84,25 +75,19 @@ def build_trace_plan(
 ) -> List[TraceStagePlan]:
     """ساخت برنامهٔ پیش‌فرض مراحل تریس از روی Policy."""
 
-    remaining = list(policy.join_keys)
-    assigned: set[str] = set()
+    if policy.trace_stage_names != _CANONICAL_TRACE_ORDER:
+        raise ValueError(
+            "Policy trace stages must match the canonical 8-stage order",
+        )
 
     plan: List[TraceStagePlan] = []
-    for stage in _DEFAULT_TRACE_NAMES[:-1]:
-        hint = _STAGE_HINTS.get(stage)
-        column = None
-        if hint and hint not in assigned:
-            column = hint
-            if hint in remaining:
-                remaining.remove(hint)
-        elif remaining:
-            column = remaining.pop(0)
-        else:
-            raise ValueError("Not enough columns to build trace plan")
-        assigned.add(column)
-        plan.append(TraceStagePlan(stage=stage, column=column))
-
-    plan.append(TraceStagePlan(stage="capacity_gate", column=capacity_column))
+    for definition in policy.trace_stages:
+        column = (
+            capacity_column
+            if definition.stage == "capacity_gate"
+            else definition.column
+        )
+        plan.append(TraceStagePlan(stage=definition.stage, column=column))
     return plan
 
 

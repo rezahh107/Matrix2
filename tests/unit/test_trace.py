@@ -9,28 +9,45 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.common.trace import build_allocation_trace, build_trace_plan
-from app.core.policy_loader import PolicyConfig
+from app.core.policy_loader import (
+    PolicyConfig,
+    RankingRule,
+    TraceStageDefinition,
+    parse_policy_dict,
+)
 
 
 @pytest.fixture()
 def policy_config() -> PolicyConfig:
-    return PolicyConfig(
-        version="1.0.3",
-        normal_statuses=[1, 0],
-        school_statuses=[1],
-        join_keys=[
-            "کدرشته",
-            "جنسیت",
-            "دانش آموز فارغ",
-            "مرکز گلستان صدرا",
-            "مالی حکمت بنیاد",
-            "کد مدرسه",
-        ],
-        ranking=[
-            "min_occupancy_ratio",
-            "min_allocations_new",
-            "min_mentor_id",
-        ],
+    return parse_policy_dict(
+        {
+            "version": "1.0.3",
+            "normal_statuses": [1, 0],
+            "school_statuses": [1],
+            "join_keys": [
+                "کدرشته",
+                "جنسیت",
+                "دانش آموز فارغ",
+                "مرکز گلستان صدرا",
+                "مالی حکمت بنیاد",
+                "کد مدرسه",
+            ],
+            "ranking_rules": [
+                {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
+                {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
+                {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
+            ],
+            "trace_stages": [
+                {"stage": "type", "column": "کدرشته"},
+                {"stage": "group", "column": "گروه آزمایشی"},
+                {"stage": "gender", "column": "جنسیت"},
+                {"stage": "graduation_status", "column": "دانش آموز فارغ"},
+                {"stage": "center", "column": "مرکز گلستان صدرا"},
+                {"stage": "finance", "column": "مالی حکمت بنیاد"},
+                {"stage": "school", "column": "کد مدرسه"},
+                {"stage": "capacity_gate", "column": "remaining_capacity"},
+            ],
+        }
     )
 
 
@@ -70,6 +87,7 @@ def test_build_trace_plan_prefers_policy_columns(policy_config: PolicyConfig) ->
 
     assert stages[-1] == "capacity_gate"
     assert columns[:3] == ["کدرشته", "گروه آزمایشی", "جنسیت"]
+    assert columns[-1] == "remaining_capacity"
 
 
 def test_build_allocation_trace_counts_down(policy_config: PolicyConfig) -> None:
@@ -102,3 +120,37 @@ def test_capacity_gate_handles_no_capacity(policy_config: PolicyConfig) -> None:
 
     assert trace[-1]["total_after"] == 0
     assert trace[-1]["matched"] is False
+
+
+def test_build_trace_plan_rejects_noncanonical_order() -> None:
+    config = PolicyConfig(
+        version="1.0.3",
+        normal_statuses=[1, 0],
+        school_statuses=[1],
+        join_keys=[
+            "کدرشته",
+            "جنسیت",
+            "دانش آموز فارغ",
+            "مرکز گلستان صدرا",
+            "مالی حکمت بنیاد",
+            "کد مدرسه",
+        ],
+        ranking_rules=[
+            RankingRule(name="min_occupancy_ratio", column="occupancy_ratio", ascending=True),
+            RankingRule(name="min_allocations_new", column="allocations_new", ascending=True),
+            RankingRule(name="min_mentor_id", column="mentor_sort_key", ascending=True),
+        ],
+        trace_stages=[
+            TraceStageDefinition(stage="type", column="کدرشته"),
+            TraceStageDefinition(stage="gender", column="جنسیت"),
+            TraceStageDefinition(stage="group", column="گروه آزمایشی"),
+            TraceStageDefinition(stage="graduation_status", column="دانش آموز فارغ"),
+            TraceStageDefinition(stage="center", column="مرکز گلستان صدرا"),
+            TraceStageDefinition(stage="finance", column="مالی حکمت بنیاد"),
+            TraceStageDefinition(stage="school", column="کد مدرسه"),
+            TraceStageDefinition(stage="capacity_gate", column="remaining_capacity"),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="canonical 8-stage order"):
+        build_trace_plan(config)

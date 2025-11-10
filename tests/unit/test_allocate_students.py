@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.allocate_students import allocate_batch
+from app.core.common.types import JoinKeyValues
 
 
 @pytest.fixture()
@@ -85,6 +86,49 @@ def test_allocate_batch_progress_reports_start_and_end(_base_pool: pd.DataFrame)
     assert progress_calls[0][1] == "start"
     assert any(pct == 100 for pct, _ in progress_calls)
     assert progress_calls[-1][1] == "done"
+
+
+def test_join_key_values_validates_length() -> None:
+    with pytest.raises(ValueError):
+        JoinKeyValues({"a": 1, "b": 2, "c": 3, "d": 4, "e": 5})
+
+
+def test_join_key_values_rejects_non_int() -> None:
+    with pytest.raises(TypeError):
+        JoinKeyValues(
+            {
+                "a": 1,
+                "b": 2,
+                "c": "oops",
+                "d": 4,
+                "e": 5,
+                "f": 6,
+            }
+        )
+
+
+def test_allocate_batch_join_keys_are_typed(_base_pool: pd.DataFrame) -> None:
+    students = _single_student()
+
+    _, _, logs, _ = allocate_batch(students, _base_pool)
+
+    join_values = logs.iloc[0]["join_keys"]
+    assert isinstance(join_values, JoinKeyValues)
+    assert list(join_values.keys()) == [
+        "کدرشته",
+        "جنسیت",
+        "دانش_آموز_فارغ",
+        "مرکز_گلستان_صدرا",
+        "مالی_حکمت_بنیاد",
+        "کد_مدرسه",
+    ]
+
+
+def test_allocate_batch_invalid_join_value_raises(_base_pool: pd.DataFrame) -> None:
+    students = _single_student(**{"کدرشته": ""})
+
+    with pytest.raises(ValueError):
+        allocate_batch(students, _base_pool)
 
 
 @pytest.mark.skipif(importlib.util.find_spec("openpyxl") is None, reason="openpyxl لازم است")
