@@ -745,8 +745,12 @@ def _explode_rows(
     df["دانش آموز فارغ"] = pd.to_numeric(df["status_code"], errors="coerce").astype("Int64")
     df["جنسیت"] = df["جنسیت"].where(df["جنسیت"].notna(), pd.NA)
     df["دانش آموز فارغ"] = df["دانش آموز فارغ"].where(df["دانش آموز فارغ"].notna(), pd.NA)
-    df["جنسیت2"] = df["جنسیت"].apply(lambda v: gender_text(v) if v != "" else "")
-    df["دانش آموز فارغ2"] = df["دانش آموز فارغ"].apply(lambda v: status_text(v) if v != "" else "")
+    df["جنسیت2"] = df["جنسیت"].map(
+        lambda v: gender_text(v) if pd.notna(v) and v != "" else ""
+    )
+    df["دانش آموز فارغ2"] = df["دانش آموز فارغ"].map(
+        lambda v: status_text(v) if pd.notna(v) and v != "" else ""
+    )
     df["مرکز گلستان صدرا3"] = df["center_text"]
 
     df = df.drop(columns=["gender_code", "status_code", "center_text"])
