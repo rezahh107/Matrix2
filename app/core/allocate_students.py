@@ -53,6 +53,7 @@ from typing import Callable, List, Mapping, Sequence
 
 import pandas as pd
 
+from .common.column_normalizer import normalize_input_columns
 from .common.filters import apply_join_filters
 from .common.ids import build_mentor_id_map, inject_mentor_id
 from .common.ranking import apply_ranking_policy
@@ -218,6 +219,13 @@ def allocate_batch(
 
     if policy is None:
         policy = load_policy()
+
+    students, _ = normalize_input_columns(
+        students, kind="StudentReport", include_alias=False, report=False
+    )
+    candidate_pool, _ = normalize_input_columns(
+        candidate_pool, kind="MentorPool", include_alias=False, report=False
+    )
 
     progress(0, "start")
     pool = candidate_pool.copy()

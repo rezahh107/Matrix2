@@ -24,6 +24,7 @@ from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple
 import numpy as np
 import pandas as pd
 
+from .common.column_normalizer import normalize_input_columns
 # =============================================================================
 # CONSTANTS
 # =============================================================================
@@ -925,6 +926,9 @@ def build_matrix(
     Returns:
         شش‌تایی دیتافریم شامل ماتریس و جداول کنترلی.
     """
+    insp_df, _ = normalize_input_columns(insp_df, kind="InspactorReport")
+    schools_df, _ = normalize_input_columns(schools_df, kind="SchoolReport")
+
     progress(5, "preparing crosswalk mappings")
     name_to_code, code_to_name, buckets, synonyms = prepare_crosswalk_mappings(
         crosswalk_groups_df,
@@ -1120,6 +1124,8 @@ def validate_with_students(
     students_gender_mode: str = "auto",
     students_source_hint: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
+    students_df, _ = normalize_input_columns(students_df, kind="StudentReport", report=False)
+    schools_df, _ = normalize_input_columns(schools_df, kind="SchoolReport", report=False)
     stud_raw = students_df.copy()
     schools = schools_df.copy()
     _, school_name_to_code = build_school_maps(schools)
