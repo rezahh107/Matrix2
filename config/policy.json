@@ -30,7 +30,7 @@
   ],
   "trace_stages": [
     {"stage": "type", "column": "کدرشته"},
-    {"stage": "group", "column": "گروه آزمایشی"},
+    {"stage": "group", "column": "کدرشته"},
     {"stage": "gender", "column": "جنسیت"},
     {"stage": "graduation_status", "column": "دانش آموز فارغ"},
     {"stage": "center", "column": "مرکز گلستان صدرا"},
@@ -56,7 +56,9 @@
       "major_code": "کدرشته"
     },
     "inspactor": {
-      "کد گروه آزمایشی": "کدرشته"
+      "کد گروه آزمایشی": "کدرشته",
+      "گروه آزمایشی": "کدرشته",
+      "گروه آزمایشی ": "گروه آزمایشی"
     },
     "school": {
       "کد مدرسه": "کد مدرسه",
