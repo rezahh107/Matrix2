@@ -207,8 +207,24 @@ def accepted_synonyms(source: Source, canonical_fa: str) -> Sequence[str]:
     target_en = CANON_FA_TO_EN.get(normalized_key)
     if target_en is None:
         return ()
-    synonyms = bundle.report_map.get(CANON_EN_TO_FA[target_en], [])
-    return tuple(dict.fromkeys(synonyms))
+
+    canonical_name = CANON_EN_TO_FA[target_en]
+    synonyms = list(bundle.report_map.get(canonical_name, []))
+    synonyms.append(canonical_name)
+
+    # نسخه‌های انگلیسی (با و بدون زیرخط) برای پیام خطا
+    english_name = target_en
+    synonyms.append(english_name)
+    english_spaced = english_name.replace("_", " ")
+    if english_spaced != english_name:
+        synonyms.append(english_spaced)
+
+    # نسخهٔ حاوی زیرخط برای معادل فارسی (مانند «کد_مدرسه»)
+    persian_underscored = canonical_name.replace(" ", "_")
+    if persian_underscored != canonical_name:
+        synonyms.append(persian_underscored)
+
+    return tuple(dict.fromkeys(filter(None, synonyms)))
 
 
 def _match_column(df: pd.DataFrame, *, canonical_en: str, bundle: _AliasBundle) -> str | None:
