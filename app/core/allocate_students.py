@@ -67,6 +67,7 @@ from .common.types import (
     TraceStageRecord,
 )
 from .common.normalization import safe_int_value, to_numlike_str
+from .policy_adapter import policy as policy_adapter
 from .policy_loader import PolicyConfig, load_policy
 
 ProgressFn = Callable[[int, str], None]
@@ -79,11 +80,13 @@ __all__ = [
 ]
 
 
-REQUIRED_STUDENT_COLUMNS = {
-    CANON["group_code"],
-    CANON["gender"],
-    CANON["graduation_status"],
-}
+def _student_required_columns() -> frozenset[str]:
+    columns = set(policy_adapter.required_student_fields())
+    columns.update(policy_adapter.config.join_keys)
+    return frozenset(columns)
+
+
+REQUIRED_STUDENT_COLUMNS = _student_required_columns()
 REQUIRED_POOL_BASE_COLUMNS = {CANON["mentor_id"]}
 
 
@@ -158,21 +161,31 @@ def _require_columns(df: pd.DataFrame, required: Collection[str], source: str) -
     raise ValueError(f"Missing columns: {missing} — accepted synonyms: {accepted}")
 
 
+def _resolve_capacity_column(policy: PolicyConfig, override: str | None) -> str:
+    if override:
+        return override
+    column = policy_adapter.stage_column("capacity_gate")
+    if column:
+        return column
+    return policy.columns.remaining_capacity
+
+
 def allocate_student(
     student: StudentRow | Mapping[str, object],
     candidate_pool: pd.DataFrame,
     *,
     policy: PolicyConfig | None = None,
     progress: ProgressFn = _noop_progress,
-    capacity_column: str = "remaining_capacity",
+    capacity_column: str | None = None,
     trace_plan: Sequence[TraceStagePlan] | None = None,
 ) -> AllocationResult:
     """تخصیص یک دانش‌آموز براساس ۷ فیلتر، ظرفیت و رتبه‌بندی سیاست."""
 
     if policy is None:
         policy = load_policy()
+    resolved_capacity_column = _resolve_capacity_column(policy, capacity_column)
     if trace_plan is None:
-        trace_plan = build_trace_plan(policy, capacity_column=capacity_column)
+        trace_plan = build_trace_plan(policy, capacity_column=resolved_capacity_column)
 
     progress(5, "prefilter")
     eligible_after_join = apply_join_filters(candidate_pool, student, policy=policy)
@@ -181,7 +194,7 @@ def allocate_student(
         candidate_pool,
         policy=policy,
         stage_plan=trace_plan,
-        capacity_column=capacity_column,
+        capacity_column=resolved_capacity_column,
     )
 
     if eligible_after_join.empty:
@@ -197,7 +210,7 @@ def allocate_student(
         return AllocationResult(None, trace, log)
 
     progress(25, "capacity")
-    capacity_mask = eligible_after_join[capacity_column] > 0
+    capacity_mask = eligible_after_join[resolved_capacity_column] > 0
     capacity_filtered = eligible_after_join.loc[capacity_mask]
 
     if capacity_filtered.empty:
@@ -239,12 +252,13 @@ def allocate_batch(
     *,
     policy: PolicyConfig | None = None,
     progress: ProgressFn = _noop_progress,
-    capacity_column: str = "remaining_capacity",
+    capacity_column: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """تخصیص دسته‌ای با خروجی چهارگانه (allocations, pool, logs, trace)."""
 
     if policy is None:
         policy = load_policy()
+    resolved_capacity_column = _resolve_capacity_column(policy, capacity_column)
 
     students = resolve_aliases(students, "report")
     students = coerce_semantics(students, "report")
@@ -260,17 +274,17 @@ def allocate_batch(
     )
     required_pool_columns = set(policy.join_keys) | REQUIRED_POOL_BASE_COLUMNS
     _require_columns(candidate_pool, required_pool_columns, "inspactor")
-    if capacity_column not in candidate_pool.columns:
-        raise KeyError(f"Missing capacity column '{capacity_column}'")
+    if resolved_capacity_column not in candidate_pool.columns:
+        raise KeyError(f"Missing capacity column '{resolved_capacity_column}'")
 
     progress(0, "start")
     pool = candidate_pool.copy()
-    original_capacity_dtype = pool[capacity_column].dtype
-    converted_capacity = pool[capacity_column].map(lambda v: safe_int_value(v, default=0))
+    original_capacity_dtype = pool[resolved_capacity_column].dtype
+    converted_capacity = pool[resolved_capacity_column].map(lambda v: safe_int_value(v, default=0))
     if pd_types.is_integer_dtype(original_capacity_dtype):
-        pool[capacity_column] = converted_capacity.astype(original_capacity_dtype)
+        pool[resolved_capacity_column] = converted_capacity.astype(original_capacity_dtype)
     else:
-        pool[capacity_column] = converted_capacity.astype("Int64")
+        pool[resolved_capacity_column] = converted_capacity.astype("Int64")
     mentor_col = CANON["mentor_id"]
     pool[mentor_col] = (
         pool[mentor_col].astype("string").str.strip().fillna("").astype(object)
@@ -283,7 +297,7 @@ def allocate_batch(
     trace_rows: list[Mapping[str, object]] = []
 
     total = max(int(students.shape[0]), 1)
-    trace_plan = build_trace_plan(policy, capacity_column=capacity_column)
+    trace_plan = build_trace_plan(policy, capacity_column=resolved_capacity_column)
 
     for idx, (_, student_row) in enumerate(students.iterrows(), start=1):
         student_dict = student_row.to_dict()
@@ -295,7 +309,7 @@ def allocate_batch(
             pool,
             policy=policy,
             progress=_noop_progress,
-            capacity_column=capacity_column,
+            capacity_column=resolved_capacity_column,
             trace_plan=trace_plan,
         )
         logs.append(result.log)
@@ -306,10 +320,10 @@ def allocate_batch(
             mentor_index = result.mentor_row.name
             if mentor_index in pool.index:
                 previous_capacity = safe_int_value(
-                    pool.loc[mentor_index, capacity_column], default=0
+                    pool.loc[mentor_index, resolved_capacity_column], default=0
                 )
                 updated_capacity = max(previous_capacity - 1, 0)
-                pool.loc[mentor_index, capacity_column] = updated_capacity
+                pool.loc[mentor_index, resolved_capacity_column] = updated_capacity
                 logs[-1]["capacity_before"] = previous_capacity
                 logs[-1]["capacity_after"] = updated_capacity
             allocations.append(

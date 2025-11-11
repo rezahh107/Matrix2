@@ -23,6 +23,15 @@
     "مالی حکمت بنیاد",
     "کد مدرسه"
   ],
+  "required_student_fields": [
+    "کدرشته",
+    "گروه آزمایشی",
+    "جنسیت",
+    "دانش آموز فارغ",
+    "مرکز گلستان صدرا",
+    "مالی حکمت بنیاد",
+    "کد مدرسه"
+  ],
   "ranking_rules": [
     {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": true},
     {"name": "min_allocations_new", "column": "allocations_new", "ascending": true},
@@ -52,6 +61,7 @@
       "مرکز ثبت نام": "مرکز گلستان صدرا",
       "کد رشته": "کدرشته",
       "گروه آزمایشی": "کدرشته",
+      "گروه_آزمایشی": "گروه آزمایشی",
       "group_code": "کدرشته",
       "major_code": "کدرشته"
     },
