@@ -99,7 +99,7 @@ class SessionContextFilter(logging.Filter):
         record.user = getattr(record, "user", self._context.user)
         record.application = getattr(record, "application", self._context.application)
         record.app_version = getattr(record, "app_version", self._context.version)
-        record.error_id = getattr(record, "error_id", self._context.session_id)
+        record.error_id = getattr(record, "error_id", "")
         record.report_path = getattr(record, "report_path", "")
         return True
 
@@ -114,7 +114,30 @@ def _attach_filter(target: logging.Logger, filter_obj: logging.Filter) -> None:
             handler.addFilter(filter_obj)
 
 
-def setup_logging(config_path: str | Path = DEFAULT_LOGGING_CONFIG) -> None:
+def _apply_log_dir_override(config: dict[str, Any], log_directory: Path) -> None:
+    """به‌روزرسانی مسیر handlerهای فایل بر اساس log_dir سفارشی."""
+
+    handlers = config.get("handlers", {})
+    if not isinstance(handlers, dict):
+        return
+
+    for handler_cfg in handlers.values():
+        if not isinstance(handler_cfg, dict):
+            continue
+        filename = handler_cfg.get("filename")
+        if not filename:
+            continue
+        filename_path = Path(str(filename))
+        if filename_path.is_absolute():
+            handler_cfg["filename"] = str(filename_path)
+            continue
+        handler_cfg["filename"] = str((log_directory / filename_path.name).resolve())
+
+
+def setup_logging(
+    config_path: str | Path = DEFAULT_LOGGING_CONFIG,
+    log_dir: str | Path | None = None,
+) -> None:
     """بارگذاری پیکربندی logging از فایل YAML و اعمال آن.
 
     مثال::
@@ -123,6 +146,7 @@ def setup_logging(config_path: str | Path = DEFAULT_LOGGING_CONFIG) -> None:
 
     Args:
         config_path: مسیر فایل پیکربندی YAML.
+        log_dir: مسیر دلخواه برای نگهداری فایل‌های لاگ.
 
     Raises:
         FileNotFoundError: اگر فایل پیکربندی وجود نداشته باشد.
@@ -139,6 +163,10 @@ def setup_logging(config_path: str | Path = DEFAULT_LOGGING_CONFIG) -> None:
     if not isinstance(data, dict):
         raise ValueError("logging config must be a mapping")
 
+    log_directory = Path(log_dir).expanduser().resolve() if log_dir else None
+    if log_directory:
+        _apply_log_dir_override(data, log_directory)
+
     handlers = data.get("handlers", {})
     if isinstance(handlers, dict):
         for handler_cfg in handlers.values():
@@ -148,7 +176,11 @@ def setup_logging(config_path: str | Path = DEFAULT_LOGGING_CONFIG) -> None:
             if "FileHandler" in cls_name:
                 filename = handler_cfg.get("filename")
                 if filename:
-                    Path(filename).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+                    file_path = Path(str(filename)).expanduser()
+                    if not file_path.is_absolute():
+                        file_path = file_path.resolve()
+                    handler_cfg["filename"] = str(file_path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
 
     logging.config.dictConfig(data)
 
@@ -174,10 +206,9 @@ def configure_logging(
         LoggingContext: کانتکست نشست فعلی برای تولید گزارش خطا.
     """
 
-    setup_logging(config_path)
-
-    log_directory = Path(log_dir) if log_dir else Path("logs")
+    log_directory = Path(log_dir).expanduser().resolve() if log_dir else Path("logs").resolve()
     log_directory.mkdir(parents=True, exist_ok=True)
+    setup_logging(config_path, log_directory)
     error_directory = log_directory / "errors"
     error_directory.mkdir(parents=True, exist_ok=True)
 
@@ -246,7 +277,7 @@ def install_exception_hook(logger: logging.Logger, context: LoggingContext) -> C
         previous_sys_hook(exc_type, exc_value, exc_tb)
 
     def handle_thread_exception(args: threading.ExceptHookArgs) -> None:
-        thread_name = getattr(args.thread, "name", "thread") if getattr(args, "thread", None) else "thread"
+        thread_name = getattr(getattr(args, "thread", None), "name", "thread")
         _log_exception(args.exc_type, args.exc_value, args.exc_traceback, source=f"{thread_name}")
         if previous_thread_hook:
             previous_thread_hook(args)
