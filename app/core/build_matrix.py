@@ -25,7 +25,7 @@ from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple, TypeV
 import numpy as np
 import pandas as pd
 
-from app.core.common.columns import accepted_synonyms, coerce_semantics, resolve_aliases
+from app.core.common.columns import coerce_semantics, ensure_required_columns, resolve_aliases
 from app.core.common.column_normalizer import normalize_input_columns
 from app.core.common.domain import (
     BuildConfig as DomainBuildConfig,
@@ -426,19 +426,6 @@ def center_text(code: int) -> str:
 # =============================================================================
 # CROSSWALK
 # =============================================================================
-def _require_columns(df: pd.DataFrame, required: Collection[str], source: str) -> None:
-    missing = [col for col in required if col not in df.columns]
-    if not missing:
-        return
-    accepted: Dict[str, List[str]] = {}
-    for col in missing:
-        synonyms = list(accepted_synonyms(source, col))
-        if col not in synonyms:
-            synonyms.insert(0, col)
-        accepted[col] = synonyms
-    raise ValueError(f"Missing columns: {missing} — accepted synonyms: {accepted}")
-
-
 def _validate_finance_invariants(matrix: pd.DataFrame, *, cfg: BuildConfig, finance_col: str) -> None:
     if finance_col not in matrix.columns:
         return
@@ -608,7 +595,7 @@ def expand_group_token(
 # SCHOOL MAPPINGS
 # =============================================================================
 def build_school_maps(schools_df: pd.DataFrame) -> tuple[dict[str, str], dict[str, str]]:
-    _require_columns(schools_df, {COL_SCHOOL_CODE}, "school")
+    schools_df = ensure_required_columns(schools_df, {COL_SCHOOL_CODE}, "school")
     name_cols = [c for c in schools_df.columns if "نام مدرسه" in c]
     if not name_cols:
         raise ValueError("ستون نام مدرسه در SchoolReport یافت نشد")
@@ -1246,11 +1233,11 @@ def build_matrix(
     """
     insp_df = resolve_aliases(insp_df, "inspactor")
     insp_df = coerce_semantics(insp_df, "inspactor")
-    _require_columns(insp_df, REQUIRED_INSPACTOR_COLUMNS, "inspactor")
+    insp_df = ensure_required_columns(insp_df, REQUIRED_INSPACTOR_COLUMNS, "inspactor")
     insp_df, _ = normalize_input_columns(insp_df, kind="InspactorReport")
     schools_df = resolve_aliases(schools_df, "school")
     schools_df = coerce_semantics(schools_df, "school")
-    _require_columns(schools_df, REQUIRED_SCHOOL_COLUMNS, "school")
+    schools_df = ensure_required_columns(schools_df, REQUIRED_SCHOOL_COLUMNS, "school")
     schools_df, _ = normalize_input_columns(schools_df, kind="SchoolReport")
 
     progress(5, "preparing crosswalk mappings")

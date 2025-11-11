@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Literal, Mapping, Sequence
+from typing import Collection, Dict, Iterable, List, Literal, Mapping, Sequence
 
 import pandas as pd
 
@@ -15,6 +15,7 @@ __all__ = [
     "CANON_FA_TO_EN",
     "CANON",
     "resolve_aliases",
+    "ensure_required_columns",
     "coerce_semantics",
     "canonicalize_headers",
     "collect_aliases_for",
@@ -344,6 +345,58 @@ def resolve_aliases(df: pd.DataFrame, source: Source) -> pd.DataFrame:
     result = df.rename(columns=rename_map, errors="ignore")
     result = result.loc[:, ~pd.Index(result.columns).duplicated(keep="first")]
     return result
+
+
+def ensure_required_columns(
+    df: pd.DataFrame,
+    required: Collection[str],
+    source: Source,
+) -> pd.DataFrame:
+    """تضمین حضور ستون‌های حیاتی با استفاده از سینونیم‌ها.
+
+    مثال ساده::
+
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({"school_code": [101]})
+        >>> ensured = ensure_required_columns(
+        ...     df,
+        ...     {CANON_EN_TO_FA["school_code"]},
+        ...     "inspactor",
+        ... )
+        >>> list(ensured.columns)
+        ['کد مدرسه']
+
+    Args:
+        df: دیتافریم ورودی که باید ستون‌های ضروری را داشته باشد.
+        required: فهرست ستون‌های فارسی که Policy اجبار کرده است.
+        source: نوع ورودی (report/inspactor/school) برای اعمال نگاشت صحیح.
+
+    Returns:
+        دیتافریم با نام‌گذاری استاندارد در صورت امکان. در صورت نقص ستون‌ها، خطا می‌دهد.
+    """
+
+    if not required:
+        return df
+
+    existing = set(map(str, df.columns))
+    missing = [column for column in required if column not in existing]
+    if not missing:
+        return df
+
+    resolved = resolve_aliases(df, source)
+    existing = set(map(str, resolved.columns))
+    missing = [column for column in required if column not in existing]
+    if not missing:
+        return resolved
+
+    accepted: Dict[str, Sequence[str]] = {}
+    for column in missing:
+        synonyms = list(accepted_synonyms(source, column))
+        if column not in synonyms:
+            synonyms.insert(0, column)
+        accepted[column] = tuple(dict.fromkeys(synonyms))
+
+    raise ValueError(f"Missing columns: {missing} — accepted synonyms: {accepted}")
 
 
 def coerce_semantics(df: pd.DataFrame, source: Source) -> pd.DataFrame:
