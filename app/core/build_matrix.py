@@ -17,7 +17,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
-from functools import lru_cache, wraps
+from functools import lru_cache
 from itertools import product
 from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple, TypeVar
 
@@ -416,20 +416,6 @@ def center_text(code: int) -> str:
 # =============================================================================
 # CROSSWALK
 # =============================================================================
-def validate_dataframe_columns(*required_cols: str):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(df: pd.DataFrame, *args, **kwargs):
-            missing = [c for c in required_cols if c not in df.columns]
-            if missing:
-                raise ValueError(f"Missing columns: {missing}")
-            return func(df, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
 def _require_columns(df: pd.DataFrame, required: Collection[str], source: str) -> None:
     missing = [col for col in required if col not in df.columns]
     if not missing:
@@ -611,8 +597,8 @@ def expand_group_token(
 # =============================================================================
 # SCHOOL MAPPINGS
 # =============================================================================
-@validate_dataframe_columns(COL_SCHOOL_CODE)
 def build_school_maps(schools_df: pd.DataFrame) -> tuple[dict[str, str], dict[str, str]]:
+    _require_columns(schools_df, {COL_SCHOOL_CODE}, "school")
     name_cols = [c for c in schools_df.columns if "نام مدرسه" in c]
     if not name_cols:
         raise ValueError("ستون نام مدرسه در SchoolReport یافت نشد")

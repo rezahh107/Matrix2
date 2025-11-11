@@ -15,6 +15,9 @@ from typing import Dict, Iterator, List, Tuple
 
 import pandas as pd
 
+from app.core.common.columns import CANON_EN_TO_FA, HeaderMode, canonicalize_headers
+from app.core.policy_loader import get_policy
+
 __all__ = [
     "write_xlsx_atomic",
     "read_excel_first_sheet",
@@ -24,6 +27,9 @@ __all__ = [
 ALT_CODE_COLUMN = "کد جایگزین"
 
 _INVALID_SHEET_CHARS = re.compile(r"[\\/*?:\[\]]")
+
+_STRING_EXPORT_KEYS: Tuple[str, ...] = ("alias", "mentor_id", "postal_code")
+_INT_EXPORT_KEYS: Tuple[str, ...] = ("group_code", "school_code")
 
 
 def _safe_sheet_name(name: str, taken: set[str]) -> str:
@@ -39,6 +45,24 @@ def _safe_sheet_name(name: str, taken: set[str]) -> str:
         index += 1
     taken.add(candidate)
     return candidate
+
+
+def _prepare_dataframe_for_excel(df: pd.DataFrame) -> pd.DataFrame:
+    """تضمین نوع دادهٔ مناسب برای خروجی Excel."""
+
+    result = df.copy()
+    for key in _STRING_EXPORT_KEYS:
+        fa_name = CANON_EN_TO_FA.get(key, key)
+        for column_name in (fa_name, key):
+            if column_name in result.columns:
+                result[column_name] = result[column_name].astype("string")
+    for key in _INT_EXPORT_KEYS:
+        fa_name = CANON_EN_TO_FA.get(key, key)
+        for column_name in (fa_name, key):
+            if column_name in result.columns:
+                numeric = pd.to_numeric(result[column_name], errors="coerce")
+                result[column_name] = numeric.astype("Int64")
+    return result
 
 
 def _apply_excel_formatting(
@@ -149,8 +173,9 @@ def write_xlsx_atomic(
     data_dict: Dict[str, pd.DataFrame],
     filepath: Path | str | PathLike[str],
     *,
-    rtl: bool = False,
-    font_name: str | None = "Vazirmatn",
+    rtl: bool | None = None,
+    font_name: str | None = None,
+    header_mode: HeaderMode | None = None,
 ) -> None:
     """نوشتن امن و اتمیک Excel با مدیریت نام شیت و انتخاب engine.
 
@@ -166,13 +191,21 @@ def write_xlsx_atomic(
         data_dict: نگاشت نام شیت به دیتافریم.
         filepath: مسیر فایل خروجی (``str``/``Path``). در صورت نبود پوشهٔ مقصد
             ساخته می‌شود.
-        rtl: در صورت True، شیت‌ها راست‌به‌چپ خواهند شد.
-        font_name: نام فونت پیش‌فرض برای نوشتن (در صورت ``None`` فونت پیش‌فرض
-            Excel استفاده می‌شود).
+        rtl: جهت نوشتن (در صورت ``None`` از policy استفاده می‌شود).
+        font_name: نام فونت (در صورت ``None`` از policy استفاده می‌شود).
+        header_mode: حالت نام‌گذاری هدرها (``fa``، ``en`` یا ``fa_en``). در صورت ``None``
+            مقدار policy اعمال می‌شود.
     """
 
     target_path = Path(filepath)
     target_path.parent.mkdir(parents=True, exist_ok=True)
+    policy = get_policy()
+    if rtl is None:
+        rtl = policy.excel.rtl
+    if font_name is None:
+        font_name = policy.excel.font_name
+    if header_mode is None:
+        header_mode = policy.excel.header_mode
     engine = _pick_engine()
     taken: set[str] = set()
     written_frames: Dict[str, pd.DataFrame] = {}
@@ -180,8 +213,11 @@ def write_xlsx_atomic(
         with pd.ExcelWriter(tmp_path, engine=engine) as writer:
             for sheet_name, df in data_dict.items():
                 safe_name = _safe_sheet_name(str(sheet_name), taken)
-                df.to_excel(writer, sheet_name=safe_name, index=False)
-                written_frames[safe_name] = df
+                prepared = _prepare_dataframe_for_excel(df)
+                if header_mode:
+                    prepared = canonicalize_headers(prepared, header_mode=header_mode)
+                prepared.to_excel(writer, sheet_name=safe_name, index=False)
+                written_frames[safe_name] = prepared
             _apply_excel_formatting(
                 writer,
                 engine=engine,

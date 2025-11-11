@@ -45,9 +45,26 @@
     "capacity_special": "تعداد تحت پوشش خاص",
     "remaining_capacity": "remaining_capacity"
   },
+  "column_aliases": {
+    "report": {
+      "وضعیت تحصیلی": "دانش آموز فارغ",
+      "مرکز ثبت نام": "مرکز گلستان صدرا",
+      "کد رشته": "کدرشته",
+      "گروه آزمایشی": "کدرشته",
+      "group_code": "کدرشته",
+      "major_code": "کدرشته"
+    },
+    "inspactor": {
+      "کد گروه آزمایشی": "کدرشته"
+    },
+    "school": {
+      "کد مدرسه": "کد مدرسه",
+      "نام مدرسه": "نام مدرسه"
+    }
+  },
   "excel": {
     "rtl": true,
     "font_name": "Vazirmatn",
-    "header_mode": "fa"
+    "header_mode": "fa_en"
   }
 }
