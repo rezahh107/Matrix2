@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum, auto
 from functools import lru_cache, wraps
 from itertools import product
-from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple
+from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -61,7 +61,6 @@ COL_GROUP_INCLUDED = "شامل گروه های آزمایشی"
 _RE_BIDI = re.compile("[\u200c-\u200f\u202a-\u202e]")
 _RE_NONWORD = re.compile(r"[^\w\u0600-\u06FF0-9\s]+", flags=re.UNICODE)
 _RE_WHITESPACE = re.compile(r"\s+")
-_RE_INT = re.compile(r"^[+-]?\d+$")
 _TRANS_PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
 _RE_SPLIT_ITEMS = re.compile(r"[,\u060C]\s*")
 _RE_RANGE = re.compile(r"^\s*(\d+)\s*[:\-–]\s*(\d+)\s*$")
@@ -144,16 +143,94 @@ def normalize_fa(text: Any) -> str:
     return _RE_WHITESPACE.sub(" ", s).strip().lower()
 
 
+_ZERO_WIDTH_CHARS = (
+    "\ufeff",
+    "\u200b",
+    "\u200c",
+    "\u200d",
+    "\u200e",
+    "\u200f",
+    "\u202a",
+    "\u202b",
+    "\u202c",
+    "\u202d",
+    "\u202e",
+    "\u2060",
+)
+_THOUSAND_SEPARATORS = {",", "\u066c", "\u060c", " ", "\u00a0", "\u202f", "_"}
+_RE_THOUSAND_GROUP = re.compile(r"^[+-]?\d{1,3}(,\d{3})*(\.\d+)?$")
+_DECIMAL_SEPARATORS = {ord("\u066b"): ".", ord("\u06d4"): "."}
+_DIGIT_TRANSLATIONS = {
+    **{ord("۰") + i: str(i) for i in range(10)},
+    **{ord("٠") + i: str(i) for i in range(10)},
+}
+_HYPHEN_TRANSLATIONS = {
+    ord("−"): "-",
+    ord("‐"): "-",
+    ord("‑"): "-",
+    ord("‒"): "-",
+    ord("–"): "-",
+    ord("—"): "-",
+    ord("―"): "-",
+}
+_NUMERIC_TRANSLATION_TABLE = {
+    **_DIGIT_TRANSLATIONS,
+    **_HYPHEN_TRANSLATIONS,
+    **_DECIMAL_SEPARATORS,
+    **{ord(ch): None for ch in _ZERO_WIDTH_CHARS},
+    **{ord(ch): None for ch in _THOUSAND_SEPARATORS},
+}
+
+_DefaultT = TypeVar("_DefaultT")
+
+
+def to_ascii_numeric(value: str) -> str:
+    """نرمال‌سازی اعداد به معادل ASCII با حذف جداکننده‌ها و علائم اضافی."""
+
+    if value is None:
+        return ""
+    normalized = unicodedata.normalize("NFKC", str(value))
+    translated = normalized.translate(_NUMERIC_TRANSLATION_TABLE)
+    return translated.strip()
+
+
+def parse_int_safe(x: Any, default: _DefaultT | None = None) -> int | _DefaultT | None:
+    raw = "" if x is None else str(x)
+    normalized = unicodedata.normalize("NFKC", raw)
+    normalized = normalized.translate(
+        {
+            **_DIGIT_TRANSLATIONS,
+            **_HYPHEN_TRANSLATIONS,
+            **_DECIMAL_SEPARATORS,
+            **{ord(ch): None for ch in _ZERO_WIDTH_CHARS},
+        }
+    ).strip()
+    if not normalized:
+        return default
+    if any(ch in _THOUSAND_SEPARATORS for ch in normalized):
+        collapsed = normalized.translate({ord(ch): "," for ch in _THOUSAND_SEPARATORS})
+        if not _RE_THOUSAND_GROUP.match(collapsed):
+            return default
+    s = to_ascii_numeric(normalized)
+    if not s:
+        return default
+    sign = 1
+    if s[0] in "+-":
+        sign = -1 if s[0] == "-" else 1
+        s = s[1:]
+    if not s or not s.isascii() or not s.isdigit():
+        return default
+    return sign * int(s)
+
+
 def _standardize_numeric_text(value: str) -> str:
     """یکسان‌سازی ارقام فارسی، جداکننده‌ها و علائم اعشاری."""
 
-    sanitized = value.strip()
+    sanitized = to_ascii_numeric(value)
     if not sanitized:
         return ""
-    sanitized = sanitized.translate(_TRANS_PERSIAN_DIGITS)
-    sanitized = sanitized.replace("،", ",")
-    sanitized = sanitized.replace(",", "")
     sanitized = sanitized.replace("٫", ".")
+    sanitized = sanitized.replace("٬", "")
     return sanitized
 
 
@@ -162,18 +239,15 @@ def _parse_int_from_text(text: str) -> int | None:
 
     if not text:
         return None
-    sign = ""
-    digits = text
-    if text[0] in {"+", "-"}:
-        sign, digits = text[0], text[1:]
-    if not digits:
-        return None
-    if _RE_INT.match(digits):
-        return int(f"{sign}{digits}")
+    parsed = parse_int_safe(text)
+    if parsed is not None:
+        return parsed
+    digits = text[1:] if text and text[0] in "+-" else text
     if "." in digits:
         integer_part, decimal_part = digits.split(".", 1)
         if integer_part and integer_part.isdigit() and (not decimal_part or set(decimal_part) <= {"0"}):
-            return int(f"{sign}{integer_part}")
+            sign = -1 if text and text[0] == "-" else 1
+            return sign * int(integer_part)
     return None
 
 
