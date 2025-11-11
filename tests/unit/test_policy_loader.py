@@ -68,7 +68,7 @@ def _valid_payload() -> dict[str, object]:
             "capacity_special": "تعداد تحت پوشش خاص",
             "remaining_capacity": "remaining_capacity",
         },
-        "excel": {"rtl": True, "font_name": "Vazirmatn", "header_mode": "fa"},
+            "excel": {"rtl": True, "font_name": "Vazirmatn", "header_mode": "fa_en"},
     }
 
 
@@ -203,7 +203,7 @@ def test_ranking_legacy_strings_supported() -> None:
 def test_excel_options_parsing() -> None:
     payload = _valid_payload()
     policy = parse_policy_dict(payload)
-    assert policy.excel.header_mode == "fa"
+    assert policy.excel.header_mode == "fa_en"
     assert policy.excel.rtl is True
     assert policy.excel.font_name == "Vazirmatn"
 

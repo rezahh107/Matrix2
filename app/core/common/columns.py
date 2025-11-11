@@ -1,16 +1,9 @@
-"""ابزار استانداردسازی ستون‌ها و تولید هدر دوزبانه برای منابع ورودی.
-
-این ماژول تمام منطق مرتبط با نگاشت نام ستون‌ها، همگرایی تایپ و
-تولید هدرهای خروجی دوزبانه را در یک نقطه نگه می‌دارد. منبع داده می‌تواند
-یکی از سه مقدار «report»، «inspactor» یا «school» باشد و تمام عملیات‌ها
-Case-insensitive و با تکیه بر :func:`normalize_fa` انجام می‌شود تا اختلافات
-کاراکتری (نیم‌فاصله، ارقام فارسی، حروف عربی) مدیریت شود.
-"""
+"""ابزار استانداردسازی ستون‌ها و اعمال اجباری سیاست ستون‌ها."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Mapping, Sequence
+from typing import Dict, Iterable, List, Literal, Mapping, Sequence
 
 import pandas as pd
 
@@ -21,9 +14,6 @@ __all__ = [
     "CANON_EN_TO_FA",
     "CANON_FA_TO_EN",
     "CANON",
-    "REPORT_SYNONYMS",
-    "INSPACTOR_SYNONYMS",
-    "SCHOOL_SYNONYMS",
     "resolve_aliases",
     "coerce_semantics",
     "canonicalize_headers",
@@ -36,7 +26,7 @@ HeaderMode = Literal["fa", "en", "fa_en"]
 
 
 # ---------------------------------------------------------------------------
-# Canonical dictionaries (EN ↔ FA)
+# Canonical headers (EN ↔ FA)
 # ---------------------------------------------------------------------------
 CANON_EN_TO_FA: Mapping[str, str] = {
     "group_code": "کدرشته",
@@ -66,67 +56,99 @@ CANON_EN_TO_FA: Mapping[str, str] = {
     "mentor_name": "پشتیبان",
     "manager_name": "مدیر",
 }
-CANON: Mapping[str, str] = CANON_EN_TO_FA
+CANON = CANON_EN_TO_FA
 CANON_FA_TO_EN: Mapping[str, str] = {
     normalize_fa(value): key for key, value in CANON_EN_TO_FA.items()
 }
 
 
 # ---------------------------------------------------------------------------
-# Base synonym dictionaries (raw strings, before normalization)
+# Base alias maps (Policy-first; extensible via policy.column_aliases)
 # ---------------------------------------------------------------------------
-REPORT_SYNONYMS: Mapping[str, str] = {
-    "وضعیت تحصیلی": "دانش آموز فارغ",
-    "مرکز ثبت نام": "مرکز گلستان صدرا",
-    # Suggested English equivalents
-    "graduated": "دانش آموز فارغ",
-    "is_grad": "دانش آموز فارغ",
-    "center": "مرکز گلستان صدرا",
-    "registration_center": "مرکز گلستان صدرا",
-    "کد رشته": "کدرشته",
-    "group_code": "کدرشته",
-    "major_code": "کدرشته",
+ALIASES_DEFAULT: Mapping[Source, Mapping[str, str]] = {
+    "report": {
+        "وضعیت تحصیلی": "دانش آموز فارغ",
+        "وضیعت تحصیلی": "دانش آموز فارغ",
+        "وضعیت‌تحصیلی": "دانش آموز فارغ",
+        "مرکز ثبت نام": "مرکز گلستان صدرا",
+        "مرکز ثبت‌نام": "مرکز گلستان صدرا",
+        "کد رشته": "کدرشته",
+        "گروه آزمایشی": "کدرشته",
+        "group_code": "کدرشته",
+        "major_code": "کدرشته",
+    },
+    "inspactor": {
+        "کد رشته": "کدرشته",
+        "کد گروه آزمایشی": "کدرشته",
+        "کدپستی": "کدپستی",
+        "کد پستی": "کدپستی",
+        "کد کارمندی پشتیبان": "کد کارمندی پشتیبان",
+        "mentor_id": "کد کارمندی پشتیبان",
+        "نام مدرسه 1": "نام مدرسه 1",
+        "نام مدرسه 2": "نام مدرسه 2",
+        "نام مدرسه 3": "نام مدرسه 3",
+        "نام مدرسه 4": "نام مدرسه 4",
+        "کد مدرسه 1": "کد مدرسه 1",
+        "کد مدرسه 2": "کد مدرسه 2",
+        "کد مدرسه 3": "کد مدرسه 3",
+        "کد مدرسه 4": "کد مدرسه 4",
+        "کد کامل مدرسه": "کد کامل مدرسه",
+        "تعداد مدارس تحت پوشش": "تعداد مدارس تحت پوشش",
+        "تعداد داوطلبان تحت پوشش": "تعداد داوطلبان تحت پوشش",
+        "تعداد تحت پوشش خاص": "تعداد تحت پوشش خاص",
+    },
+    "school": {
+        "کد مدرسه": "کد مدرسه",
+        "کد‌مدرسه": "کد مدرسه",
+        "school_code": "کد مدرسه",
+        "school id": "کد مدرسه",
+        "نام مدرسه": "نام مدرسه",
+        "نام‌مدرسه": "نام مدرسه",
+        "school_name": "نام مدرسه",
+    },
 }
 
-INSPACTOR_SYNONYMS: Mapping[str, str] = {
-    "کد رشته": "کدرشته",
-    "کد گروه آزمایشی": "کدرشته",
-    "کدپستی": "کدپستی",
-    "تعداد مدارس تحت پوشش": "تعداد مدارس تحت پوشش",
-    "نام مدرسه 1": "نام مدرسه 1",
-    "نام مدرسه 2": "نام مدرسه 2",
-    "نام مدرسه 3": "نام مدرسه 3",
-    "نام مدرسه 4": "نام مدرسه 4",
-    "کد مدرسه": "کد مدرسه",
-    "کد کارمندی پشتیبان": "کد کارمندی پشتیبان",
-    "mentor_id": "کد کارمندی پشتیبان",
+_STRING_COLUMNS: Mapping[str, Sequence[str]] = {
+    "common": ("alias", "mentor_id", "postal_code"),
 }
 
-SCHOOL_SYNONYMS: Mapping[str, str] = {
-    "کد مدرسه": "کد مدرسه",
-    "نام مدرسه": "نام مدرسه",
-    "کد کامل مدرسه": "کد کامل مدرسه",
-    "کد آموزش و پرورش": "کد آموزش و پرورش",
-    "school_code": "کد مدرسه",
-    "school_name": "نام مدرسه",
-}
+_INT_COLUMNS_BASE: Sequence[str] = (
+    "group_code",
+    "school_code",
+    "school_code_1",
+    "school_code_2",
+    "school_code_3",
+    "school_code_4",
+)
 
-_BASE_SYNONYMS: Mapping[Source, Mapping[str, str]] = {
-    "report": REPORT_SYNONYMS,
-    "inspactor": INSPACTOR_SYNONYMS,
-    "school": SCHOOL_SYNONYMS,
+_INT_COLUMNS_BY_SOURCE: Mapping[Source, Sequence[str]] = {
+    "report": _INT_COLUMNS_BASE + ("graduation_status", "center", "finance"),
+    "inspactor": _INT_COLUMNS_BASE
+    + (
+        "center",
+        "finance",
+        "schools_covered_count",
+        "covered_students_count",
+        "capacity_special",
+        "capacity_current",
+    ),
+    "school": _INT_COLUMNS_BASE,
 }
 
 
 @dataclass(frozen=True)
 class _AliasBundle:
-    """نگهدارندهٔ نگاشت نرمال‌ شده و فهرست مترادف‌های قابل گزارش."""
+    """نگه‌دارندهٔ نگاشت نرمال‌شده به کلید کاننیکال و فهرست سینونیم‌ها."""
 
     normalized_map: Mapping[str, str]
     report_map: Mapping[str, List[str]]
 
 
-def _normalize_header(value: str) -> str:
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _normalize_header(value: object) -> str:
     text = normalize_fa(value)
     text = text.replace("_", " ")
     text = " ".join(text.split())
@@ -136,104 +158,70 @@ def _normalize_header(value: str) -> str:
     return text.lower()
 
 
-def _target_to_en(value: str) -> str | None:
-    normalized = _normalize_header(value)
-    if not normalized:
-        return None
-    if normalized in CANON_FA_TO_EN:
-        return CANON_FA_TO_EN[normalized]
-    for key in CANON_EN_TO_FA:
-        if normalized == _normalize_header(key):
-            return key
-    return None
-
-
-def _combined_aliases(source: Source) -> Mapping[str, str]:
+def _policy_aliases(source: Source) -> Mapping[str, str]:
     policy = get_policy()
-    policy_aliases = policy.column_aliases.get(source, {})
-    merged: Dict[str, str] = {}
-    merged.update(_BASE_SYNONYMS.get(source, {}))
-    merged.update(policy_aliases)
-    return merged
+    return policy.column_aliases.get(source, {})
 
 
 def _build_alias_bundle(source: Source) -> _AliasBundle:
+    base = dict(ALIASES_DEFAULT.get(source, {}))
+    base.update(_policy_aliases(source))
+
     normalized_map: Dict[str, str] = {}
     report_map: Dict[str, List[str]] = {
         CANON_EN_TO_FA[key]: [] for key in CANON_EN_TO_FA
     }
 
-    raw_aliases = _combined_aliases(source)
-    for alias, target in raw_aliases.items():
-        canonical = _target_to_en(target)
-        if canonical is None:
+    for alias, target in base.items():
+        normalized = _normalize_header(alias)
+        target_key = CANON_FA_TO_EN.get(_normalize_header(target))
+        if not normalized or not target_key:
             continue
-        normalized_map[_normalize_header(alias)] = canonical
-        report_map.setdefault(CANON_EN_TO_FA[canonical], []).append(alias)
+        normalized_map[normalized] = target_key
+        report_map.setdefault(CANON_EN_TO_FA[target_key], []).append(alias)
 
-    for en_key, fa_key in CANON_EN_TO_FA.items():
+    for en_key, fa_value in CANON_EN_TO_FA.items():
         normalized_map.setdefault(_normalize_header(en_key), en_key)
-        normalized_map.setdefault(_normalize_header(fa_key), en_key)
+        normalized_map.setdefault(_normalize_header(fa_value), en_key)
+        report_map.setdefault(fa_value, []).append(fa_value)
 
     return _AliasBundle(normalized_map=normalized_map, report_map=report_map)
 
 
 def collect_aliases_for(source: Source) -> Mapping[str, str]:
-    """بازگرداندن نگاشت alias→ستون استاندارد (فارسی) برای پیام‌های خطا."""
+    """برگرداندن نگاشت alias→نام کاننیکال (فارسی) برای پیام‌های خطا."""
 
-    return dict(_combined_aliases(source))
+    bundle = _build_alias_bundle(source)
+    aliases: Dict[str, str] = {}
+    for normalized, en_key in bundle.normalized_map.items():
+        fa_name = CANON_EN_TO_FA.get(en_key, en_key)
+        aliases[normalized] = fa_name
+    return aliases
 
 
 def accepted_synonyms(source: Source, canonical_fa: str) -> Sequence[str]:
-    """فهرست مترادف‌های قابل قبول برای ستون هدف را بازمی‌گرداند."""
+    """فهرست سینونیم‌های قابل قبول برای ستونی مشخص."""
 
     bundle = _build_alias_bundle(source)
-    synonyms = bundle.report_map.get(canonical_fa, [])
-    return sorted(dict.fromkeys(synonyms))
+    normalized_key = normalize_fa(canonical_fa)
+    target_en = CANON_FA_TO_EN.get(normalized_key)
+    if target_en is None:
+        return ()
+    synonyms = bundle.report_map.get(CANON_EN_TO_FA[target_en], [])
+    return tuple(dict.fromkeys(synonyms))
 
 
-def _find_column(df: pd.DataFrame, *, canonical_en: str) -> str | None:
-    """یافتن نام ستونی که با کلید canonical تطابق دارد."""
-
-    fa_name = CANON_EN_TO_FA.get(canonical_en)
-    if fa_name and fa_name in df.columns:
-        return fa_name
+def _match_column(df: pd.DataFrame, *, canonical_en: str, bundle: _AliasBundle) -> str | None:
+    canonical_fa = CANON_EN_TO_FA.get(canonical_en, canonical_en)
+    if canonical_fa in df.columns:
+        return canonical_fa
     normalized_targets = {
-        _normalize_header(canonical_en),
+        key for key, target in bundle.normalized_map.items() if target == canonical_en
     }
-    if fa_name:
-        normalized_targets.add(_normalize_header(fa_name))
     for column in df.columns:
-        if _normalize_header(str(column)) in normalized_targets:
-            return column
-    return fa_name if fa_name in df.columns else None
-
-
-def resolve_aliases(df: pd.DataFrame, source: Source) -> pd.DataFrame:
-    """نام ستون‌ها را براساس مترادف‌های تعریف‌شده به حالت استاندارد فارسی تبدیل می‌کند."""
-
-    bundle = _build_alias_bundle(source)
-    rename_map: Dict[str, str] = {}
-    for column in df.columns:
-        normalized = _normalize_header(str(column))
-        canonical_en = bundle.normalized_map.get(normalized)
-        if canonical_en is None:
-            continue
-        rename_map[column] = CANON_EN_TO_FA.get(canonical_en, canonical_en)
-    result = df.copy()
-    if rename_map:
-        result = result.rename(columns=rename_map)
-    return result
-
-
-def _looks_numeric(text: str) -> bool:
-    cleaned = text.replace(" ", "")
-    if cleaned.startswith("-"):
-        cleaned = cleaned[1:]
-    parts = cleaned.split(".")
-    if len(parts) > 2:
-        return False
-    return all(part.isdigit() for part in parts if part)
+        if _normalize_header(column) in normalized_targets:
+            return str(column)
+    return None
 
 
 def _identifier_to_string(value: object) -> object:
@@ -242,37 +230,31 @@ def _identifier_to_string(value: object) -> object:
     text = str(value).strip()
     if not text:
         return pd.NA
-    numeric_candidate = to_numlike_str(text)
-    if numeric_candidate and (_looks_numeric(text) or isinstance(value, (int, float))):
-        return numeric_candidate
+    num_candidate = to_numlike_str(text)
+    if num_candidate:
+        cleaned = text.replace(" ", "")
+        if cleaned.endswith(".0") and num_candidate.isdigit():
+            return num_candidate
+        cleaned = cleaned.lstrip("+-")
+        cleaned = cleaned.replace(".", "", 1)
+        if cleaned.isdigit() and num_candidate:
+            return num_candidate
     return text
 
 
-def _status_to_int(value: object) -> object:
+def _clean_numeric(value: object) -> str:
     if pd.isna(value):
-        return pd.NA
-    if isinstance(value, (int,)):
-        return int(value)
-    text = str(value).strip()
-    if not text:
-        return pd.NA
-    numeric_candidate = to_numlike_str(text)
-    if numeric_candidate and numeric_candidate.isdigit():
-        return int(numeric_candidate)
-    normalized = normalize_fa(text)
-    if "فارغ" in normalized:
-        return 1
-    return 0
+        return ""
+    text = normalize_fa(value)
+    candidate = to_numlike_str(text)
+    return candidate if candidate is not None else ""
 
 
-def _coerce_int_column(df: pd.DataFrame, canonical_en: str) -> None:
-    column = _find_column(df, canonical_en=canonical_en)
+def _coerce_numeric_column(df: pd.DataFrame, canonical_en: str, bundle: _AliasBundle) -> None:
+    column = _match_column(df, canonical_en=canonical_en, bundle=bundle)
     if column is None:
         return
-    column_data = df[column]
-    if isinstance(column_data, pd.DataFrame):
-        column_data = column_data.iloc[:, 0]
-    cleaned = column_data.map(lambda v: to_numlike_str(v) if not pd.isna(v) else "")
+    cleaned = df[column].map(_clean_numeric)
     numeric = pd.to_numeric(cleaned.replace("", pd.NA), errors="coerce")
     if numeric.isna().any():
         df[column] = numeric.astype("Int64")
@@ -280,71 +262,109 @@ def _coerce_int_column(df: pd.DataFrame, canonical_en: str) -> None:
         df[column] = numeric.astype("int64")
 
 
-def _coerce_identifier_column(df: pd.DataFrame, canonical_en: str) -> None:
-    column = _find_column(df, canonical_en=canonical_en)
+def _coerce_string_column(df: pd.DataFrame, canonical_en: str, bundle: _AliasBundle) -> None:
+    column = _match_column(df, canonical_en=canonical_en, bundle=bundle)
     if column is None:
         return
     coerced = df[column].map(_identifier_to_string)
     df[column] = coerced.astype("string")
 
 
-def _coerce_report_semantics(df: pd.DataFrame) -> None:
-    grad_col = _find_column(df, canonical_en="graduation_status")
-    status_series = df[grad_col] if grad_col is not None else None
-    if status_series is not None:
-        df[grad_col] = status_series.map(_status_to_int).astype("Int64")
-    center_col = _find_column(df, canonical_en="center")
-    if center_col is None:
-        bundle = _build_alias_bundle("report")
-        normalized_target = {
-            norm
-            for norm, key in bundle.normalized_map.items()
-            if key == "center"
-        }
-        for column in df.columns:
-            if _normalize_header(str(column)) in normalized_target:
-                center_col = column
-                break
-    if center_col is not None:
-        df[center_col] = df[center_col].map(
-            lambda v: normalize_fa(v) if not pd.isna(v) else pd.NA
-        )
+def _ensure_column(df: pd.DataFrame, canonical_en: str, bundle: _AliasBundle) -> str | None:
+    column = _match_column(df, canonical_en=canonical_en, bundle=bundle)
+    if column is None:
+        return None
+    canonical_fa = CANON_EN_TO_FA.get(canonical_en, canonical_en)
+    if column != canonical_fa:
+        df[canonical_fa] = df[column]
+        column = canonical_fa
+    return column
 
 
-def _coerce_common_semantics(df: pd.DataFrame, source: Source) -> None:
-    _coerce_identifier_column(df, "mentor_id")
-    _coerce_identifier_column(df, "alias")
-    _coerce_identifier_column(df, "postal_code")
-    _coerce_int_column(df, "group_code")
-    _coerce_int_column(df, "school_code")
-    _coerce_int_column(df, "center")
-    _coerce_int_column(df, "finance")
-    if source == "report":
-        _coerce_int_column(df, "graduation_status")
-    if source == "inspactor":
-        _coerce_int_column(df, "schools_covered_count")
-        _coerce_int_column(df, "covered_students_count")
+def _status_to_int(value: object) -> object:
+    if pd.isna(value):
+        return pd.NA
+    if isinstance(value, (int,)):
+        return int(value)
+    text = normalize_fa(value)
+    if not text:
+        return pd.NA
+    num_candidate = to_numlike_str(text)
+    if num_candidate and num_candidate.isdigit():
+        return int(num_candidate)
+    return 1 if "فارغ" in text else 0
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def resolve_aliases(df: pd.DataFrame, source: Source) -> pd.DataFrame:
+    """هم‌نام‌سازی ستون‌های ورودی بر اساس سیاست و سینونیم‌ها."""
+
+    bundle = _build_alias_bundle(source)
+    rename_map: Dict[str, str] = {}
+    seen: set[str] = set()
+    for column in df.columns:
+        normalized = _normalize_header(column)
+        canonical_en = bundle.normalized_map.get(normalized)
+        if canonical_en is None:
+            continue
+        canonical_fa = CANON_EN_TO_FA.get(canonical_en, canonical_en)
+        if canonical_fa in seen:
+            continue
+        seen.add(canonical_fa)
+        if str(column) != canonical_fa:
+            rename_map[str(column)] = canonical_fa
+    result = df.rename(columns=rename_map, errors="ignore")
+    result = result.loc[:, ~pd.Index(result.columns).duplicated(keep="first")]
+    return result
 
 
 def coerce_semantics(df: pd.DataFrame, source: Source) -> pd.DataFrame:
-    """اعمال تبدیل‌های معنایی (نوع داده، ستونی مشتق‌شده و ...)."""
+    """اعمال قواعد معنایی (تایپ، مقادیر مشتق) پس از هم‌نام‌سازی."""
 
+    bundle = _build_alias_bundle(source)
     result = df.copy()
+
     if source == "report":
-        _coerce_report_semantics(result)
-    _coerce_common_semantics(result, source)
+        status_col = _ensure_column(result, "graduation_status", bundle)
+        if status_col is not None:
+            coerced = result[status_col].map(_status_to_int)
+            result[status_col] = coerced.astype("Int64")
+        center_col = _ensure_column(result, "center", bundle)
+        if center_col is not None:
+            cleaned = result[center_col].map(_clean_numeric)
+            numeric = pd.to_numeric(cleaned.replace("", pd.NA), errors="coerce")
+            result[center_col] = numeric.astype("Int64")
+    else:
+        _ensure_column(result, "center", bundle)
+        _ensure_column(result, "graduation_status", bundle)
+
+    for key in _STRING_COLUMNS["common"]:
+        _coerce_string_column(result, key, bundle)
+
+    for key in _INT_COLUMNS_BY_SOURCE[source]:
+        _coerce_numeric_column(result, key, bundle)
+
     return result
 
 
 def canonicalize_headers(df: pd.DataFrame, header_mode: HeaderMode) -> pd.DataFrame:
-    """تولید هدر خروجی بر اساس تنظیم دوزبانه."""
+    """تبدیل نام ستون‌ها به فارسی، انگلیسی یا دوزبانه."""
 
     if header_mode not in {"fa", "en", "fa_en"}:
         raise ValueError(f"Unsupported header_mode '{header_mode}'")
+
     rename: Dict[str, str] = {}
     for column in df.columns:
-        normalized = _normalize_header(str(column))
-        en_key = _target_to_en(str(column))
+        normalized = _normalize_header(column)
+        en_key = CANON_FA_TO_EN.get(normalized)
+        if en_key is None:
+            for candidate_en in CANON_EN_TO_FA:
+                if normalized == _normalize_header(candidate_en):
+                    en_key = candidate_en
+                    break
         if en_key is None:
             continue
         fa_name = CANON_EN_TO_FA[en_key]
@@ -357,3 +377,24 @@ def canonicalize_headers(df: pd.DataFrame, header_mode: HeaderMode) -> pd.DataFr
     if not rename:
         return df.copy()
     return df.rename(columns=rename)
+
+
+# ---------------------------------------------------------------------------
+# Doctest-style examples (برای اسناد داخلی)
+# ---------------------------------------------------------------------------
+
+def _example_usage() -> None:  # pragma: no cover - documentation helper
+    """نمونهٔ فشرده برای دفترچه توسعه‌دهندگان."""
+
+    data = pd.DataFrame(
+        {
+            "وضعیت تحصیلی": ["فارغ التحصیل"],
+            "مرکز ثبت نام": ["مرکز 12"],
+            "کد رشته": ["4001"],
+            "کد کارمندی پشتیبان": ["1205"],
+        }
+    )
+    resolved = resolve_aliases(data, "report")
+    coerced = coerce_semantics(resolved, "report")
+    _ = canonicalize_headers(coerced, header_mode="fa_en")
+

@@ -23,7 +23,6 @@ import pandas as pd
 
 from app.core.allocate_students import allocate_batch
 from app.core.build_matrix import build_matrix
-from app.core.common.columns import canonicalize_headers
 from app.core.policy_loader import PolicyConfig, load_policy
 from app.infra.io_utils import (
     ALT_CODE_COLUMN,
@@ -115,15 +114,12 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         "meta": pd.json_normalize([meta]),
     }
     header_mode = policy.excel.header_mode
-    formatted_sheets = {
-        name: canonicalize_headers(df.copy(), header_mode=header_mode)
-        for name, df in sheets.items()
-    }
     write_xlsx_atomic(
-        formatted_sheets,
+        sheets,
         output,
         rtl=policy.excel.rtl,
         font_name=policy.excel.font_name,
+        header_mode=header_mode,
     )
     progress(100, "done")
     return 0
@@ -160,15 +156,12 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
         "trace": trace_df,
     }
     header_mode = policy.excel.header_mode
-    formatted_sheets = {
-        name: canonicalize_headers(df.copy(), header_mode=header_mode)
-        for name, df in sheets.items()
-    }
     write_xlsx_atomic(
-        formatted_sheets,
+        sheets,
         output,
         rtl=policy.excel.rtl,
         font_name=policy.excel.font_name,
+        header_mode=header_mode,
     )
     progress(100, "done")
     return 0
