@@ -51,6 +51,26 @@ _RANKING_RULE_LIBRARY: Mapping[str, tuple[str, bool]] = {
 
 
 @dataclass(frozen=True)
+class PolicyColumns:
+    """تعریف ستون‌های سیاست که باید از Policy خوانده شوند."""
+
+    postal_code: str
+    school_count: str
+    school_code: str
+    capacity_current: str
+    capacity_special: str
+    remaining_capacity: str
+
+
+@dataclass(frozen=True)
+class PolicyAliasRule:
+    """قوانین تعیین alias برای ردیف‌های عادی و مدرسه‌ای."""
+
+    normal: str
+    school: str
+
+
+@dataclass(frozen=True)
 class PolicyConfig:
     """ساختار دادهٔ فقط‌خواندنی برای نگهداری سیاست بارگذاری‌شده."""
 
@@ -60,6 +80,12 @@ class PolicyConfig:
     join_keys: List[str]
     ranking_rules: List["RankingRule"]
     trace_stages: List["TraceStageDefinition"]
+    postal_valid_range: tuple[int, int]
+    finance_variants: tuple[int, ...]
+    center_map: Mapping[str, int]
+    school_code_empty_as_zero: bool
+    alias_rule: PolicyAliasRule
+    columns: PolicyColumns
 
     @property
     def ranking(self) -> List[str]:
@@ -112,7 +138,18 @@ class TraceStageDefinition:
 
 
 def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object]:
-    required = ["version", "normal_statuses", "school_statuses", "join_keys"]
+    required = [
+        "version",
+        "normal_statuses",
+        "school_statuses",
+        "join_keys",
+        "postal_valid_range",
+        "finance_variants",
+        "center_map",
+        "school_code_empty_as_zero",
+        "alias_rule",
+        "columns",
+    ]
     missing = [key for key in required if key not in data]
     if "ranking_rules" not in data and "ranking" not in data:
         missing.append("ranking")
@@ -125,6 +162,12 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     join_keys = _normalize_join_keys(data["join_keys"])
     ranking_rules = _normalize_ranking_rules(data["ranking_rules"] if "ranking_rules" in data else data["ranking"])
     trace_stages = _normalize_trace_stages(data.get("trace_stages"), join_keys)
+    postal_valid_range = _normalize_postal_valid_range(data["postal_valid_range"])
+    finance_variants = _normalize_finance_variants(data["finance_variants"])
+    center_map = _normalize_center_map(data["center_map"])
+    school_code_empty_as_zero = _ensure_bool("school_code_empty_as_zero", data["school_code_empty_as_zero"])
+    alias_rule = _normalize_alias_rule(data["alias_rule"])
+    columns = _normalize_columns(data["columns"])
 
     return {
         "version": version,
@@ -133,6 +176,12 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "join_keys": join_keys,
         "ranking_rules": ranking_rules,
         "trace_stages": trace_stages,
+        "postal_valid_range": postal_valid_range,
+        "finance_variants": finance_variants,
+        "center_map": center_map,
+        "school_code_empty_as_zero": school_code_empty_as_zero,
+        "alias_rule": alias_rule,
+        "columns": columns,
     }
 
 
@@ -145,6 +194,92 @@ def _ensure_int_sequence(name: str, value: object) -> List[int]:
             raise TypeError(f"All {name} items must be int")
         result.append(int(item))
     return result
+
+
+def _normalize_postal_valid_range(value: object) -> tuple[int, int]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) != 2:
+        raise TypeError("postal_valid_range must be a sequence of two ints")
+    start, end = value
+    if not isinstance(start, int) or not isinstance(end, int):
+        raise TypeError("postal_valid_range items must be int")
+    if start > end:
+        raise ValueError("postal_valid_range start must be <= end")
+    return int(start), int(end)
+
+
+def _normalize_finance_variants(value: object) -> tuple[int, ...]:
+    items = _ensure_int_sequence("finance_variants", value)
+    unique: list[int] = []
+    seen: set[int] = set()
+    for item in items:
+        if item not in seen:
+            unique.append(item)
+            seen.add(item)
+    required = {0, 1, 3}
+    if not required.issubset(seen):
+        missing = sorted(required.difference(seen))
+        raise ValueError(f"finance_variants missing required codes: {missing}")
+    return tuple(unique)
+
+
+def _normalize_center_map(value: object) -> Mapping[str, int]:
+    if not isinstance(value, Mapping):
+        raise TypeError("center_map must be a mapping of manager name to center id")
+    normalized: dict[str, int] = {}
+    for key, raw in value.items():
+        if not isinstance(key, str):
+            raise TypeError("center_map keys must be strings")
+        if not isinstance(raw, int):
+            raise TypeError("center_map values must be integers")
+        normalized[key.strip()] = int(raw)
+    if "*" not in normalized:
+        normalized["*"] = 0
+    return normalized
+
+
+def _ensure_bool(name: str, value: object) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError(f"{name} must be a boolean")
+    return bool(value)
+
+
+def _normalize_alias_rule(value: object) -> Mapping[str, str]:
+    if not isinstance(value, Mapping):
+        raise TypeError("alias_rule must be a mapping")
+    required_keys = {"normal", "school"}
+    missing = [key for key in required_keys if key not in value]
+    if missing:
+        raise ValueError(f"alias_rule missing keys: {missing}")
+    normalized: dict[str, str] = {}
+    for key in required_keys:
+        item = value[key]
+        if not isinstance(item, (str, bytes)) or not str(item).strip():
+            raise ValueError(f"alias_rule['{key}'] must be a non-empty string")
+        normalized[key] = str(item).strip()
+    return normalized
+
+
+def _normalize_columns(value: object) -> Mapping[str, str]:
+    if not isinstance(value, Mapping):
+        raise TypeError("columns must be a mapping")
+    required = {
+        "postal_code",
+        "school_count",
+        "school_code",
+        "capacity_current",
+        "capacity_special",
+        "remaining_capacity",
+    }
+    missing = [key for key in required if key not in value]
+    if missing:
+        raise ValueError(f"columns mapping missing keys: {missing}")
+    normalized: dict[str, str] = {}
+    for key in required:
+        item = value[key]
+        if not isinstance(item, (str, bytes)) or not str(item).strip():
+            raise ValueError(f"columns['{key}'] must be a non-empty string")
+        normalized[key] = str(item).strip()
+    return normalized
 
 
 def _normalize_join_keys(raw: object) -> List[str]:
@@ -291,6 +426,22 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         join_keys=[str(item) for item in data["join_keys"]],  # type: ignore[index]
         ranking_rules=[_to_ranking_rule(item) for item in data["ranking_rules"]],
         trace_stages=[_to_trace_stage(item) for item in data["trace_stages"]],
+        postal_valid_range=tuple(int(item) for item in data["postal_valid_range"]),
+        finance_variants=tuple(int(item) for item in data["finance_variants"]),
+        center_map={str(k): int(v) for k, v in data["center_map"].items()},
+        school_code_empty_as_zero=bool(data["school_code_empty_as_zero"]),
+        alias_rule=PolicyAliasRule(
+            normal=str(data["alias_rule"]["normal"]),
+            school=str(data["alias_rule"]["school"]),
+        ),
+        columns=PolicyColumns(
+            postal_code=str(data["columns"]["postal_code"]),
+            school_count=str(data["columns"]["school_count"]),
+            school_code=str(data["columns"]["school_code"]),
+            capacity_current=str(data["columns"]["capacity_current"]),
+            capacity_special=str(data["columns"]["capacity_special"]),
+            remaining_capacity=str(data["columns"]["remaining_capacity"]),
+        ),
     )
 
 

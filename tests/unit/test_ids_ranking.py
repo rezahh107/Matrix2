@@ -15,40 +15,55 @@ from app.core.common.ranking import apply_ranking_policy
 from app.core.policy_loader import PolicyConfig, parse_policy_dict
 
 
+def _base_policy_payload() -> dict[str, object]:
+    return {
+        "version": "1.0.3",
+        "normal_statuses": [1, 0],
+        "school_statuses": [1],
+        "postal_valid_range": [1000, 9999],
+        "finance_variants": [0, 1, 3],
+        "center_map": {"شهدخت کشاورز": 1, "آیناز هوشمند": 2, "*": 0},
+        "school_code_empty_as_zero": True,
+        "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
+        "join_keys": [
+            "کدرشته",
+            "جنسیت",
+            "دانش آموز فارغ",
+            "مرکز گلستان صدرا",
+            "مالی حکمت بنیاد",
+            "کد مدرسه",
+        ],
+        "columns": {
+            "postal_code": "کدپستی",
+            "school_count": "تعداد مدارس تحت پوشش",
+            "school_code": "کد مدرسه",
+            "capacity_current": "تعداد داوطلبان تحت پوشش",
+            "capacity_special": "تعداد تحت پوشش خاص",
+            "remaining_capacity": "remaining_capacity",
+        },
+        "ranking_rules": [
+            {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
+            {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
+            {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
+        ],
+        "trace_stages": [
+            {"stage": "type", "column": "کدرشته"},
+            {"stage": "group", "column": "گروه آزمایشی"},
+            {"stage": "gender", "column": "جنسیت"},
+            {"stage": "graduation_status", "column": "دانش آموز فارغ"},
+            {"stage": "center", "column": "مرکز گلستان صدرا"},
+            {"stage": "finance", "column": "مالی حکمت بنیاد"},
+            {"stage": "school", "column": "کد مدرسه"},
+            {"stage": "capacity_gate", "column": "remaining_capacity"},
+        ],
+    }
+
+
 @pytest.fixture()
 def _policy() -> PolicyConfig:
     """سیاست نمونه مطابق نسخهٔ 1.0.3 برای تست‌های رتبه‌بندی."""
 
-    return parse_policy_dict(
-        {
-            "version": "1.0.3",
-            "normal_statuses": [1, 0],
-            "school_statuses": [1],
-            "join_keys": [
-                "کدرشته",
-                "جنسیت",
-                "دانش آموز فارغ",
-                "مرکز گلستان صدرا",
-                "مالی حکمت بنیاد",
-                "کد مدرسه",
-            ],
-            "ranking_rules": [
-                {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
-                {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
-                {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
-            ],
-            "trace_stages": [
-                {"stage": "type", "column": "کدرشته"},
-                {"stage": "group", "column": "گروه آزمایشی"},
-                {"stage": "gender", "column": "جنسیت"},
-                {"stage": "graduation_status", "column": "دانش آموز فارغ"},
-                {"stage": "center", "column": "مرکز گلستان صدرا"},
-                {"stage": "finance", "column": "مالی حکمت بنیاد"},
-                {"stage": "school", "column": "کد مدرسه"},
-                {"stage": "capacity_gate", "column": "remaining_capacity"},
-            ],
-        }
-    )
+    return parse_policy_dict(_base_policy_payload())
 
 
 def test_build_mentor_id_map_normalizes_inputs() -> None:
@@ -131,56 +146,23 @@ def test_apply_ranking_policy_natural_tie_break(_policy: PolicyConfig) -> None:
     "payload",
     (
         {
-            "version": "1.0.3",
-            "normal_statuses": [1, 0],
-            "school_statuses": [1],
-            "join_keys": [
-                "کدرشته",
-                "جنسیت",
-                "دانش آموز فارغ",
-                "مرکز گلستان صدرا",
-                "مالی حکمت بنیاد",
-                "کد مدرسه",
-            ],
+            **_base_policy_payload(),
             "ranking": [
                 "min_occupancy_ratio",
                 "min_allocations_new",
                 "min_mentor_id",
             ],
+            "ranking_rules": [],
         },
-        {
-            "version": "1.0.3",
-            "normal_statuses": [1, 0],
-            "school_statuses": [1],
-            "join_keys": [
-                "کدرشته",
-                "جنسیت",
-                "دانش آموز فارغ",
-                "مرکز گلستان صدرا",
-                "مالی حکمت بنیاد",
-                "کد مدرسه",
-            ],
-            "ranking_rules": [
-                {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
-                {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
-                {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
-            ],
-            "trace_stages": [
-                {"stage": "type", "column": "کدرشته"},
-                {"stage": "group", "column": "گروه آزمایشی"},
-                {"stage": "gender", "column": "جنسیت"},
-                {"stage": "graduation_status", "column": "دانش آموز فارغ"},
-                {"stage": "center", "column": "مرکز گلستان صدرا"},
-                {"stage": "finance", "column": "مالی حکمت بنیاد"},
-                {"stage": "school", "column": "کد مدرسه"},
-                {"stage": "capacity_gate", "column": "remaining_capacity"},
-            ],
-        },
+        _base_policy_payload(),
     ),
     ids=["legacy", "extended"],
 )
 def test_ranking_payloads_equivalent(payload: dict[str, object]) -> None:
-    policy = parse_policy_dict(payload)
+    policy_data = dict(payload)
+    if not policy_data.get("ranking_rules"):
+        policy_data.pop("ranking_rules", None)
+    policy = parse_policy_dict(policy_data)
     pool = pd.DataFrame(
         {
             "پشتیبان": ["الف", "ب", "ج"],

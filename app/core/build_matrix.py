@@ -24,15 +24,22 @@ from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple
 import numpy as np
 import pandas as pd
 
+from app.core.common.domain import (
+    BuildConfig as DomainBuildConfig,
+    MentorType,
+    center_from_manager as domain_center_from_manager,
+    classify_mentor_mode,
+    compute_alias,
+    finance_cross,
+    school_code_norm,
+)
+from app.core.policy_loader import PolicyConfig, load_policy
+
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 __version__ = "1.0.4"  # bumped
-# Postal code range for NORMAL mentors
-MIN_POSTAL_CODE = 1000
-MAX_POSTAL_CODE = 9999
-# Sort fallbacks for null values
-SCHOOL_CODE_NULL_SORT = 999999
+# Sort fallback for alias values
 ALIAS_FALLBACK_SORT = 10**12  # push non-numeric aliases last
 
 # Column headers (Persian per SSoT)
@@ -118,16 +125,89 @@ class Finance(IntEnum):
 @dataclass(slots=True)
 class BuildConfig:
     version: str = __version__
-    finance_variants: tuple[int, ...] = (Finance.NORMAL, Finance.BONYAD, Finance.HEKMAT)
+    policy: PolicyConfig = field(default_factory=load_policy)
+    finance_variants: tuple[int, ...] | None = None
     default_status: int = Status.STUDENT
     enable_capacity_gate: bool = True
-    center_manager_map: dict[str, int] = field(
-        default_factory=lambda: {
-            "شهدخت کشاورز": Center.GOLESTAN,
-            "آیناز هوشمند": Center.SADRA,
-        }
-    )
+    center_manager_map: dict[str, int] | None = None
     can_allocate_truthy: tuple[str, ...] = ("بلی", "بله", "Yes", "yes", "1", "true", "True")
+    postal_valid_range: tuple[int, int] | None = None
+    school_code_empty_as_zero: bool | None = None
+    alias_rule_normal: str | None = None
+    alias_rule_school: str | None = None
+    postal_code_column: str | None = None
+    school_count_column: str | None = None
+    school_code_column: str | None = None
+    capacity_current_column: str | None = None
+    capacity_special_column: str | None = None
+    remaining_capacity_column: str | None = None
+
+    def __post_init__(self) -> None:
+        policy = self.policy
+        columns = policy.columns
+
+        if self.finance_variants is None:
+            self.finance_variants = tuple(policy.finance_variants)
+        else:
+            unique: list[int] = []
+            seen: set[int] = set()
+            for item in self.finance_variants:
+                iv = int(item)
+                if iv not in seen:
+                    unique.append(iv)
+                    seen.add(iv)
+            self.finance_variants = tuple(unique)
+
+        if self.center_manager_map is None:
+            self.center_manager_map = dict(policy.center_map)
+        else:
+            self.center_manager_map = {str(k): int(v) for k, v in self.center_manager_map.items()}
+
+        if self.postal_valid_range is None:
+            self.postal_valid_range = tuple(policy.postal_valid_range)
+        else:
+            start, end = (int(self.postal_valid_range[0]), int(self.postal_valid_range[1]))
+            if start > end:
+                raise ValueError("postal_valid_range start must be <= end")
+            self.postal_valid_range = (start, end)
+
+        if self.school_code_empty_as_zero is None:
+            self.school_code_empty_as_zero = bool(policy.school_code_empty_as_zero)
+        else:
+            self.school_code_empty_as_zero = bool(self.school_code_empty_as_zero)
+
+        if self.alias_rule_normal is None:
+            self.alias_rule_normal = policy.alias_rule.normal
+        if self.alias_rule_school is None:
+            self.alias_rule_school = policy.alias_rule.school
+
+        if self.postal_code_column is None:
+            self.postal_code_column = columns.postal_code
+        if self.school_count_column is None:
+            self.school_count_column = columns.school_count
+        if self.school_code_column is None:
+            self.school_code_column = columns.school_code
+        if self.capacity_current_column is None:
+            self.capacity_current_column = columns.capacity_current
+        if self.capacity_special_column is None:
+            self.capacity_special_column = columns.capacity_special
+        if self.remaining_capacity_column is None:
+            self.remaining_capacity_column = columns.remaining_capacity
+
+
+def _as_domain_config(cfg: BuildConfig) -> DomainBuildConfig:
+    """Create :class:`DomainBuildConfig` from :class:`BuildConfig`."""
+
+    return DomainBuildConfig(
+        version=cfg.policy.version,
+        postal_valid_range=tuple(cfg.postal_valid_range or (1000, 9999)),
+        finance_variants=tuple(cfg.finance_variants or (Finance.NORMAL, Finance.BONYAD, Finance.HEKMAT)),
+        center_map=dict(cfg.center_manager_map or {}),
+        school_code_empty_as_zero=bool(cfg.school_code_empty_as_zero),
+        alias_rule_normal=cfg.alias_rule_normal or "postal_or_fallback_mentor_id",
+        alias_rule_school=cfg.alias_rule_school or "mentor_id",
+    )
+
 
 # =============================================================================
 # NORMALIZATION
@@ -255,14 +335,6 @@ def norm_status(value: Any) -> int | None:
 
 def status_text(code: int | None) -> str:
     return {Status.STUDENT: "دانش‌آموز", Status.GRADUATE: "فارغ‌التحصیل"}.get(int(code), "") if code is not None else ""
-
-
-def center_from_manager(manager_name: str, cfg: BuildConfig) -> int:
-    name = str(manager_name or "")
-    for needle, center_code in cfg.center_manager_map.items():
-        if needle and needle in name:
-            return int(center_code)
-    return Center.MARKAZ
 
 
 def center_text(code: int) -> str:
@@ -480,19 +552,23 @@ def normalize_capacity_values(current: Any, special: Any, *, default: int = 0) -
 def capacity_gate(
     insp: pd.DataFrame,
     *,
+    cfg: BuildConfig,
     progress: ProgressFn = noop_progress,
 ) -> tuple[pd.DataFrame, pd.DataFrame, bool]:
-    if CAPACITY_CURRENT_COL not in insp.columns or CAPACITY_SPECIAL_COL not in insp.columns:
+    current_col = cfg.capacity_current_column or CAPACITY_CURRENT_COL
+    special_col = cfg.capacity_special_column or CAPACITY_SPECIAL_COL
+
+    if current_col not in insp.columns or special_col not in insp.columns:
         progress(10, "capacity columns missing; skipping capacity gate")
         return insp.copy(), pd.DataFrame(), True
 
     df = insp.copy()
-    df["_cap_cur"] = safe_int_column(df, CAPACITY_CURRENT_COL, default=0)
-    df["_cap_spec"] = safe_int_column(df, CAPACITY_SPECIAL_COL, default=0)
+    df["_cap_cur"] = safe_int_column(df, current_col, default=0)
+    df["_cap_spec"] = safe_int_column(df, special_col, default=0)
 
     removed_mask = ~(df["_cap_cur"] < df["_cap_spec"])
 
-    keep_cols = [COL_MENTOR_NAME, COL_MANAGER_NAME, CAPACITY_CURRENT_COL, CAPACITY_SPECIAL_COL]
+    keep_cols = [COL_MENTOR_NAME, COL_MANAGER_NAME, current_col, special_col]
     if COL_SCHOOL1 in df.columns:
         keep_cols.append(COL_SCHOOL1)
     if COL_GROUP in df.columns:
@@ -501,8 +577,8 @@ def capacity_gate(
     removed = df.loc[removed_mask, keep_cols].copy()
     removed = removed.rename(
         columns={
-            CAPACITY_CURRENT_COL: "تحت پوشش فعلی",
-            CAPACITY_SPECIAL_COL: "ظرفیت خاص",
+            current_col: "تحت پوشش فعلی",
+            special_col: "ظرفیت خاص",
             COL_MENTOR_NAME: "پشتیبان",
             COL_MANAGER_NAME: "مدیر",
             COL_SCHOOL1: "مدرسه (خام)",
@@ -529,19 +605,29 @@ def to_int_str_or_none(value: Any) -> str | None:
     return str(parsed)
 
 
-def collect_school_codes_from_row(r: pd.Series, name_to_code: dict[str, str], school_cols: list[str]) -> list[str]:
-    codes = [
-        code
-        for col in school_cols
-        if (raw := r.get(col)) and (code := to_int_str_or_none(raw) or name_to_code.get(normalize_fa(raw)))
-    ]
-    seen: set[str] = set()
-    out: list[str] = []
-    for c in codes:
-        if c not in seen:
-            out.append(c)
-            seen.add(c)
-    return out
+def collect_school_codes_from_row(
+    r: pd.Series,
+    name_to_code: dict[str, str],
+    school_cols: list[str],
+    *,
+    domain_cfg: DomainBuildConfig,
+) -> list[int]:
+    """استخراج کدهای مدرسه با نرمال‌سازی دامنه‌ای."""
+
+    normalized_codes: list[int] = []
+    seen: set[int] = set()
+    for col in school_cols:
+        raw = r.get(col)
+        if raw is None:
+            continue
+        candidate = to_int_str_or_none(raw)
+        if candidate is None:
+            candidate = name_to_code.get(normalize_fa(raw), None)
+        normalized = school_code_norm(candidate, cfg=domain_cfg)
+        if normalized > 0 and normalized not in seen:
+            normalized_codes.append(normalized)
+            seen.add(normalized)
+    return normalized_codes
 
 # =============================================================================
 # PROGRESS (optional)
@@ -660,8 +746,7 @@ def generate_row_variants(
         stcode = norm_status(st) if st != "" else None
         school_code, school_name, is_school = _school_lookup(sc)
 
-        # Alias rule per SSoT
-        alias_val = base["alias"] if is_school == 0 else base["mentor_id"]
+        alias_val = base.get("alias", "")
 
         rows.append(
             {
@@ -698,6 +783,7 @@ def _prepare_base_rows(
     insp: pd.DataFrame,
     *,
     cfg: BuildConfig,
+    domain_cfg: DomainBuildConfig,
     name_to_code: dict[str, int],
     code_to_name: dict[int, str],
     buckets: dict[str, list[tuple[str, int]]],
@@ -713,7 +799,13 @@ def _prepare_base_rows(
     unseen_groups: list[dict[str, Any]] = []
     unmatched_schools: list[dict[str, Any]] = []
 
-    finance_variants = list(cfg.finance_variants)
+    finance_variants = list(finance_cross(cfg.finance_variants, cfg=domain_cfg))
+    normal_statuses = [int(s) for s in cfg.policy.normal_statuses]
+    school_statuses = [int(s) for s in cfg.policy.school_statuses]
+    postal_col = cfg.postal_code_column or COL_POSTAL
+    school_count_col = cfg.school_count_column or COL_SCHOOL_COUNT
+    capacity_current_col = cfg.capacity_current_column or CAPACITY_CURRENT_COL
+    capacity_special_col = cfg.capacity_special_column or CAPACITY_SPECIAL_COL
 
     for row in insp.to_dict(orient="records"):
         mentor_id_raw = row.get(COL_MENTOR_ID, "")
@@ -728,6 +820,7 @@ def _prepare_base_rows(
 
         mentor_name = str(row.get(COL_MENTOR_NAME, "")).strip()
         manager_name = str(row.get(COL_MANAGER_NAME, "")).strip()
+        postal_raw = row.get(postal_col, "")
 
         alias_val = row.get(COL_POSTAL, "")
         alias_num = None
@@ -741,8 +834,8 @@ def _prepare_base_rows(
         school_count = safe_int_value(row.get(COL_SCHOOL_COUNT, 0), default=0)
 
         covered_now, special_limit, remaining_capacity = normalize_capacity_values(
-            row.get(CAPACITY_CURRENT_COL, 0),
-            row.get(CAPACITY_SPECIAL_COL, 0),
+            row.get(capacity_current_col, 0),
+            row.get(capacity_special_col, 0),
         )
 
         genders_raw = ensure_list([row.get(gender_col)]) if gender_col else [""]
@@ -792,8 +885,20 @@ def _prepare_base_rows(
         if not group_pairs:
             continue
 
-        alias_school = to_numlike_str(mentor_id_raw) or normalize_fa(mentor_id_raw) or mentor_id
-        center = center_from_manager(manager_name, cfg=cfg)
+        mentor_mode = classify_mentor_mode(
+            postal_code=postal_raw,
+            school_codes=school_codes,
+            cfg=domain_cfg,
+        )
+
+        alias_normal_raw = compute_alias(MentorType.NORMAL, postal_raw, mentor_id, cfg=domain_cfg)
+        alias_school_raw = compute_alias(MentorType.SCHOOL, postal_raw, mentor_id, cfg=domain_cfg)
+        alias_normal = alias_normal_raw or None
+        alias_school = alias_school_raw or None
+
+        center = domain_center_from_manager(manager_name, cfg=domain_cfg)
+        has_school_codes = any(code > 0 for code in school_codes)
+
         base = {
             "supporter": mentor_name,
             "manager": manager_name,
@@ -806,19 +911,20 @@ def _prepare_base_rows(
             "school_codes": school_codes,
             "schools_normal": [""],
             "finance": finance_variants,
-            "statuses_normal": [Status.STUDENT, Status.GRADUATE],
-            "statuses_school": [Status.STUDENT],
-            "alias_normal": alias_num,
+            "statuses_normal": normal_statuses,
+            "statuses_school": school_statuses,
+            "alias_normal": alias_normal,
             "alias_school": alias_school,
-            "can_normal": alias_num is not None,
-            "can_school": bool(school_codes) or school_count > 0,
+            "can_normal": mentor_mode in (MentorType.NORMAL, MentorType.DUAL) and bool(alias_normal),
+            "can_school": mentor_mode in (MentorType.SCHOOL, MentorType.DUAL) and has_school_codes,
             "capacity_current": covered_now,
             "capacity_special": special_limit,
             "capacity_remaining": remaining_capacity,
+            "school_count": school_count,
         }
 
         for sc in school_codes:
-            if sc not in code_to_name_school:
+            if str(sc) not in code_to_name_school:
                 unmatched_schools.append(
                     {"raw_school": str(sc), "supporter": mentor_name, "manager": manager_name}
                 )
@@ -837,6 +943,8 @@ def _explode_rows(
     school_col: str,
     type_label: str,
     code_to_name_school: dict[str, str],
+    cfg: BuildConfig,
+    domain_cfg: DomainBuildConfig,
 ) -> pd.DataFrame:
     if base.empty:
         return pd.DataFrame()
@@ -896,9 +1004,9 @@ def _explode_rows(
         }
     )
 
-    df[CAPACITY_CURRENT_COL] = safe_int_column(df, "capacity_current")
-    df[CAPACITY_SPECIAL_COL] = safe_int_column(df, "capacity_special")
-    df["remaining_capacity"] = safe_int_column(df, "capacity_remaining")
+    df[cap_current_col] = safe_int_column(df, "capacity_current")
+    df[cap_special_col] = safe_int_column(df, "capacity_special")
+    df[remaining_col] = safe_int_column(df, "capacity_remaining")
 
     df["مالی حکمت بنیاد"] = safe_int_column(df, "مالی حکمت بنیاد")
     df["جنسیت"] = df["gender_code"].astype("Int64")
@@ -930,17 +1038,36 @@ def _explode_rows(
         "دانش آموز فارغ",
         "مرکز گلستان صدرا",
         "مالی حکمت بنیاد",
-        "کد مدرسه",
+        school_code_col,
         "نام مدرسه",
         "عادی مدرسه",
         "جنسیت2",
         "دانش آموز فارغ2",
         "مرکز گلستان صدرا3",
-        CAPACITY_CURRENT_COL,
-        CAPACITY_SPECIAL_COL,
-        "remaining_capacity",
+        cap_current_col,
+        cap_special_col,
+        remaining_col,
     ]
-    return df[ordered_columns]
+    result = df[ordered_columns]
+    if not result.empty:
+        dedupe_cols = [
+            col
+            for col in (
+                "جایگزین",
+                "کد کارمندی پشتیبان",
+                "کدرشته",
+                "گروه آزمایشی",
+                "جنسیت",
+                "دانش آموز فارغ",
+                cfg.policy.stage_column("center"),
+                cfg.policy.stage_column("finance"),
+                school_code_col,
+            )
+            if col in result.columns
+        ]
+        if dedupe_cols:
+            result = result.drop_duplicates(subset=dedupe_cols, keep="first")
+    return result
 
 
 # =============================================================================
@@ -980,9 +1107,10 @@ def build_matrix(
     code_to_name_school, school_name_to_code = build_school_maps(schools_df)
 
     insp = insp_df.copy()
+    domain_cfg = _as_domain_config(cfg)
 
     if cfg.enable_capacity_gate:
-        insp, removed_mentors, r0_skipped = capacity_gate(insp, progress=progress)
+        insp, removed_mentors, r0_skipped = capacity_gate(insp, cfg=cfg, progress=progress)
     else:
         removed_mentors = pd.DataFrame()
         r0_skipped = True
@@ -1017,6 +1145,7 @@ def build_matrix(
     base_df, unseen_groups, unmatched_schools = _prepare_base_rows(
         insp_valid,
         cfg=cfg,
+        domain_cfg=domain_cfg,
         name_to_code=name_to_code,
         code_to_name=code_to_name,
         buckets=buckets,
@@ -1037,6 +1166,8 @@ def build_matrix(
         school_col="schools_normal",
         type_label="عادی",
         code_to_name_school=code_to_name_school,
+        cfg=cfg,
+        domain_cfg=domain_cfg,
     )
     school_df = _explode_rows(
         base_df.loc[base_df["can_school"]],
@@ -1045,9 +1176,18 @@ def build_matrix(
         school_col="school_codes",
         type_label="مدرسه‌ای",
         code_to_name_school=code_to_name_school,
+        cfg=cfg,
+        domain_cfg=domain_cfg,
     )
 
     matrix = pd.concat([normal_df, school_df], ignore_index=True, sort=False)
+    school_code_col = cfg.school_code_column or COL_SCHOOL
+    cap_current_col = cfg.capacity_current_column or CAPACITY_CURRENT_COL
+    cap_special_col = cfg.capacity_special_column or CAPACITY_SPECIAL_COL
+    remaining_col = cfg.remaining_capacity_column or "remaining_capacity"
+    finance_col = cfg.policy.stage_column("finance")
+    center_col = cfg.policy.stage_column("center")
+
     if matrix.empty:
         matrix = pd.DataFrame(
             columns=[
@@ -1060,17 +1200,17 @@ def build_matrix(
                 "کدرشته",
                 "جنسیت",
                 "دانش آموز فارغ",
-                "مرکز گلستان صدرا",
-                "مالی حکمت بنیاد",
-                "کد مدرسه",
+                center_col,
+                finance_col,
+                school_code_col,
                 "عادی مدرسه",
                 "نام مدرسه",
                 "جنسیت2",
                 "دانش آموز فارغ2",
                 "مرکز گلستان صدرا3",
-                CAPACITY_CURRENT_COL,
-                CAPACITY_SPECIAL_COL,
-                "remaining_capacity",
+                cap_current_col,
+                cap_special_col,
+                remaining_col,
             ]
         )
 
@@ -1092,10 +1232,36 @@ def build_matrix(
             lambda v: safe_int_value(v, default=ALIAS_FALLBACK_SORT)
         )
         matrix = matrix.sort_values(
-            by=["مرکز گلستان صدرا", "کدرشته", "_school_sort", "_alias_sort"],
+            by=[center_col, school_code_col, "_alias_sort"],
             kind="stable",
         )
-        matrix = matrix.drop(columns=["_school_sort", "_alias_sort"])
+        matrix = matrix.drop(columns=["_alias_sort"])
+
+        # Invariant: ensure finance variants available for each join key combination
+        join_key_cols = [col for col in cfg.policy.join_keys if col in matrix.columns]
+        key_without_finance = [col for col in join_key_cols if col != finance_col]
+        if key_without_finance:
+            expected_finance = set(cfg.finance_variants)
+            finance_check = (
+                matrix.groupby(key_without_finance)[finance_col]
+                .agg(lambda vals: set(int(v) for v in vals if pd.notna(v)))
+            )
+            missing_finance = finance_check[~finance_check.apply(lambda present: expected_finance.issubset(present))]
+            if not missing_finance.empty:
+                raise AssertionError("finance variants missing for some join-key combinations")
+
+        # Validation: ensure alias numeric range matches row type expectations
+        postal_min, postal_max = cfg.postal_valid_range or (1000, 9999)
+        alias_numeric = pd.to_numeric(matrix["جایگزین"], errors="coerce")
+        positive_alias = alias_numeric.notna() & (alias_numeric > 0)
+        low_mask = positive_alias & (alias_numeric < postal_min)
+        high_mask = positive_alias & alias_numeric.between(postal_min, postal_max, inclusive="both")
+        if (low_mask & (matrix["عادی مدرسه"] != "مدرسه‌ای")).any():
+            raise AssertionError("postal codes below minimum must be school rows")
+        if (high_mask & (matrix["عادی مدرسه"] != "عادی")).any():
+            raise AssertionError("postal codes in valid range must map to normal rows")
+        if (low_mask & (matrix[school_code_col] == 0)).any():
+            raise AssertionError("school rows with low postal codes must carry school codes")
 
     matrix.insert(0, "counter", range(1, len(matrix) + 1))
 
@@ -1105,9 +1271,9 @@ def build_matrix(
                 "total_rows": len(matrix),
                 "distinct_supporters": matrix["پشتیبان"].nunique() if not matrix.empty else 0,
                 "school_based_rows": int((matrix["عادی مدرسه"] == "مدرسه‌ای").sum()) if not matrix.empty else 0,
-                "finance_0_rows": int((matrix["مالی حکمت بنیاد"] == Finance.NORMAL).sum()) if not matrix.empty else 0,
-                "finance_1_rows": int((matrix["مالی حکمت بنیاد"] == Finance.BONYAD).sum()) if not matrix.empty else 0,
-                "finance_3_rows": int((matrix["مالی حکمت بنیاد"] == Finance.HEKMAT).sum()) if not matrix.empty else 0,
+                "finance_0_rows": int((matrix[finance_col] == Finance.NORMAL).sum()) if not matrix.empty else 0,
+                "finance_1_rows": int((matrix[finance_col] == Finance.BONYAD).sum()) if not matrix.empty else 0,
+                "finance_3_rows": int((matrix[finance_col] == Finance.HEKMAT).sum()) if not matrix.empty else 0,
                 "removed_mentors": 0 if removed_mentors is None else len(removed_mentors),
                 "r0_skipped": 1 if r0_skipped else 0,
             }
@@ -1160,7 +1326,13 @@ def validate_with_students(
     crosswalk_synonyms_df: pd.DataFrame | None = None,
     students_gender_mode: str = "auto",
     students_source_hint: str | None = None,
+    cfg: BuildConfig | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
+    cfg = cfg or BuildConfig()
+    domain_cfg = _as_domain_config(cfg)
+    school_code_col = cfg.school_code_column or COL_SCHOOL
+    center_col = cfg.policy.stage_column("center")
+
     stud_raw = students_df.copy()
     schools = schools_df.copy()
     _, school_name_to_code = build_school_maps(schools)
@@ -1197,16 +1369,17 @@ def validate_with_students(
 
     mat = matrix_df.copy()
     mat["alias_norm"] = mat["جایگزین"].apply(to_numlike_str)
-    mat["school_code"] = mat["کد مدرسه"].astype(str).str.strip()
+    mat["school_code"] = mat[school_code_col].astype(str).str.strip()
 
     def _student_type_from_postal(v: str) -> str:
         if not v:
             return "normal_by_alias"
         try:
             iv = int(v)
-            if iv < MIN_POSTAL_CODE:
+            postal_min, postal_max = cfg.postal_valid_range or (1000, 9999)
+            if iv < postal_min:
                 return "school_by_schoolcode"
-            if MIN_POSTAL_CODE <= iv <= MAX_POSTAL_CODE:
+            if postal_min <= iv <= postal_max:
                 return "normal_by_alias"
             return "school_by_mentorid"
         except Exception:
@@ -1234,21 +1407,15 @@ def validate_with_students(
         return (sub2, None if not sub2.empty else "status mismatch")
 
     def _check_center(row: pd.Series, sub: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
-        def _center_from_manager(n: str) -> int:
-            if "شهدخت" in str(n) and "کشاورز" in str(n):
-                return Center.GOLESTAN
-            if "آیناز" in str(n) and "هوشمند" in str(n):
-                return Center.SADRA
-            return Center.MARKAZ
-
-        expected = _center_from_manager(row["manager"])
-        sub2 = sub[sub["مرکز گلستان صدرا"] == expected]
+        expected = domain_center_from_manager(row["manager"], cfg=domain_cfg)
+        sub2 = sub[sub[center_col] == expected]
         return (sub2, None if not sub2.empty else "center mismatch (manager-based)")
 
     def _check_group(row: pd.Series, sub: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
         if row["group_code"] is None:
             return (sub, None)
-        sub2 = sub[sub["کدرشته"] == row["group_code"]]
+        group_col = cfg.policy.join_keys[0]
+        sub2 = sub[sub[group_col] == row["group_code"]]
         return (sub2, None if not sub2.empty else "group_code mismatch")
 
     def first_fail_reason(row: pd.Series) -> str:

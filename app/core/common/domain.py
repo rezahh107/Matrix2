@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
-from typing import Any, Mapping, Literal, TypedDict, final, TypeGuard
+from typing import Any, Iterable, Mapping, Literal, Sequence, TypedDict, final, TypeGuard
 
 from .errors import DataMissingError, InvalidCenterMappingError, InvalidGenderValueError
 from .normalization import normalize_fa, to_numlike_str
@@ -342,6 +342,14 @@ def mentor_type(postal_code: Any, school_count: int | None, *, cfg: BuildConfig)
     return MentorType.NORMAL
 
 
+def classify_mentor_mode(postal_code: Any, school_codes: Sequence[Any], *, cfg: BuildConfig) -> MentorType:
+    """طبقه‌بندی نوع پشتیبان بر اساس کدپستی و کدهای مدرسه."""
+
+    normalized_codes = [school_code_norm(code, cfg=cfg) for code in school_codes]
+    school_count = sum(1 for code in normalized_codes if code > 0)
+    return mentor_type(postal_code, school_count, cfg=cfg)
+
+
 def compute_alias(row_type: MentorType, postal_code: Any, mentor_id: Any, *, cfg: BuildConfig) -> str:
     """تولید مقدار ستون «جایگزین» براساس نوع ردیف.
 
@@ -355,6 +363,35 @@ def compute_alias(row_type: MentorType, postal_code: Any, mentor_id: Any, *, cfg
     if row_type is MentorType.SCHOOL:
         return _compute_school_alias(mentor_id)
     return _compute_normal_or_dual_alias(postal_code, mentor_id, cfg)
+
+
+def school_code_norm(value: Any, *, cfg: BuildConfig) -> int:
+    """نرمال‌سازی کد مدرسه به عدد صحیح غیرمنفی."""
+
+    text = to_numlike_str(value)
+    if not text:
+        return 0 if cfg.school_code_empty_as_zero else 0
+    code = _num_to_int_safe(text)
+    return max(code, 0)
+
+
+def finance_cross(values: Iterable[int] | None, *, cfg: BuildConfig) -> tuple[int, ...]:
+    """تضمین می‌کند که تمامی مقادیر مالی سیاست در لیست ورودی حضور داشته باشند."""
+
+    base = tuple(cfg.finance_variants)
+    if values is None:
+        return base
+    seen: set[int] = set()
+    ordered: list[int] = []
+    for item in values:
+        iv = int(item)
+        if iv not in seen:
+            ordered.append(iv)
+            seen.add(iv)
+    missing = [code for code in base if code not in seen]
+    if missing:
+        raise AssertionError(f"finance codes missing from variants: {missing}")
+    return tuple(ordered)
 
 
 def compute_mentor_type_str(row_type: MentorType) -> str:
@@ -605,6 +642,7 @@ __all__ = [
     "MentorType", "Status", "Gender", "FinanceCode",
     "BuildConfig", "JoinKey", "MentorIdentity", "Capacity", "MatrixRow", "ImportToSabtRow",
     "norm_status", "norm_gender", "center_from_manager", "mentor_type", "compute_alias", "compute_mentor_type_str",
+    "classify_mentor_mode", "school_code_norm", "finance_cross",
     "DecisionReason", "TraceDict",
     "StudentRow", "JoinKeyDict", "MentorDict",
 ]
