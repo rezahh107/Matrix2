@@ -71,6 +71,15 @@ class PolicyAliasRule:
 
 
 @dataclass(frozen=True)
+class ExcelOptions:
+    """تنظیمات خروجی Excel (جهت، فونت و حالت هدر)."""
+
+    rtl: bool
+    font_name: str
+    header_mode: str
+
+
+@dataclass(frozen=True)
 class PolicyConfig:
     """ساختار دادهٔ فقط‌خواندنی برای نگهداری سیاست بارگذاری‌شده."""
 
@@ -87,6 +96,7 @@ class PolicyConfig:
     alias_rule: PolicyAliasRule
     columns: PolicyColumns
     column_aliases: Mapping[str, Dict[str, str]]
+    excel: ExcelOptions
 
     @property
     def ranking(self) -> List[str]:
@@ -170,6 +180,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     alias_rule = _normalize_alias_rule(data["alias_rule"])
     columns = _normalize_columns(data["columns"])
     column_aliases = _normalize_column_aliases(data.get("column_aliases", {}))
+    excel = _normalize_excel_options(data.get("excel"))
 
     return {
         "version": version,
@@ -185,6 +196,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "alias_rule": alias_rule,
         "columns": columns,
         "column_aliases": column_aliases,
+        "excel": excel,
     }
 
 
@@ -302,6 +314,20 @@ def _normalize_column_aliases(value: object) -> Mapping[str, Dict[str, str]]:
             if isinstance(k, (str, bytes)) and isinstance(v, (str, bytes)) and str(v).strip()
         }
     return normalized
+
+
+def _normalize_excel_options(value: object | None) -> ExcelOptions:
+    if value is None:
+        return ExcelOptions(rtl=True, font_name="Vazirmatn", header_mode="fa")
+    if not isinstance(value, Mapping):
+        raise TypeError("excel must be a mapping")
+    rtl = _ensure_bool("excel.rtl", value.get("rtl", True))
+    font_raw = value.get("font_name", "Vazirmatn")
+    font_name = str(font_raw or "Vazirmatn")
+    header_mode = str(value.get("header_mode", "fa"))
+    if header_mode not in {"fa", "en", "fa_en"}:
+        raise ValueError("excel.header_mode must be one of {'fa','en','fa_en'}")
+    return ExcelOptions(rtl=rtl, font_name=font_name, header_mode=header_mode)
 
 
 def _normalize_join_keys(raw: object) -> List[str]:
@@ -466,6 +492,7 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         ),
         column_aliases={str(source): {str(k): str(v) for k, v in aliases.items()}
                         for source, aliases in data["column_aliases"].items()},
+        excel=data["excel"],
     )
 
 

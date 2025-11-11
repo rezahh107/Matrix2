@@ -44,5 +44,10 @@
     "capacity_current": "تعداد داوطلبان تحت پوشش",
     "capacity_special": "تعداد تحت پوشش خاص",
     "remaining_capacity": "remaining_capacity"
+  },
+  "excel": {
+    "rtl": true,
+    "font_name": "Vazirmatn",
+    "header_mode": "fa"
   }
 }

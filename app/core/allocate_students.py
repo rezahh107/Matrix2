@@ -54,7 +54,7 @@ from typing import Callable, Collection, Dict, List, Mapping, Sequence
 import pandas as pd
 from pandas.api import types as pd_types
 
-from .common.columns import CANON, collect_aliases_for, resolve_aliases
+from .common.columns import CANON, accepted_synonyms, coerce_semantics, resolve_aliases
 from .common.column_normalizer import normalize_input_columns
 from .common.filters import apply_join_filters
 from .common.ids import build_mentor_id_map, inject_mentor_id
@@ -149,14 +149,12 @@ def _require_columns(df: pd.DataFrame, required: Collection[str], source: str) -
     missing = [col for col in required if col not in df.columns]
     if not missing:
         return
-    alias_map = collect_aliases_for(source)
     accepted: Dict[str, List[str]] = {}
     for col in missing:
-        options = [col]
-        for alias, target in alias_map.items():
-            if target == col and alias not in options:
-                options.append(alias)
-        accepted[col] = options
+        synonyms = list(accepted_synonyms(source, col))
+        if col not in synonyms:
+            synonyms.insert(0, col)
+        accepted[col] = synonyms
     raise ValueError(f"Missing columns: {missing} — accepted synonyms: {accepted}")
 
 
@@ -249,12 +247,14 @@ def allocate_batch(
         policy = load_policy()
 
     students = resolve_aliases(students, "report")
+    students = coerce_semantics(students, "report")
     students, _ = normalize_input_columns(
         students, kind="StudentReport", include_alias=False, report=False
     )
     _require_columns(students, REQUIRED_STUDENT_COLUMNS, "report")
 
     candidate_pool = resolve_aliases(candidate_pool, "inspactor")
+    candidate_pool = coerce_semantics(candidate_pool, "inspactor")
     candidate_pool, _ = normalize_input_columns(
         candidate_pool, kind="MentorPool", include_alias=False, report=False
     )

@@ -68,6 +68,7 @@ def _valid_payload() -> dict[str, object]:
             "capacity_special": "تعداد تحت پوشش خاص",
             "remaining_capacity": "remaining_capacity",
         },
+        "excel": {"rtl": True, "font_name": "Vazirmatn", "header_mode": "fa"},
     }
 
 
@@ -197,6 +198,21 @@ def test_ranking_legacy_strings_supported() -> None:
         "min_allocations_new",
         "min_mentor_id",
     ]
+
+
+def test_excel_options_parsing() -> None:
+    payload = _valid_payload()
+    policy = parse_policy_dict(payload)
+    assert policy.excel.header_mode == "fa"
+    assert policy.excel.rtl is True
+    assert policy.excel.font_name == "Vazirmatn"
+
+    payload_override = _valid_payload()
+    payload_override["excel"] = {"rtl": False, "font_name": "Tahoma", "header_mode": "fa_en"}
+    policy_override = parse_policy_dict(payload_override)
+    assert policy_override.excel.rtl is False
+    assert policy_override.excel.font_name == "Tahoma"
+    assert policy_override.excel.header_mode == "fa_en"
 
 
 def test_policy_column_aliases_supported() -> None:

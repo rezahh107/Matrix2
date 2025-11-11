@@ -11,7 +11,7 @@ import re
 import tempfile
 from os import PathLike
 from pathlib import Path
-from typing import Dict, Iterator, Tuple
+from typing import Dict, Iterator, List, Tuple
 
 import pandas as pd
 
@@ -39,6 +39,65 @@ def _safe_sheet_name(name: str, taken: set[str]) -> str:
         index += 1
     taken.add(candidate)
     return candidate
+
+
+def _apply_excel_formatting(
+    writer: pd.ExcelWriter,
+    *,
+    engine: str,
+    rtl: bool,
+    font_name: str | None,
+    sheet_frames: Dict[str, pd.DataFrame],
+) -> None:
+    """اعمال تنظیمات RTL و فونت پیش‌فرض برای خروجی Excel."""
+
+    if not rtl and not font_name:
+        return
+    if engine == "xlsxwriter":
+        workbook = writer.book  # type: ignore[attr-defined]
+        fmt = workbook.add_format({"font_name": font_name}) if font_name else None
+        for worksheet in writer.sheets.values():
+            if rtl:
+                worksheet.right_to_left()
+            if fmt is not None:
+                worksheet.set_column(0, 16384, None, fmt)
+        return
+
+    if engine != "openpyxl":
+        return
+
+    try:
+        from openpyxl.styles import Font
+    except Exception:  # pragma: no cover - dependency edge case
+        Font = None  # type: ignore[assignment]
+
+    workbook = writer.book  # type: ignore[attr-defined]
+    for sheet_name, df in sheet_frames.items():
+        worksheet = workbook[sheet_name]
+        if rtl:
+            worksheet.sheet_view.rightToLeft = True
+        if not font_name or Font is None:
+            continue
+        header_font = Font(name=font_name)
+        for cell in next(worksheet.iter_rows(min_row=1, max_row=1), []):
+            cell.font = header_font
+        if df.empty:
+            continue
+        text_columns = [
+            idx
+            for idx, column in enumerate(df.columns, start=1)
+            if str(df[column].dtype) in {"object", "string"}
+        ]
+        max_rows = min(len(df) + 1, 50)
+        for col_idx in text_columns:
+            for row in worksheet.iter_rows(
+                min_row=2,
+                max_row=max_rows,
+                min_col=col_idx,
+                max_col=col_idx,
+            ):
+                for cell in row:
+                    cell.font = header_font
 
 
 @contextlib.contextmanager
@@ -89,6 +148,9 @@ def _pick_engine() -> str:
 def write_xlsx_atomic(
     data_dict: Dict[str, pd.DataFrame],
     filepath: Path | str | PathLike[str],
+    *,
+    rtl: bool = False,
+    font_name: str | None = "Vazirmatn",
 ) -> None:
     """نوشتن امن و اتمیک Excel با مدیریت نام شیت و انتخاب engine.
 
@@ -104,17 +166,29 @@ def write_xlsx_atomic(
         data_dict: نگاشت نام شیت به دیتافریم.
         filepath: مسیر فایل خروجی (``str``/``Path``). در صورت نبود پوشهٔ مقصد
             ساخته می‌شود.
+        rtl: در صورت True، شیت‌ها راست‌به‌چپ خواهند شد.
+        font_name: نام فونت پیش‌فرض برای نوشتن (در صورت ``None`` فونت پیش‌فرض
+            Excel استفاده می‌شود).
     """
 
     target_path = Path(filepath)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     engine = _pick_engine()
     taken: set[str] = set()
+    written_frames: Dict[str, pd.DataFrame] = {}
     with _temporary_file_path(suffix=".xlsx", directory=target_path.parent) as tmp_path:
         with pd.ExcelWriter(tmp_path, engine=engine) as writer:
             for sheet_name, df in data_dict.items():
                 safe_name = _safe_sheet_name(str(sheet_name), taken)
                 df.to_excel(writer, sheet_name=safe_name, index=False)
+                written_frames[safe_name] = df
+            _apply_excel_formatting(
+                writer,
+                engine=engine,
+                rtl=rtl,
+                font_name=font_name,
+                sheet_frames=written_frames,
+            )
         os.replace(tmp_path, target_path)
 
 

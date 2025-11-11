@@ -96,6 +96,23 @@ def test_write_xlsx_atomic_respects_env_override(tmp_path: Path, monkeypatch: py
     assert out.exists() and out.stat().st_size > 0
 
 
+@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای بررسی RTL/فونت")
+def test_write_xlsx_atomic_applies_rtl_and_font(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EXCEL_ENGINE", "openpyxl")
+    df = pd.DataFrame({"کدرشته": [101]})
+    out = tmp_path / "rtl.xlsx"
+
+    write_xlsx_atomic({"Sheet": df}, out, rtl=True, font_name="Tahoma")
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(out)
+    ws = wb["Sheet"]
+
+    assert ws.sheet_view.rightToLeft is True
+    assert ws.cell(row=1, column=1).font.name == "Tahoma"
+
+
 @pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای خواندن .xlsx")
 def test_read_excel_first_sheet_preserves_alt_code_as_text(tmp_path: Path) -> None:
     data = pd.DataFrame({ALT_CODE_COLUMN: [123456], "value": [1]})
