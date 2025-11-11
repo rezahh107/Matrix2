@@ -49,6 +49,31 @@ def _bootstrap_logging() -> LoggingContext:
     return _LOGGING_CONTEXT
 
 
+def _log_startup_exception(
+    target_logger: logging.Logger,
+    context: LoggingContext,
+    *,
+    level: int,
+    report_message: str,
+    log_message: str,
+    traceback_text: str,
+) -> tuple[str, Path]:
+    """ثبت خطا، ساخت گزارش تفصیلی و بازگرداندن شناسه و مسیر گزارش."""
+
+    error_id = context.new_error_id()
+    report_path = context.write_error_report(
+        error_id=error_id,
+        message=report_message,
+        traceback_text=traceback_text,
+    )
+    target_logger.log(
+        level,
+        log_message,
+        extra={"error_id": error_id, "report_path": str(report_path)},
+    )
+    return error_id, report_path
+
+
 def setup_environment() -> None:
     """
     پیکربندی محیط اجرا با مدیریت خطا و بهینه‌سازی تنظیمات
@@ -343,15 +368,13 @@ def main() -> int:
         # خطاهای مربوط به import ماژول‌ها
         error_msg = str(e)
         error_details = traceback.format_exc()
-        error_id = context.new_error_id()
-        report_path = context.write_error_report(
-            error_id=error_id,
-            message=error_msg,
+        _, report_path = _log_startup_exception(
+            logger,
+            context,
+            level=logging.ERROR,
+            report_message=error_msg,
+            log_message=f"خطای Import: {error_msg}",
             traceback_text=error_details,
-        )
-        logger.error(
-            f"خطای Import: {error_msg}",
-            extra={"error_id": error_id, "report_path": str(report_path)},
         )
         show_critical_error(
             "خطا در بارگذاری کامپوننت‌های برنامه.\n\n"
@@ -368,16 +391,13 @@ def main() -> int:
         # مدیریت خطاهای بحرانی
         error_message = f"خطای غیرمنتظره: {str(e)}"
         technical_details = traceback.format_exc()
-        error_id = context.new_error_id()
-        report_path = context.write_error_report(
-            error_id=error_id,
-            message=error_message,
+        _, report_path = _log_startup_exception(
+            logger,
+            context,
+            level=logging.CRITICAL,
+            report_message=error_message,
+            log_message=f"خطای بحرانی: {error_message}\n{technical_details}",
             traceback_text=technical_details,
-        )
-
-        logger.critical(
-            f"خطای بحرانی: {error_message}\n{technical_details}",
-            extra={"error_id": error_id, "report_path": str(report_path)},
         )
 
         show_critical_error(
