@@ -131,7 +131,7 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
     students_path = Path(args.students)
     pool_path = Path(args.pool)
     output = Path(args.output)
-    capacity_column = args.capacity_column
+    capacity_column = args.capacity_column or policy.columns.remaining_capacity
 
     reader_students = _detect_reader(students_path)
     reader_pool = _detect_reader(pool_path)
@@ -190,8 +190,8 @@ def _build_parser() -> argparse.ArgumentParser:
     alloc_cmd.add_argument("--output", required=True, help="مسیر Excel خروجی تخصیص")
     alloc_cmd.add_argument(
         "--capacity-column",
-        default="remaining_capacity",
-        help="نام ستون ظرفیت باقی‌مانده در استخر",
+        default=None,
+        help="نام ستون ظرفیت باقی‌مانده در استخر (پیش‌فرض از policy)",
     )
     alloc_cmd.add_argument(
         "--policy",

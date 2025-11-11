@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from pathlib import Path
 from typing import List, Tuple
@@ -12,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.allocate_students import allocate_batch
 from app.core.common.types import JoinKeyValues
+from app.core.policy_loader import parse_policy_dict
 
 
 @pytest.fixture()
@@ -141,6 +143,21 @@ def test_allocate_batch_invalid_join_value_raises(_base_pool: pd.DataFrame) -> N
         allocate_batch(students, _base_pool)
 
 
+def test_policy_required_fields_enforced_from_config(
+    _base_pool: pd.DataFrame,
+) -> None:
+    payload = json.loads(Path("config/policy.json").read_text(encoding="utf-8"))
+    payload["required_student_fields"] = payload["join_keys"] + ["exam_group"]
+    policy = parse_policy_dict(payload)
+
+    students = _single_student()
+    allocate_batch(students, _base_pool, policy=policy)
+
+    missing_group = students.drop(columns=["گروه_آزمایشی"]).copy()
+    with pytest.raises(ValueError, match="Missing columns"):
+        allocate_batch(missing_group, _base_pool, policy=policy)
+
+
 @pytest.mark.skipif(importlib.util.find_spec("openpyxl") is None, reason="openpyxl لازم است")
 def test_allocation_outputs_excel_openable(tmp_path: Path, _base_pool: pd.DataFrame) -> None:
     from openpyxl import load_workbook
@@ -167,3 +184,73 @@ def test_allocation_outputs_excel_openable(tmp_path: Path, _base_pool: pd.DataFr
 
     workbook = load_workbook(out_path)
     assert set(workbook.sheetnames) == {"allocations", "pool", "logs", "trace"}
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("openpyxl") is None
+    and importlib.util.find_spec("xlsxwriter") is None,
+    reason="نیاز به یکی از موتورهای Excel (openpyxl/xlsxwriter)",
+)
+def test_cli_capacity_column_default_from_policy(tmp_path: Path) -> None:
+    from app.infra import cli
+
+    policy_path = tmp_path / "policy.json"
+    payload = json.loads(Path("config/policy.json").read_text(encoding="utf-8"))
+    payload["columns"]["remaining_capacity"] = "ظرفیت"
+    with policy_path.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False)
+
+    students_path = tmp_path / "students.xlsx"
+    pool_path = tmp_path / "pool.xlsx"
+    output_path = tmp_path / "out.xlsx"
+
+    pd.DataFrame(
+        [
+            {
+                "student_id": "S1",
+                "کدرشته": 1201,
+                "گروه_آزمایشی": "تجربی",
+                "جنسیت": 1,
+                "دانش_آموز_فارغ": 0,
+                "مرکز_گلستان_صدرا": 1,
+                "مالی_حکمت_بنیاد": 0,
+                "کد_مدرسه": 100,
+            }
+        ]
+    ).to_excel(students_path, index=False)
+
+    pd.DataFrame(
+        [
+            {
+                "پشتیبان": "زهرا",
+                "کد کارمندی پشتیبان": "EMP-1",
+                "کدرشته": 1201,
+                "گروه آزمایشی": "تجربی",
+                "جنسیت": 1,
+                "دانش آموز فارغ": 0,
+                "مرکز گلستان صدرا": 1,
+                "مالی حکمت بنیاد": 0,
+                "کد مدرسه": 100,
+                "ظرفیت": 1,
+                "occupancy_ratio": 0.2,
+                "allocations_new": 0,
+            }
+        ]
+    ).to_excel(pool_path, index=False)
+
+    rc = cli.main(
+        [
+            "allocate",
+            "--students",
+            str(students_path),
+            "--pool",
+            str(pool_path),
+            "--output",
+            str(output_path),
+            "--policy",
+            str(policy_path),
+        ]
+    )
+
+    assert rc == 0
+    assert output_path.exists()
