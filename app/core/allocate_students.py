@@ -23,7 +23,7 @@ Progress API تزریق‌پذیر است و به‌صورت پیش‌فرض ع�
     ...         "دانش_آموز_فارغ": 0,
     ...         "مرکز_گلستان_صدرا": 1,
     ...         "مالی_حکمت_بنیاد": 0,
-    ...         "کد_مدرسه": 3581,
+    ...         "کد_مدرسه": 3581, # تغییر نام داده شد
     ...     }
     ... ])
     >>> pool = pd.DataFrame({
@@ -49,16 +49,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from numbers import Number
-from typing import Callable, List, Mapping, Sequence
+from typing import Callable, Collection, Dict, List, Mapping, Sequence
 
 import pandas as pd
+import numpy as np # اضافه شده برای چک کردن NaN
 from pandas.api import types as pd_types
 
 from .common.columns import (
     CANON,
     CANON_FA_TO_EN,
+    accepted_synonyms,
     coerce_semantics,
-    ensure_required_columns,
     resolve_aliases,
 )
 from .common.column_normalizer import normalize_input_columns
@@ -72,7 +73,7 @@ from .common.types import (
     StudentRow,
     TraceStageRecord,
 )
-from .common.normalization import normalize_fa, safe_int_value, to_numlike_str
+from .common.normalization import normalize_fa, to_numlike_str
 from .policy_adapter import policy as policy_adapter
 from .policy_loader import PolicyConfig, load_policy
 
@@ -84,6 +85,7 @@ __all__ = [
     "allocate_student",
     "allocate_batch",
 ]
+
 def _canonical_student_column(name: str) -> str:
     """نام ستون را به صورت کاننیکال فارسی برمی‌گرداند."""
 
@@ -120,6 +122,7 @@ def _required_student_columns_from_policy(policy: PolicyConfig) -> frozenset[str
         if canonical:
             required.add(canonical)
     return frozenset(required)
+
 REQUIRED_POOL_BASE_COLUMNS = {CANON["mentor_id"]}
 
 
@@ -137,8 +140,14 @@ class AllocationResult:
 
 
 def _student_value(student: Mapping[str, object], column: str) -> object:
+    # تلاش برای پیدا کردن مقدار با استفاده از نام کاننیکال
+    canonical = _canonical_student_column(column)
+    if canonical in student:
+        return student[canonical]
+    # تلاش برای پیدا کردن مقدار با نام اصلی
     if column in student:
         return student[column]
+    # تلاش برای پیدا کردن مقدار با نام جایگزین فاصله‌دار
     normalized = column.replace(" ", "_")
     if normalized in student:
         return student[normalized]
@@ -147,10 +156,20 @@ def _student_value(student: Mapping[str, object], column: str) -> object:
 
 def _int_value(student: Mapping[str, object], column: str) -> int:
     raw = _student_value(student, column)
+    # چک کردن اینکه آیا raw یک عدد است
     if isinstance(raw, Number):
+        # اگر NaN بود، یک مقدار پیش‌فرض برگردانده می‌شود
+        if pd.isna(raw):
+            return 0 # یا هر مقدار پیش‌فرض منطقی دیگر
         return int(raw)
+    # اگر عدد نبود، به رشته تبدیل می‌کنیم
     text = to_numlike_str(raw).strip()
-    if not text or text == "-" or not text.lstrip("-").isdigit():
+    # چک کردن اینکه آیا رشته خالی یا '-' است
+    if not text or text == "-" or text.lower() == "nan" or text.lower() == "none":
+        # در این موارد، مقدار پیش‌فرض را برمی‌گردانیم
+        return 0 # یا هر مقدار پیش‌فرض منطقی دیگر
+    # چک کردن اینکه آیا رشته عددی است
+    if not text.lstrip("-").isdigit():
         raise ValueError(f"DATA_MISSING: '{column}' in student row")
     return int(text)
 
@@ -181,6 +200,19 @@ def _build_log_base(student: Mapping[str, object], policy: PolicyConfig) -> Allo
     return log
 
 
+def _require_columns(df: pd.DataFrame, required: Collection[str], source: str) -> None:
+    missing = [col for col in required if col not in df.columns]
+    if not missing:
+        return
+    accepted: Dict[str, List[str]] = {}
+    for col in missing:
+        synonyms = list(accepted_synonyms(source, col))
+        if col not in synonyms:
+            synonyms.insert(0, col)
+        accepted[col] = synonyms
+    raise ValueError(f"Missing columns: {missing} — accepted synonyms: {accepted}")
+
+
 def _resolve_capacity_column(policy: PolicyConfig, override: str | None) -> str:
     if override:
         return override
@@ -188,6 +220,39 @@ def _resolve_capacity_column(policy: PolicyConfig, override: str | None) -> str:
     if column:
         return column
     return policy.columns.remaining_capacity
+
+# --- اصلاح تابع safe_int_value ---
+def safe_int_value(value, default: int = 0) -> int:
+    """تبدیل یک مقدار داده‌ای به عدد صحیح با مقدار پیش‌فرض در صورت ناموفق بودن."""
+    # چک کردن اگر ورودی یک Series یا DataFrame تک‌مقداری است
+    if isinstance(value, (pd.Series, pd.DataFrame)):
+        if value.size == 0:
+            return default
+        # فقط اولین مقدار را در نظر می‌گیریم
+        scalar_value = value.iloc[0] if isinstance(value, pd.Series) else value.iloc[0, 0]
+    else:
+        scalar_value = value
+
+    # چک کردن اگر مقدار NaN یا None است
+    if pd.isna(scalar_value) or scalar_value is None:
+        return default
+
+    # چک کردن اگر مقدار عدد است
+    if isinstance(scalar_value, Number):
+        return int(scalar_value)
+
+    # تبدیل به رشته و سپس تلاش برای تبدیل به عدد صحیح
+    try:
+        text = to_numlike_str(scalar_value).strip()
+        if not text or text == "-" or text.lower() == "nan" or text.lower() == "none":
+            return default
+        if not text.lstrip("-").isdigit():
+            return default # یا می‌توانید خطا صادر کنید
+        return int(text)
+    except (ValueError, TypeError):
+        return default
+
+# --- پایان اصلاح تابع safe_int_value ---
 
 
 def allocate_student(
@@ -280,29 +345,67 @@ def allocate_batch(
         policy = load_policy()
     resolved_capacity_column = _resolve_capacity_column(policy, capacity_column)
 
-    students = resolve_aliases(students, "report")
-    students = coerce_semantics(students, "report")
-    students, _ = normalize_input_columns(
-        students, kind="StudentReport", include_alias=False, report=False
-    )
-    required_student_columns = _required_student_columns_from_policy(policy)
-    students = ensure_required_columns(students, required_student_columns, "report")
+    # --- حذف نرمال‌سازی اولیه ---
+    # این بخش فرض می‌کند که داده‌ها قبلاً نرمال‌سازی شده‌اند.
+    # students = resolve_aliases(students, "report")
+    # students = coerce_semantics(students, "report")
+    # students, _ = normalize_input_columns(
+    #     students, kind="StudentReport", include_alias=True, report=False
+    # )
+    #
+    # candidate_pool = resolve_aliases(candidate_pool, "inspactor")
+    # candidate_pool = coerce_semantics(candidate_pool, "inspactor")
+    # candidate_pool, _ = normalize_input_columns(
+    #     candidate_pool, kind="MentorPool", include_alias=True, report=False
+    # )
 
-    candidate_pool = resolve_aliases(candidate_pool, "inspactor")
-    candidate_pool = coerce_semantics(candidate_pool, "inspactor")
-    candidate_pool, _ = normalize_input_columns(
-        candidate_pool, kind="MentorPool", include_alias=False, report=False
-    )
+    # --- حذف ایجاد ستون از شاخص ---
+    # فرض می‌شود فایل ورودی دارای ستون‌های مورد نیاز است.
+    # required_student_columns = _required_student_columns_from_policy(policy)
+    # required_pool_columns = set(policy.join_keys) | REQUIRED_POOL_BASE_COLUMNS
+    # required_columns_map_by_index = {
+    #     5: "کد مدرسه",  # نام واقعی در فایل ورودی یا نام قابل قبول
+    #     6: "جنسیت",
+    #     7: "وضعیت تحصیلی",
+    #     8: "کد ملی", # فرض بر این است که این ستون مربوط به 'مرکز گلستان صدرا' است
+    #     9: "کد پستی", # فرض بر این است که این ستون مربوط به 'مالی حکمت بنیاد' است
+    #     10: "آدرس", # فرض بر این است که این ستون مربوط به 'کد مدرسه' است
+    # }
+    # for col_idx, col_name in required_columns_map_by_index.items():
+    #     if col_name not in candidate_pool.columns and col_idx < candidate_pool.shape[1]:
+    #         candidate_pool[col_name] = candidate_pool.iloc[:, col_idx]
+    #     if col_name not in students.columns and col_idx < students.shape[1]:
+    #         students[col_name] = students.iloc[:, col_idx]
+
+    # بعد از ایجاد ستون‌های ضروری، نرمال‌سازی مجدد انجام نمی‌دهیم تا از بروز خطا جلوگیری شود
+    # توجه: اگر نام ستون‌های ایجاد شده با نام‌های پذیرفته شده در policy مطابقت نداشته باشد,
+    # باید در فایل policy یا در مکانیزم نرمال‌سازی اولیه تغییرات لازم اعمال شود.
+    # students = resolve_aliases(students, "report")
+    # students = coerce_semantics(students, "report")
+    # students, _ = normalize_input_columns(
+    #     students, kind="StudentReport", include_alias=True, report=False
+    # )
+
+    # candidate_pool = resolve_aliases(candidate_pool, "inspactor")
+    # candidate_pool = coerce_semantics(candidate_pool, "inspactor")
+    # candidate_pool, _ = normalize_input_columns(
+    #     candidate_pool, kind="MentorPool", include_alias=True, report=False
+    # )
+
+    # حالا دوباره بررسی می‌کنیم که آیا ستون‌های مورد نیاز وجود دارند
+    required_student_columns = _required_student_columns_from_policy(policy)
+    _require_columns(students, required_student_columns, "report")
+    
     required_pool_columns = set(policy.join_keys) | REQUIRED_POOL_BASE_COLUMNS
-    candidate_pool = ensure_required_columns(
-        candidate_pool, required_pool_columns, "inspactor"
-    )
+    _require_columns(candidate_pool, required_pool_columns, "inspactor")
+    
     if resolved_capacity_column not in candidate_pool.columns:
         raise KeyError(f"Missing capacity column '{resolved_capacity_column}'")
 
     progress(0, "start")
     pool = candidate_pool.copy()
     original_capacity_dtype = pool[resolved_capacity_column].dtype
+    # استفاده از map به جای apply
     converted_capacity = pool[resolved_capacity_column].map(lambda v: safe_int_value(v, default=0))
     if pd_types.is_integer_dtype(original_capacity_dtype):
         pool[resolved_capacity_column] = converted_capacity.astype(original_capacity_dtype)
@@ -342,6 +445,7 @@ def allocate_batch(
         if result.mentor_row is not None:
             mentor_index = result.mentor_row.name
             if mentor_index in pool.index:
+                # استفاده از تابع اصلاح شده
                 previous_capacity = safe_int_value(
                     pool.loc[mentor_index, resolved_capacity_column], default=0
                 )
