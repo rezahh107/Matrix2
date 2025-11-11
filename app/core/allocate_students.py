@@ -49,10 +49,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from numbers import Number
-from typing import Callable, List, Mapping, Sequence
+from typing import Callable, Collection, Dict, List, Mapping, Sequence
 
 import pandas as pd
+from pandas.api import types as pd_types
 
+from .common.columns import CANON, collect_aliases_for, resolve_aliases
 from .common.column_normalizer import normalize_input_columns
 from .common.filters import apply_join_filters
 from .common.ids import build_mentor_id_map, inject_mentor_id
@@ -64,6 +66,7 @@ from .common.types import (
     StudentRow,
     TraceStageRecord,
 )
+from .common.normalization import safe_int_value, to_numlike_str
 from .policy_loader import PolicyConfig, load_policy
 
 ProgressFn = Callable[[int, str], None]
@@ -74,6 +77,14 @@ __all__ = [
     "allocate_student",
     "allocate_batch",
 ]
+
+
+REQUIRED_STUDENT_COLUMNS = {
+    CANON["group_code"],
+    CANON["gender"],
+    CANON["graduation_status"],
+}
+REQUIRED_POOL_BASE_COLUMNS = {CANON["mentor_id"]}
 
 
 def _noop_progress(_: int, __: str) -> None:
@@ -99,13 +110,13 @@ def _student_value(student: Mapping[str, object], column: str) -> object:
 
 
 def _int_value(student: Mapping[str, object], column: str) -> int:
-    value = _student_value(student, column)
-    if isinstance(value, Number):
-        return int(value)
-    text = str(value).strip()
-    if not text:
-        raise ValueError(f"Expected int-compatible value for '{column}'")
-    return int(float(text))
+    raw = _student_value(student, column)
+    if isinstance(raw, Number):
+        return int(raw)
+    text = to_numlike_str(raw).strip()
+    if not text or text == "-" or not text.lstrip("-").isdigit():
+        raise ValueError(f"DATA_MISSING: '{column}' in student row")
+    return int(text)
 
 
 def _build_log_base(student: Mapping[str, object], policy: PolicyConfig) -> AllocationLogRecord:
@@ -128,8 +139,25 @@ def _build_log_base(student: Mapping[str, object], policy: PolicyConfig) -> Allo
         "error_type": None,
         "detailed_reason": None,
         "suggested_actions": [],
+        "capacity_before": None,
+        "capacity_after": None,
     }
     return log
+
+
+def _require_columns(df: pd.DataFrame, required: Collection[str], source: str) -> None:
+    missing = [col for col in required if col not in df.columns]
+    if not missing:
+        return
+    alias_map = collect_aliases_for(source)
+    accepted: Dict[str, List[str]] = {}
+    for col in missing:
+        options = [col]
+        for alias, target in alias_map.items():
+            if target == col and alias not in options:
+                options.append(alias)
+        accepted[col] = options
+    raise ValueError(f"Missing columns: {missing} — accepted synonyms: {accepted}")
 
 
 def allocate_student(
@@ -220,15 +248,33 @@ def allocate_batch(
     if policy is None:
         policy = load_policy()
 
+    students = resolve_aliases(students, "report")
     students, _ = normalize_input_columns(
         students, kind="StudentReport", include_alias=False, report=False
     )
+    _require_columns(students, REQUIRED_STUDENT_COLUMNS, "report")
+
+    candidate_pool = resolve_aliases(candidate_pool, "inspactor")
     candidate_pool, _ = normalize_input_columns(
         candidate_pool, kind="MentorPool", include_alias=False, report=False
     )
+    required_pool_columns = set(policy.join_keys) | REQUIRED_POOL_BASE_COLUMNS
+    _require_columns(candidate_pool, required_pool_columns, "inspactor")
+    if capacity_column not in candidate_pool.columns:
+        raise KeyError(f"Missing capacity column '{capacity_column}'")
 
     progress(0, "start")
     pool = candidate_pool.copy()
+    original_capacity_dtype = pool[capacity_column].dtype
+    converted_capacity = pool[capacity_column].map(lambda v: safe_int_value(v, default=0))
+    if pd_types.is_integer_dtype(original_capacity_dtype):
+        pool[capacity_column] = converted_capacity.astype(original_capacity_dtype)
+    else:
+        pool[capacity_column] = converted_capacity.astype("Int64")
+    mentor_col = CANON["mentor_id"]
+    pool[mentor_col] = (
+        pool[mentor_col].astype("string").str.strip().fillna("").astype(object)
+    )
     id_map = build_mentor_id_map(pool)
     pool = inject_mentor_id(pool, id_map)
 
@@ -259,9 +305,13 @@ def allocate_batch(
         if result.mentor_row is not None:
             mentor_index = result.mentor_row.name
             if mentor_index in pool.index:
-                pool.loc[mentor_index, capacity_column] = (
-                    pool.loc[mentor_index, capacity_column] - 1
+                previous_capacity = safe_int_value(
+                    pool.loc[mentor_index, capacity_column], default=0
                 )
+                updated_capacity = max(previous_capacity - 1, 0)
+                pool.loc[mentor_index, capacity_column] = updated_capacity
+                logs[-1]["capacity_before"] = previous_capacity
+                logs[-1]["capacity_after"] = updated_capacity
             allocations.append(
                 {
                     "student_id": student_dict.get("student_id", ""),
@@ -273,6 +323,8 @@ def allocate_batch(
     progress(100, "done")
 
     allocations_df = pd.DataFrame(allocations)
+    if not allocations_df.empty and "mentor_id" in allocations_df.columns:
+        allocations_df["mentor_id"] = allocations_df["mentor_id"].astype("string").str.strip().fillna("")
     logs_df = pd.DataFrame(logs)
     trace_df = pd.DataFrame(trace_rows)
     return allocations_df, pool, logs_df, trace_df

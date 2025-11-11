@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from app.core.common.domain import BuildConfig, MentorType, compute_alias
 from app.core.common.ids import build_mentor_id_map, ensure_ranking_columns, inject_mentor_id
 from app.core.common.ranking import apply_ranking_policy
 from app.core.policy_loader import PolicyConfig, parse_policy_dict
@@ -179,3 +180,11 @@ def test_ranking_payloads_equivalent(payload: dict[str, object]) -> None:
         "EMP-002",
         "EMP-010",
     ]
+
+
+def test_compute_alias_respects_policy_rules() -> None:
+    cfg = BuildConfig()
+
+    assert compute_alias(MentorType.NORMAL, "4001", "EMP-9", cfg=cfg) == "4001"
+    assert compute_alias(MentorType.NORMAL, "401", "EMP-9", cfg=cfg) == ""
+    assert compute_alias(MentorType.SCHOOL, "4001", 4001.0, cfg=cfg) == "4001"
