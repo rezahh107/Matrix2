@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.common.trace import build_allocation_trace, build_trace_plan
 from app.core.policy_loader import (
+    ExcelOptions,
     PolicyAliasRule,
     PolicyColumns,
     PolicyConfig,
@@ -181,6 +182,7 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
             TraceStageDefinition(stage="capacity_gate", column="remaining_capacity"),
         ],
         column_aliases={},
+        excel=ExcelOptions(rtl=True, font_name="Vazirmatn", header_mode="fa"),
     )
 
     with pytest.raises(ValueError, match="canonical 8-stage order"):

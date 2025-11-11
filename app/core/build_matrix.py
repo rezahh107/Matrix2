@@ -24,7 +24,7 @@ from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple, TypeV
 import numpy as np
 import pandas as pd
 
-from app.core.common.columns import collect_aliases_for, resolve_aliases
+from app.core.common.columns import accepted_synonyms, coerce_semantics, resolve_aliases
 from app.core.common.column_normalizer import normalize_input_columns
 from app.core.common.domain import (
     BuildConfig as DomainBuildConfig,
@@ -434,14 +434,12 @@ def _require_columns(df: pd.DataFrame, required: Collection[str], source: str) -
     missing = [col for col in required if col not in df.columns]
     if not missing:
         return
-    alias_map = collect_aliases_for(source)
     accepted: Dict[str, List[str]] = {}
     for col in missing:
-        options = [col]
-        for alias, target in alias_map.items():
-            if target == col and alias not in options:
-                options.append(alias)
-        accepted[col] = options
+        synonyms = list(accepted_synonyms(source, col))
+        if col not in synonyms:
+            synonyms.insert(0, col)
+        accepted[col] = synonyms
     raise ValueError(f"Missing columns: {missing} — accepted synonyms: {accepted}")
 
 
@@ -1251,9 +1249,11 @@ def build_matrix(
         شش‌تایی دیتافریم شامل ماتریس و جداول کنترلی.
     """
     insp_df = resolve_aliases(insp_df, "inspactor")
+    insp_df = coerce_semantics(insp_df, "inspactor")
     _require_columns(insp_df, REQUIRED_INSPACTOR_COLUMNS, "inspactor")
     insp_df, _ = normalize_input_columns(insp_df, kind="InspactorReport")
     schools_df = resolve_aliases(schools_df, "school")
+    schools_df = coerce_semantics(schools_df, "school")
     _require_columns(schools_df, REQUIRED_SCHOOL_COLUMNS, "school")
     schools_df, _ = normalize_input_columns(schools_df, kind="SchoolReport")
 
