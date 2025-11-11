@@ -21,6 +21,11 @@ def policy_file(tmp_path: Path) -> Path:
         "version": "1.0.3",
         "normal_statuses": [1, 0],
         "school_statuses": [1],
+        "postal_valid_range": [1000, 9999],
+        "finance_variants": [0, 1, 3],
+        "center_map": {"شهدخت کشاورز": 1, "آیناز هوشمند": 2, "*": 0},
+        "school_code_empty_as_zero": True,
+        "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
             "کدرشته",
             "جنسیت",
@@ -29,6 +34,14 @@ def policy_file(tmp_path: Path) -> Path:
             "مالی حکمت بنیاد",
             "کد مدرسه",
         ],
+        "columns": {
+            "postal_code": "کدپستی",
+            "school_count": "تعداد مدارس تحت پوشش",
+            "school_code": "کد مدرسه",
+            "capacity_current": "تعداد داوطلبان تحت پوشش",
+            "capacity_special": "تعداد تحت پوشش خاص",
+            "remaining_capacity": "remaining_capacity",
+        },
         "ranking_rules": [
             {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
             {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},

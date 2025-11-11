@@ -12,6 +12,7 @@ from app.core.build_matrix import (
     generate_row_variants,
     prepare_crosswalk_mappings,
     _prepare_base_rows,
+    _as_domain_config,
 )
 
 
@@ -127,9 +128,11 @@ def test_vectorized_matrix_matches_reference() -> None:
 
     name_to_code, code_to_name, buckets, synonyms = prepare_crosswalk_mappings(crosswalk_df)
     code_to_name_school, school_name_to_code = build_school_maps(schools_df)
+    domain_cfg = _as_domain_config(cfg)
     base_df, unseen_ref, unmatched_ref = _prepare_base_rows(
         insp_df,
         cfg=cfg,
+        domain_cfg=domain_cfg,
         name_to_code=name_to_code,
         code_to_name=code_to_name,
         buckets=buckets,
