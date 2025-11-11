@@ -73,7 +73,7 @@ ALIASES_DEFAULT: Mapping[Source, Mapping[str, str]] = {
         "مرکز ثبت نام": "مرکز گلستان صدرا",
         "مرکز ثبت‌نام": "مرکز گلستان صدرا",
         "کد رشته": "کدرشته",
-        "گروه آزمایشی": "کدرشته",
+        "گروه آزمایشی": "گروه آزمایشی",
         "group_code": "کدرشته",
         "major_code": "کدرشته",
     },
@@ -185,6 +185,15 @@ def _build_alias_bundle(source: Source) -> _AliasBundle:
         normalized_map.setdefault(_normalize_header(fa_value), en_key)
         report_map.setdefault(fa_value, []).append(fa_value)
 
+    for en_key, fa_value in CANON_EN_TO_FA.items():
+        bilingual = f"{fa_value} | {en_key}"
+        normalized_bilingual = _normalize_header(bilingual)
+        if normalized_bilingual not in normalized_map:
+            normalized_map[normalized_bilingual] = en_key
+        report_map.setdefault(fa_value, [])
+        if bilingual not in report_map[fa_value]:
+            report_map[fa_value].append(bilingual)
+
     return _AliasBundle(normalized_map=normalized_map, report_map=report_map)
 
 
@@ -207,8 +216,24 @@ def accepted_synonyms(source: Source, canonical_fa: str) -> Sequence[str]:
     target_en = CANON_FA_TO_EN.get(normalized_key)
     if target_en is None:
         return ()
-    synonyms = bundle.report_map.get(CANON_EN_TO_FA[target_en], [])
-    return tuple(dict.fromkeys(synonyms))
+
+    canonical_name = CANON_EN_TO_FA[target_en]
+    synonyms = list(bundle.report_map.get(canonical_name, []))
+    synonyms.append(canonical_name)
+
+    # نسخه‌های انگلیسی (با و بدون زیرخط) برای پیام خطا
+    english_name = target_en
+    synonyms.append(english_name)
+    english_spaced = english_name.replace("_", " ")
+    if english_spaced != english_name:
+        synonyms.append(english_spaced)
+
+    # نسخهٔ حاوی زیرخط برای معادل فارسی (مانند «کد_مدرسه»)
+    persian_underscored = canonical_name.replace(" ", "_")
+    if persian_underscored != canonical_name:
+        synonyms.append(persian_underscored)
+
+    return tuple(dict.fromkeys(filter(None, synonyms)))
 
 
 def _match_column(df: pd.DataFrame, *, canonical_en: str, bundle: _AliasBundle) -> str | None:
