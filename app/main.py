@@ -11,10 +11,12 @@ import atexit
 import traceback
 import getpass
 from pathlib import Path
-from typing import Optional, NoReturn
+from typing import Callable, Optional, NoReturn
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt, QSharedMemory, QTimer
 from PySide6.QtGui import QFont, QGuiApplication
+
+from app.infra.logging import LoggingContext, configure_logging, install_exception_hook
 
 
 __version__ = "1.0.1"
@@ -22,16 +24,29 @@ __author__ = "Your Name"
 __description__ = "سیستم تخصیص دانشجو-منتور"
 
 
-# تنظیمات logging با فرمت بهبود یافته
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
-    handlers=[
-        logging.FileHandler('app.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("app.ui.main")
+_LOGGING_CONTEXT: LoggingContext | None = None
+_RESTORE_EXCEPTION_HOOK: Callable[[], None] | None = None
+
+
+def _bootstrap_logging() -> LoggingContext:
+    """راه‌اندازی زیرساخت لاگ با ذخیرهٔ کانتکست سراسری.
+
+    مثال::
+
+        >>> ctx = _bootstrap_logging()  # doctest: +SKIP
+    """
+
+    global _LOGGING_CONTEXT, _RESTORE_EXCEPTION_HOOK
+    if _LOGGING_CONTEXT is None:
+        context = configure_logging(
+            app_name="AllocationApp",
+            app_version=__version__,
+            logger_name=logger.name,
+        )
+        _LOGGING_CONTEXT = context
+        _RESTORE_EXCEPTION_HOOK = install_exception_hook(logger, context)
+    return _LOGGING_CONTEXT
 
 
 def setup_environment() -> None:
@@ -246,13 +261,19 @@ def load_main_window():
             ) from e
 
 
-def show_critical_error(message: str, technical_details: str = "") -> None:
+def show_critical_error(
+    message: str,
+    technical_details: str = "",
+    *,
+    log_path: Path | None = None,
+) -> None:
     """
     نمایش خطای بحرانی با جزئیات
     
     Args:
         message: پیام خطا برای کاربر
         technical_details: جزئیات فنی برای توسعه‌دهنده
+        log_path: مسیر فایل گزارش خطا برای اشتراک‌گذاری
     """
     app = QApplication.instance()
     if app is None:
@@ -262,7 +283,11 @@ def show_critical_error(message: str, technical_details: str = "") -> None:
     error_msg.setIcon(QMessageBox.Icon.Critical)
     error_msg.setWindowTitle("خطای بحرانی")
     error_msg.setText("❌ برنامه با خطای غیرمنتظره مواجه شد")
-    error_msg.setInformativeText(message)
+
+    info_text = message
+    if log_path:
+        info_text += f"\n\n📄 مسیر گزارش خطا:\n{log_path}"
+    error_msg.setInformativeText(info_text)
     
     if technical_details:
         error_msg.setDetailedText(technical_details)
@@ -278,6 +303,7 @@ def main() -> int:
     Returns:
         int: کد خروج (0 = موفق، 1 = خطا)
     """
+    context = _bootstrap_logging()
     guard = None
     app = None
     
@@ -316,39 +342,64 @@ def main() -> int:
     except ImportError as e:
         # خطاهای مربوط به import ماژول‌ها
         error_msg = str(e)
-        logger.error(f"خطای Import: {error_msg}")
+        error_details = traceback.format_exc()
+        error_id = context.new_error_id()
+        report_path = context.write_error_report(
+            error_id=error_id,
+            message=error_msg,
+            traceback_text=error_details,
+        )
+        logger.error(
+            f"خطای Import: {error_msg}",
+            extra={"error_id": error_id, "report_path": str(report_path)},
+        )
         show_critical_error(
             "خطا در بارگذاری کامپوننت‌های برنامه.\n\n"
             "راه‌حل‌های احتمالی:\n"
             "• از کامل بودن فایل‌های برنامه اطمینان حاصل کنید\n"
             "• مجدداً برنامه را نصب کنید\n"
             "• با پشتیبانی تماس بگیرید",
-            f"ImportError: {error_msg}\nPython Path: {sys.path}"
+            f"ImportError: {error_msg}\nPython Path: {sys.path}",
+            log_path=report_path,
         )
         return 1
-        
+
     except Exception as e:
         # مدیریت خطاهای بحرانی
         error_message = f"خطای غیرمنتظره: {str(e)}"
         technical_details = traceback.format_exc()
-        
-        logger.critical(f"خطای بحرانی: {error_message}\n{technical_details}")
-        
+        error_id = context.new_error_id()
+        report_path = context.write_error_report(
+            error_id=error_id,
+            message=error_message,
+            traceback_text=technical_details,
+        )
+
+        logger.critical(
+            f"خطای بحرانی: {error_message}\n{technical_details}",
+            extra={"error_id": error_id, "report_path": str(report_path)},
+        )
+
         show_critical_error(
             "برنامه با یک خطای غیرمنتظره مواجه شد.\n\n"
             "لطفاً:\n"
-            "• شرایط را بررسی کنید\n" 
+            "• شرایط را بررسی کنید\n"
             "• مجدداً تلاش کنید\n"
             "• در صورت تکرار، با پشتیبانی تماس بگیرید",
-            technical_details
+            technical_details,
+            log_path=report_path,
         )
         return 1
-        
+
     finally:
         # تمیزکاری منابع - تضمین آزادسازی در همه شرایط
         if guard:
             guard.cleanup()
         logger.info("تمیزکاری منابع انجام شد")
+        global _RESTORE_EXCEPTION_HOOK
+        if _RESTORE_EXCEPTION_HOOK:
+            _RESTORE_EXCEPTION_HOOK()
+            _RESTORE_EXCEPTION_HOOK = None
 
 
 if __name__ == "__main__":
