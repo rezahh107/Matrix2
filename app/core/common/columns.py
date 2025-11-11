@@ -344,12 +344,7 @@ def canonicalize_headers(df: pd.DataFrame, header_mode: HeaderMode) -> pd.DataFr
     rename: Dict[str, str] = {}
     for column in df.columns:
         normalized = _normalize_header(str(column))
-        en_key = CANON_FA_TO_EN.get(normalized)
-        if en_key is None:
-            for key in CANON_EN_TO_FA:
-                if normalized == _normalize_header(key):
-                    en_key = key
-                    break
+        en_key = _target_to_en(str(column))
         if en_key is None:
             continue
         fa_name = CANON_EN_TO_FA[en_key]
