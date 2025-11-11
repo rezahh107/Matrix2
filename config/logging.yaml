@@ -1,27 +1,39 @@
 version: 1
 disable_existing_loggers: false
 formatters:
-  standard:
-    format: "[%(asctime)s] %(levelname)s %(name)s - %(message)s"
+  console:
+    format: "[%(asctime)s] %(levelname)s %(name)s | %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+  detailed:
+    format: "[%(asctime)s] %(levelname)s %(name)s | session=%(session_id)s user=%(user)s error=%(error_id)s report=%(report_path)s | %(message)s"
     datefmt: "%Y-%m-%d %H:%M:%S"
 handlers:
   console:
     class: logging.StreamHandler
     level: INFO
-    formatter: standard
+    formatter: console
     stream: ext://sys.stdout
-  file:
+  app_file:
     class: logging.handlers.RotatingFileHandler
-    level: DEBUG
-    formatter: standard
+    level: INFO
+    formatter: detailed
     filename: logs/app.log
     maxBytes: 1048576
     backupCount: 5
+    encoding: utf-8
+  error_file:
+    class: logging.handlers.RotatingFileHandler
+    level: ERROR
+    formatter: detailed
+    filename: logs/errors.log
+    maxBytes: 1048576
+    backupCount: 10
+    encoding: utf-8
 loggers:
   app:
     level: INFO
-    handlers: [console, file]
+    handlers: [console, app_file, error_file]
     propagate: false
 root:
   level: WARNING
-  handlers: [console]
+  handlers: [console, error_file]
