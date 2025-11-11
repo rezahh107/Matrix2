@@ -168,6 +168,14 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
             "مالی حکمت بنیاد",
             "کد مدرسه",
         ],
+        required_student_fields=[
+            "کدرشته",
+            "جنسیت",
+            "دانش آموز فارغ",
+            "مرکز گلستان صدرا",
+            "مالی حکمت بنیاد",
+            "کد مدرسه",
+        ],
         ranking_rules=[
             RankingRule(name="min_occupancy_ratio", column="occupancy_ratio", ascending=True),
             RankingRule(name="min_allocations_new", column="allocations_new", ascending=True),

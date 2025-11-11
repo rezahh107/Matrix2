@@ -87,6 +87,7 @@ class PolicyConfig:
     normal_statuses: List[int]
     school_statuses: List[int]
     join_keys: List[str]
+    required_student_fields: List[str]
     ranking_rules: List["RankingRule"]
     trace_stages: List["TraceStageDefinition"]
     postal_valid_range: tuple[int, int]
@@ -173,6 +174,9 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     normal_statuses = _ensure_int_sequence("normal_statuses", data["normal_statuses"])
     school_statuses = _ensure_int_sequence("school_statuses", data["school_statuses"])
     join_keys = _normalize_join_keys(data["join_keys"])
+    required_student_fields = _normalize_required_student_fields(
+        data.get("required_student_fields"), join_keys
+    )
     ranking_rules = _normalize_ranking_rules(data["ranking_rules"] if "ranking_rules" in data else data["ranking"])
     trace_stages = _normalize_trace_stages(data.get("trace_stages"), join_keys)
     postal_valid_range = _normalize_postal_valid_range(data["postal_valid_range"])
@@ -190,6 +194,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "normal_statuses": normal_statuses,
         "school_statuses": school_statuses,
         "join_keys": join_keys,
+        "required_student_fields": required_student_fields,
         "ranking_rules": ranking_rules,
         "trace_stages": trace_stages,
         "postal_valid_range": postal_valid_range,
@@ -359,6 +364,43 @@ def _normalize_join_keys(raw: object) -> List[str]:
     return join_keys
 
 
+def _normalize_required_student_fields(
+    raw: object | None, join_keys: Sequence[str]
+) -> List[str]:
+    """نرمال‌سازی فهرست ستون‌های ضروری دانش‌آموز از Policy."""
+
+    if raw is None:
+        candidates: Sequence[object] = join_keys
+    else:
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+            raise TypeError("required_student_fields must be a sequence of strings")
+        candidates = raw
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    def _push(value: object) -> None:
+        if not isinstance(value, (str, bytes)):
+            raise TypeError("required_student_fields items must be strings")
+        text = str(value).strip()
+        if not text:
+            return
+        if text not in seen:
+            normalized.append(text)
+            seen.add(text)
+
+    for item in candidates:
+        _push(item)
+
+    for fallback in join_keys:
+        _push(fallback)
+
+    if not normalized:
+        raise ValueError("required_student_fields must define at least one column")
+
+    return normalized
+
+
 def _normalize_ranking_rules(raw: object) -> List[Mapping[str, object]]:
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         raise TypeError("ranking must be a sequence of rules")
@@ -476,6 +518,9 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         normal_statuses=[int(item) for item in data["normal_statuses"]],  # type: ignore[index]
         school_statuses=[int(item) for item in data["school_statuses"]],  # type: ignore[index]
         join_keys=[str(item) for item in data["join_keys"]],  # type: ignore[index]
+        required_student_fields=[
+            str(item) for item in data["required_student_fields"]
+        ],
         ranking_rules=[_to_ranking_rule(item) for item in data["ranking_rules"]],
         trace_stages=[_to_trace_stage(item) for item in data["trace_stages"]],
         postal_valid_range=tuple(int(item) for item in data["postal_valid_range"]),

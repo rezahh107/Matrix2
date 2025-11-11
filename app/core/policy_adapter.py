@@ -33,15 +33,7 @@ class PolicyAdapter:
         return dict(self.config.column_aliases.get(namespace, {}))
 
     def required_student_fields(self) -> list[str]:
-        raw = self._load_raw()
-        value = raw.get("required_student_fields")
-        if isinstance(value, list) and all(isinstance(item, str) for item in value):
-            return [item for item in value if item]
-        fallback = list(dict.fromkeys(self.config.join_keys))
-        group_column = self.stage_column("group")
-        if group_column and group_column not in fallback:
-            fallback.append(group_column)
-        return fallback
+        return list(self.config.required_student_fields)
 
     def _load_raw(self) -> Mapping[str, Any]:
         if self._raw is None:

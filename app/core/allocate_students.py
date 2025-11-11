@@ -54,7 +54,13 @@ from typing import Callable, Collection, Dict, List, Mapping, Sequence
 import pandas as pd
 from pandas.api import types as pd_types
 
-from .common.columns import CANON, accepted_synonyms, coerce_semantics, resolve_aliases
+from .common.columns import (
+    CANON,
+    CANON_FA_TO_EN,
+    accepted_synonyms,
+    coerce_semantics,
+    resolve_aliases,
+)
 from .common.column_normalizer import normalize_input_columns
 from .common.filters import apply_join_filters
 from .common.ids import build_mentor_id_map, inject_mentor_id
@@ -66,7 +72,7 @@ from .common.types import (
     StudentRow,
     TraceStageRecord,
 )
-from .common.normalization import safe_int_value, to_numlike_str
+from .common.normalization import normalize_fa, safe_int_value, to_numlike_str
 from .policy_adapter import policy as policy_adapter
 from .policy_loader import PolicyConfig, load_policy
 
@@ -78,15 +84,42 @@ __all__ = [
     "allocate_student",
     "allocate_batch",
 ]
+def _canonical_student_column(name: str) -> str:
+    """نام ستون را به صورت کاننیکال فارسی برمی‌گرداند."""
+
+    text = str(name or "").strip()
+    if not text:
+        return ""
+
+    key = text.lower().replace(" ", "_")
+    if key in CANON:
+        return CANON[key]
+
+    normalized = normalize_fa(text)
+    normalized = normalized.replace("_", " ")
+    normalized = " ".join(normalized.split())
+    if normalized in CANON_FA_TO_EN:
+        return CANON[CANON_FA_TO_EN[normalized]]
+
+    if normalized in CANON.values():
+        return normalized
+
+    direct = " ".join(text.replace("_", " ").split())
+    if direct in CANON.values():
+        return direct
+
+    return text
 
 
-def _student_required_columns() -> frozenset[str]:
-    columns = set(policy_adapter.required_student_fields())
-    columns.update(policy_adapter.config.join_keys)
-    return frozenset(columns)
+def _required_student_columns_from_policy(policy: PolicyConfig) -> frozenset[str]:
+    """ستون‌های ضروری دانش‌آموز را براساس Policy استخراج می‌کند."""
 
-
-REQUIRED_STUDENT_COLUMNS = _student_required_columns()
+    required: set[str] = set()
+    for column in list(policy.required_student_fields) + list(policy.join_keys):
+        canonical = _canonical_student_column(column)
+        if canonical:
+            required.add(canonical)
+    return frozenset(required)
 REQUIRED_POOL_BASE_COLUMNS = {CANON["mentor_id"]}
 
 
@@ -265,7 +298,8 @@ def allocate_batch(
     students, _ = normalize_input_columns(
         students, kind="StudentReport", include_alias=False, report=False
     )
-    _require_columns(students, REQUIRED_STUDENT_COLUMNS, "report")
+    required_student_columns = _required_student_columns_from_policy(policy)
+    _require_columns(students, required_student_columns, "report")
 
     candidate_pool = resolve_aliases(candidate_pool, "inspactor")
     candidate_pool = coerce_semantics(candidate_pool, "inspactor")
