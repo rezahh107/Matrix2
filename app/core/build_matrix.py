@@ -1099,6 +1099,9 @@ def build_matrix(
     Returns:
         شش‌تایی دیتافریم شامل ماتریس و جداول کنترلی.
     """
+    insp_df, _ = normalize_input_columns(insp_df, kind="InspactorReport")
+    schools_df, _ = normalize_input_columns(schools_df, kind="SchoolReport")
+
     progress(5, "preparing crosswalk mappings")
     name_to_code, code_to_name, buckets, synonyms = prepare_crosswalk_mappings(
         crosswalk_groups_df,

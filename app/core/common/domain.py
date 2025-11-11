@@ -67,6 +67,17 @@ COL_STATUS = "دانش آموز فارغ"
 COL_CENTER = "مرکز گلستان صدرا"
 COL_FINANCE = "مالی حکمت بنیاد"
 COL_SCHOOL = "کد مدرسه"
+COL_SCHOOL_NAME = "نام مدرسه"
+COL_SCHOOL_CODE_1 = "کد مدرسه 1"
+COL_SCHOOL_CODE_2 = "کد مدرسه 2"
+COL_SCHOOL_CODE_3 = "کد مدرسه 3"
+COL_SCHOOL_CODE_4 = "کد مدرسه 4"
+COL_SCHOOL_NAME_1 = "نام مدرسه 1"
+COL_SCHOOL_NAME_2 = "نام مدرسه 2"
+COL_SCHOOL_NAME_3 = "نام مدرسه 3"
+COL_SCHOOL_NAME_4 = "نام مدرسه 4"
+COL_FULL_SCHOOL_CODE = "کد کامل مدرسه"
+COL_EDU_CODE = "کد آموزش و پرورش"
 COL_ALIAS = "جایگزین"
 COL_MENTOR = "پشتیبان"
 COL_MANAGER = "مدیر"
@@ -638,6 +649,9 @@ class TraceDict(TypedDict, total=False):
 
 __all__ = [
     "COL_GROUP", "COL_GENDER", "COL_STATUS", "COL_CENTER", "COL_FINANCE", "COL_SCHOOL",
+    "COL_SCHOOL_NAME", "COL_SCHOOL_CODE_1", "COL_SCHOOL_CODE_2", "COL_SCHOOL_CODE_3", "COL_SCHOOL_CODE_4",
+    "COL_SCHOOL_NAME_1", "COL_SCHOOL_NAME_2", "COL_SCHOOL_NAME_3", "COL_SCHOOL_NAME_4",
+    "COL_FULL_SCHOOL_CODE", "COL_EDU_CODE",
     "COL_ALIAS", "COL_MENTOR", "COL_MANAGER", "COL_MENTOR_ID", "COL_MENTOR_ROWID", "COL_MENTOR_TYPE",
     "MentorType", "Status", "Gender", "FinanceCode",
     "BuildConfig", "JoinKey", "MentorIdentity", "Capacity", "MatrixRow", "ImportToSabtRow",
