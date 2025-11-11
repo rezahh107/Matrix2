@@ -12,6 +12,7 @@ Summary
 """
 from __future__ import annotations
 
+from logging import getLogger
 import math
 import re
 import unicodedata
@@ -35,12 +36,14 @@ from app.core.common.domain import (
     finance_cross,
     school_code_norm,
 )
+from app.core.common.normalization import normalize_header, resolve_group_code
 from app.core.policy_loader import PolicyConfig, load_policy
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 __version__ = "1.0.4"  # bumped
+LOGGER = getLogger(__name__)
 # Column headers (Persian per SSoT)
 CAPACITY_CURRENT_COL = "تعداد داوطلبان تحت پوشش"
 CAPACITY_SPECIAL_COL = "تعداد تحت پوشش خاص"
@@ -139,6 +142,7 @@ class BuildConfig:
     capacity_current_column: str | None = None
     capacity_special_column: str | None = None
     remaining_capacity_column: str | None = None
+    prefer_major_code: bool | None = None
 
     def __post_init__(self) -> None:
         policy = self.policy
@@ -192,6 +196,11 @@ class BuildConfig:
         if self.remaining_capacity_column is None:
             self.remaining_capacity_column = columns.remaining_capacity
 
+        if self.prefer_major_code is None:
+            self.prefer_major_code = bool(getattr(policy, "prefer_major_code", True))
+        else:
+            self.prefer_major_code = bool(self.prefer_major_code)
+
 
 def _as_domain_config(cfg: BuildConfig) -> DomainBuildConfig:
     """Create :class:`DomainBuildConfig` from :class:`BuildConfig`."""
@@ -204,6 +213,7 @@ def _as_domain_config(cfg: BuildConfig) -> DomainBuildConfig:
         school_code_empty_as_zero=bool(cfg.school_code_empty_as_zero),
         alias_rule_normal=cfg.alias_rule_normal or "postal_or_fallback_mentor_id",
         alias_rule_school=cfg.alias_rule_school or "mentor_id",
+        prefer_major_code=bool(cfg.prefer_major_code),
     )
 
 
@@ -1481,6 +1491,7 @@ def validate_with_students(
     center_col = cfg.policy.stage_column("center")
 
     stud_raw = students_df.copy()
+    stud_raw.columns = [normalize_header(col) for col in stud_raw.columns]
     schools = schools_df.copy()
     _, school_name_to_code = build_school_maps(schools)
     name_to_code, _, _, _ = prepare_crosswalk_mappings(
@@ -1489,17 +1500,38 @@ def validate_with_students(
     )
 
     # Support "کد پستی" OR "کد جایگزین"
-    std_alias_col = "کد پستی" if "کد پستی" in stud_raw.columns else ("کد جایگزین" if "کد جایگزین" in stud_raw.columns else None)
+    std_alias_col = (
+        "کد پستی"
+        if "کد پستی" in stud_raw.columns
+        else ("کد جایگزین" if "کد جایگزین" in stud_raw.columns else None)
+    )
     if std_alias_col is None:
         raise ValueError("در StudentReport ستونی با عنوان «کد پستی» یا «کد جایگزین» یافت نشد.")
 
+    postal_series = stud_raw[std_alias_col].apply(to_numlike_str)
+    resolution_frame = stud_raw.copy()
+    resolution_frame["student_postal"] = postal_series
+
+    group_stats: Dict[str, int] = {}
+    group_codes = resolution_frame.apply(
+        lambda row: resolve_group_code(
+            row,
+            name_to_code,
+            major_column="کد رشته",
+            group_column="گروه آزمایشی",
+            prefer_major_code=bool(cfg.prefer_major_code),
+            stats=group_stats,
+            logger=LOGGER,
+        ),
+        axis=1,
+    )
+
     stud = pd.DataFrame(
         {
-            "student_postal": stud_raw[std_alias_col].apply(to_numlike_str),
-            "alias_norm": stud_raw[std_alias_col].apply(to_numlike_str),
+            "student_postal": postal_series,
+            "alias_norm": postal_series,
             "mentor_name": stud_raw["نام پشتیبان"].astype(str).str.strip(),
             "manager": stud_raw["مدیر"].astype(str).str.strip(),
-            "group_code": stud_raw["گروه آزمایشی"].apply(lambda x: name_to_code.get(normalize_fa(x), None)),
             "school_code": stud_raw[COL_SCHOOL1].apply(
                 lambda x: school_name_to_code.get(normalize_fa(x), "")
             )
@@ -1507,12 +1539,22 @@ def validate_with_students(
             else "",
         }
     )
+    stud["group_code"] = pd.Series(pd.array(group_codes, dtype="Int64"), index=stud.index)
     stud["status_code"] = Status.STUDENT
     stud["gender_code"] = resolve_students_gender_series(
         stud_raw,
         source_hint=students_source_hint,
         mode=students_gender_mode,
     ).values
+
+    LOGGER.info(
+        "student group_code resolution (prefer_major_code=%s): major=%d, crosswalk=%d, mismatch=%d, unresolved=%d",
+        cfg.prefer_major_code,
+        group_stats.get("resolved_by_major_code", 0),
+        group_stats.get("resolved_by_crosswalk", 0),
+        group_stats.get("mismatch_major_vs_group", 0),
+        group_stats.get("unresolved_group_code", 0),
+    )
 
     mat = matrix_df.copy()
     mat["alias_norm"] = mat["جایگزین"].apply(to_numlike_str)
@@ -1559,10 +1601,11 @@ def validate_with_students(
         return (sub2, None if not sub2.empty else "center mismatch (manager-based)")
 
     def _check_group(row: pd.Series, sub: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
-        if row["group_code"] is None:
-            return (sub, None)
+        value = row.get("group_code")
+        if value is None or (pd.isna(value)):
+            return (sub, "دانش‌آموز فاقد «کد رشته» و «گروه آزمایشی» معتبر است")
         group_col = cfg.policy.join_keys[0]
-        sub2 = sub[sub[group_col] == row["group_code"]]
+        sub2 = sub[sub[group_col] == int(value)]
         return (sub2, None if not sub2.empty else "group_code mismatch")
 
     def first_fail_reason(row: pd.Series) -> str:
