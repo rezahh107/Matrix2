@@ -139,6 +139,19 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
     progress(0, "loading inputs")
     students_df = reader_students(students_path)
     pool_df = reader_pool(pool_path)
+    # Safety net برای هدرهای fa_en اگر کاربر policy را هنوز به‌روز نکرده باشد
+    _alias_map = {
+        "کدرشته | group_code": "کدرشته",
+        "جنسیت | gender": "جنسیت",
+        "دانش آموز فارغ | graduation_status": "دانش آموز فارغ",
+        "مرکز گلستان صدرا | center": "مرکز گلستان صدرا",
+        "مالی حکمت بنیاد | finance": "مالی حکمت بنیاد",
+        "کد مدرسه | school_code": "کد مدرسه",
+        "کد کارمندی پشتیبان | mentor_id": "کد کارمندی پشتیبان",
+    }
+    rename_cols = {c: _alias_map[c] for c in list(pool_df.columns) if c in _alias_map}
+    if rename_cols:
+        pool_df = pool_df.rename(columns=rename_cols)
     # Normalize mentor_id to string (حفظ صفرهای پیشرو/آلفانامبر)
     if "کد کارمندی پشتیبان" in pool_df.columns:
         pool_df["کد کارمندی پشتیبان"] = (
