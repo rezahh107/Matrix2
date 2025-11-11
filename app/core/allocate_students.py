@@ -49,7 +49,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from numbers import Number
-from typing import Callable, Collection, Dict, List, Mapping, Sequence
+from typing import Callable, List, Mapping, Sequence
 
 import pandas as pd
 from pandas.api import types as pd_types
@@ -57,8 +57,8 @@ from pandas.api import types as pd_types
 from .common.columns import (
     CANON,
     CANON_FA_TO_EN,
-    accepted_synonyms,
     coerce_semantics,
+    ensure_required_columns,
     resolve_aliases,
 )
 from .common.column_normalizer import normalize_input_columns
@@ -181,19 +181,6 @@ def _build_log_base(student: Mapping[str, object], policy: PolicyConfig) -> Allo
     return log
 
 
-def _require_columns(df: pd.DataFrame, required: Collection[str], source: str) -> None:
-    missing = [col for col in required if col not in df.columns]
-    if not missing:
-        return
-    accepted: Dict[str, List[str]] = {}
-    for col in missing:
-        synonyms = list(accepted_synonyms(source, col))
-        if col not in synonyms:
-            synonyms.insert(0, col)
-        accepted[col] = synonyms
-    raise ValueError(f"Missing columns: {missing} — accepted synonyms: {accepted}")
-
-
 def _resolve_capacity_column(policy: PolicyConfig, override: str | None) -> str:
     if override:
         return override
@@ -299,7 +286,7 @@ def allocate_batch(
         students, kind="StudentReport", include_alias=False, report=False
     )
     required_student_columns = _required_student_columns_from_policy(policy)
-    _require_columns(students, required_student_columns, "report")
+    students = ensure_required_columns(students, required_student_columns, "report")
 
     candidate_pool = resolve_aliases(candidate_pool, "inspactor")
     candidate_pool = coerce_semantics(candidate_pool, "inspactor")
@@ -307,7 +294,9 @@ def allocate_batch(
         candidate_pool, kind="MentorPool", include_alias=False, report=False
     )
     required_pool_columns = set(policy.join_keys) | REQUIRED_POOL_BASE_COLUMNS
-    _require_columns(candidate_pool, required_pool_columns, "inspactor")
+    candidate_pool = ensure_required_columns(
+        candidate_pool, required_pool_columns, "inspactor"
+    )
     if resolved_capacity_column not in candidate_pool.columns:
         raise KeyError(f"Missing capacity column '{resolved_capacity_column}'")
 

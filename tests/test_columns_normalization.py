@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.common import columns
-from app.core.allocate_students import _require_columns
+from app.core.common.columns import ensure_required_columns
 from app.infra.io_utils import write_xlsx_atomic
 
 
@@ -103,16 +103,24 @@ def test_canonicalize_headers_bilingual() -> None:
     ]
 
 
-def test_missing_column_error_reports_synonyms(monkeypatch: pytest.MonkeyPatch) -> None:
-    df = pd.DataFrame({"group_code": [1]})
+def test_missing_column_error_reports_synonyms() -> None:
+    df = pd.DataFrame({"نام": ["نمونه"]})
 
     with pytest.raises(ValueError) as exc:
-        _require_columns(df, [columns.CANON_EN_TO_FA["group_code"]], "report")
+        ensure_required_columns(df, [columns.CANON_EN_TO_FA["group_code"]], "report")
 
     message = str(exc.value)
     assert "Missing columns" in message
     assert "accepted synonyms" in message
     assert "group_code" in message
+
+
+def test_ensure_required_columns_accepts_synonym() -> None:
+    df = pd.DataFrame({"group_code": [1]})
+
+    ensured = ensure_required_columns(df, [columns.CANON_EN_TO_FA["group_code"]], "report")
+
+    assert columns.CANON_EN_TO_FA["group_code"] in ensured.columns
 
 
 @pytest.mark.skipif(
