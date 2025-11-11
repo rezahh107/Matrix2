@@ -225,6 +225,7 @@ class BuildConfig:
         school_code_empty_as_zero: Treat empty school codes as 0
         alias_rule_normal: Alias rule for NORMAL mentors
         alias_rule_school: Alias rule for SCHOOL mentors
+        prefer_major_code: Whether StudentReport «کد رشته» overrides group name mapping
     """
     version: str = "1.0.3"
     postal_valid_range: tuple[int, int] = (1000, 9999)
@@ -233,6 +234,7 @@ class BuildConfig:
     school_code_empty_as_zero: bool = True
     alias_rule_normal: str = "postal_or_fallback_mentor_id"
     alias_rule_school: str = "mentor_id"
+    prefer_major_code: bool = True
     _center_map_norm: dict[str, int] = field(init=False, repr=False, default_factory=dict)
 
     def __post_init__(self):

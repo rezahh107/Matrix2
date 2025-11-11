@@ -10,6 +10,7 @@
     "*": 0
   },
   "school_code_empty_as_zero": true,
+  "prefer_major_code": true,
   "alias_rule": {
     "normal": "postal_or_fallback_mentor_id",
     "school": "mentor_id"

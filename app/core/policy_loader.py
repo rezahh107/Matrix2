@@ -93,6 +93,7 @@ class PolicyConfig:
     finance_variants: tuple[int, ...]
     center_map: Mapping[str, int]
     school_code_empty_as_zero: bool
+    prefer_major_code: bool
     alias_rule: PolicyAliasRule
     columns: PolicyColumns
     column_aliases: Mapping[str, Dict[str, str]]
@@ -158,6 +159,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "finance_variants",
         "center_map",
         "school_code_empty_as_zero",
+        "prefer_major_code",
         "alias_rule",
         "columns",
     ]
@@ -177,6 +179,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     finance_variants = _normalize_finance_variants(data["finance_variants"])
     center_map = _normalize_center_map(data["center_map"])
     school_code_empty_as_zero = _ensure_bool("school_code_empty_as_zero", data["school_code_empty_as_zero"])
+    prefer_major_code = _ensure_bool("prefer_major_code", data["prefer_major_code"])
     alias_rule = _normalize_alias_rule(data["alias_rule"])
     columns = _normalize_columns(data["columns"])
     column_aliases = _normalize_column_aliases(data.get("column_aliases", {}))
@@ -193,6 +196,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "finance_variants": finance_variants,
         "center_map": center_map,
         "school_code_empty_as_zero": school_code_empty_as_zero,
+        "prefer_major_code": prefer_major_code,
         "alias_rule": alias_rule,
         "columns": columns,
         "column_aliases": column_aliases,
@@ -478,6 +482,7 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         finance_variants=tuple(int(item) for item in data["finance_variants"]),
         center_map={str(k): int(v) for k, v in data["center_map"].items()},
         school_code_empty_as_zero=bool(data["school_code_empty_as_zero"]),
+        prefer_major_code=bool(data["prefer_major_code"]),
         alias_rule=PolicyAliasRule(
             normal=str(data["alias_rule"]["normal"]),
             school=str(data["alias_rule"]["school"]),

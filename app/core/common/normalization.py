@@ -15,11 +15,16 @@ Design notes:
 """
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Set, Dict, Tuple
+from typing import Any, Iterable, List, Set, Dict, Tuple, Mapping, MutableMapping, Optional
 import re
 import unicodedata
 from functools import lru_cache
 import math
+from logging import Logger, getLogger
+
+import pandas as pd
+
+LOGGER = getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants & Regex Patterns (internal)
@@ -37,6 +42,9 @@ _RE_WHITESPACE = re.compile(r"\s+")
 
 # List separators: comma, pipe, Arabic comma, Arabic semicolon.
 _SEP_SPLIT = re.compile(r"[,\|،؛]+")
+
+_ARABIC_TO_PERSIAN = str.maketrans({"ي": "ی", "ك": "ک"})
+_PERSIAN_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
 # Arabic-Indic (0660–0669) and Extended Arabic-Indic (06F0–06F9) → ASCII digits
 _DIGIT_TRANSLATION: Dict[int, int] = {
@@ -412,6 +420,98 @@ def ensure_list(values: Iterable[Any]) -> List[str]:
         return out
 
 
+def normalize_header(name: Any) -> str:
+    """نرمال‌سازی عنوان ستون با حذف نیم‌فاصله، حروف عربی و فاصله‌های اضافه."""
+
+    try:
+        text = str(name or "").strip()
+    except Exception:
+        text = ""
+    if not text:
+        return ""
+    text = text.replace("\u200c", "")
+    text = text.translate(_ARABIC_TO_PERSIAN)
+    text = text.translate(_PERSIAN_DIGITS)
+    text = "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch))
+    text = text.replace("_", " ")
+    text = _RE_WHITESPACE.sub(" ", text)
+    return text
+
+
+def parse_int_safe(value: Any) -> Optional[int]:
+    """تبدیل امن مقدار به عدد صحیح؛ فقط اعداد درست یا اعشاری با صفر اعشار پذیرفته می‌شوند."""
+
+    candidate = to_numlike_str(value)
+    if not candidate:
+        return None
+    sign = 1
+    if candidate[0] in "+-":
+        sign = -1 if candidate[0] == "-" else 1
+        candidate = candidate[1:]
+    if not candidate:
+        return None
+    if "." in candidate:
+        integer_part, decimal_part = candidate.split(".", 1)
+        if not integer_part or not integer_part.isdigit() or set(decimal_part) - {"0"}:
+            return None
+        candidate = integer_part
+    if not candidate.isdigit():
+        return None
+    try:
+        return sign * int(candidate)
+    except Exception:
+        return None
+
+
+def resolve_group_code(
+    row: "pd.Series",
+    group_map: Mapping[str, int],
+    *,
+    major_column: str,
+    group_column: str,
+    prefer_major_code: bool = True,
+    stats: MutableMapping[str, int] | None = None,
+    logger: Logger | None = None,
+) -> Optional[int]:
+    """تعیین کد رشتهٔ دانش‌آموز با اولویت «کد رشته» و سپس نگاشت Crosswalk."""
+
+    def _bump(key: str) -> None:
+        if stats is None:
+            return
+        stats[key] = stats.get(key, 0) + 1
+
+    major_raw = row.get(major_column)
+    major_code = parse_int_safe(major_raw)
+
+    group_name_raw = row.get(group_column)
+    group_code = None
+    if group_name_raw is not None and not pd.isna(group_name_raw):
+        normalized_name = normalize_fa(group_name_raw)
+        if normalized_name:
+            group_code = group_map.get(normalized_name)
+
+    if prefer_major_code and major_code is not None:
+        if group_code is not None and group_code != major_code:
+            _bump("mismatch_major_vs_group")
+            active_logger = logger or LOGGER
+            student_ref = row.get("student_id") or row.get("student_postal") or row.name
+            active_logger.warning(
+                "student %s: mismatch between major_code=%s and group name mapping=%s -> using major_code",
+                student_ref,
+                major_code,
+                group_code,
+            )
+        _bump("resolved_by_major_code")
+        return major_code
+
+    if group_code is not None:
+        _bump("resolved_by_crosswalk")
+        return group_code
+
+    _bump("unresolved_group_code")
+    return None
+
+
 def safe_int_value(x, default: int = 0) -> int:
     """تبدیل امن مقدار به عدد صحیح بدون پذیرش اعشار ساختگی."""
 
@@ -424,4 +524,12 @@ def safe_int_value(x, default: int = 0) -> int:
     return int(default)
 
 
-__all__ = ["normalize_fa", "to_numlike_str", "ensure_list", "safe_int_value"]
+__all__ = [
+    "normalize_fa",
+    "normalize_header",
+    "to_numlike_str",
+    "ensure_list",
+    "parse_int_safe",
+    "resolve_group_code",
+    "safe_int_value",
+]
