@@ -199,6 +199,19 @@ def test_ranking_legacy_strings_supported() -> None:
     ]
 
 
+def test_policy_column_aliases_supported() -> None:
+    payload = _valid_payload()
+    payload["column_aliases"] = {
+        "inspactor": {"Alias": "کد کارمندی پشتیبان"},
+        "report": {"نام_مدرسه": "نام مدرسه"},
+    }
+
+    policy = parse_policy_dict(payload)
+
+    assert policy.column_aliases["inspactor"]["Alias"] == "کد کارمندی پشتیبان"
+    assert policy.column_aliases["report"]["نام_مدرسه"] == "نام مدرسه"
+
+
 def test_load_policy_reads_default_config(tmp_path: Path) -> None:
     config_path = tmp_path / "policy.json"
     config_path.write_text(

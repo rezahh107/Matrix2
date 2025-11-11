@@ -412,4 +412,16 @@ def ensure_list(values: Iterable[Any]) -> List[str]:
         return out
 
 
-__all__ = ["normalize_fa", "to_numlike_str", "ensure_list"]
+def safe_int_value(x, default: int = 0) -> int:
+    """تبدیل امن مقدار به عدد صحیح بدون پذیرش اعشار ساختگی."""
+
+    s = to_numlike_str(x).strip()
+    if s and s.lstrip("-").isdigit():
+        try:
+            return int(s)
+        except Exception:
+            pass
+    return int(default)
+
+
+__all__ = ["normalize_fa", "to_numlike_str", "ensure_list", "safe_int_value"]

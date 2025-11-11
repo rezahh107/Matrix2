@@ -24,6 +24,8 @@ from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple, TypeV
 import numpy as np
 import pandas as pd
 
+from app.core.common.columns import collect_aliases_for, resolve_aliases
+from app.core.common.column_normalizer import normalize_input_columns
 from app.core.common.domain import (
     BuildConfig as DomainBuildConfig,
     MentorType,
@@ -39,9 +41,6 @@ from app.core.policy_loader import PolicyConfig, load_policy
 # CONSTANTS
 # =============================================================================
 __version__ = "1.0.4"  # bumped
-# Sort fallback for alias values
-ALIAS_FALLBACK_SORT = 10**12  # push non-numeric aliases last
-
 # Column headers (Persian per SSoT)
 CAPACITY_CURRENT_COL = "تعداد داوطلبان تحت پوشش"
 CAPACITY_SPECIAL_COL = "تعداد تحت پوشش خاص"
@@ -431,6 +430,76 @@ def validate_dataframe_columns(*required_cols: str):
     return decorator
 
 
+def _require_columns(df: pd.DataFrame, required: Collection[str], source: str) -> None:
+    missing = [col for col in required if col not in df.columns]
+    if not missing:
+        return
+    alias_map = collect_aliases_for(source)
+    accepted: Dict[str, List[str]] = {}
+    for col in missing:
+        options = [col]
+        for alias, target in alias_map.items():
+            if target == col and alias not in options:
+                options.append(alias)
+        accepted[col] = options
+    raise ValueError(f"Missing columns: {missing} — accepted synonyms: {accepted}")
+
+
+def _validate_finance_invariants(matrix: pd.DataFrame, *, cfg: BuildConfig, finance_col: str) -> None:
+    if finance_col not in matrix.columns:
+        return
+    required = {int(code) for code in cfg.finance_variants}
+    join_cols = [col for col in cfg.policy.join_keys if col in matrix.columns]
+    base_cols = [col for col in join_cols if col != finance_col]
+    if not base_cols:
+        return
+
+    def _collect(values: pd.Series) -> set[int]:
+        return {int(v) for v in values.dropna()}
+
+    grouped = matrix.groupby(base_cols, dropna=False, sort=False)[finance_col].agg(_collect)
+    missing = grouped[grouped.apply(lambda present: not required.issubset(present))]
+    if not missing.empty:
+        details = {tuple(key) if isinstance(key, tuple) else key: sorted(required - present)
+                   for key, present in missing.items()}
+        raise AssertionError(
+            "Finance variants incomplete for join keys: " + str(details)
+        )
+
+
+def _validate_alias_contract(matrix: pd.DataFrame, *, cfg: BuildConfig) -> None:
+    alias_series = matrix["جایگزین"].astype("string").str.strip().fillna("")
+    mentor_ids = matrix["کد کارمندی پشتیبان"].astype("string").str.strip().fillna("")
+    row_types = matrix["عادی مدرسه"].astype("string").str.strip().fillna("")
+
+    school_mask = row_types == "مدرسه‌ای"
+    mismatch_school = matrix.loc[school_mask & (alias_series != mentor_ids)]
+    if not mismatch_school.empty:
+        raise AssertionError("School rows must use mentor_id as alias")
+
+    normal_mask = row_types == "عادی"
+    alias_normal = alias_series[normal_mask]
+    invalid_pattern = alias_normal[~alias_normal.str.fullmatch(r"\d{4}")]
+    if not invalid_pattern.empty:
+        raise AssertionError("Normal rows must use 4-digit postal alias")
+
+    min_postal, max_postal = cfg.postal_valid_range
+    alias_numeric = alias_normal.map(lambda v: safe_int_value(v, default=0))
+    invalid_range = alias_numeric[(alias_numeric < min_postal) | (alias_numeric > max_postal)]
+    if not invalid_range.empty:
+        raise AssertionError("Postal alias out of configured range")
+
+
+def _validate_school_code_contract(matrix: pd.DataFrame, *, school_code_col: str) -> None:
+    row_types = matrix["عادی مدرسه"].astype("string").str.strip().fillna("")
+    codes = matrix[school_code_col].astype("Int64")
+    school_mask = row_types == "مدرسه‌ای"
+    if ((codes[school_mask] == 0) | codes[school_mask].isna()).any():
+        raise AssertionError("School rows must have non-zero school code")
+    if (codes[~school_mask] != 0).any():
+        raise AssertionError("Normal rows must have zero school code")
+
+
 def prepare_crosswalk_mappings(
     crosswalk_groups_df: pd.DataFrame,
     synonyms_df: pd.DataFrame | None = None,
@@ -591,11 +660,13 @@ def safe_int_value(value: Any, default: int = 0) -> int:
         مقدار صحیح نرمال‌شده (حداقل برابر با ``default``).
     """
 
-    if value is None:
-        return int(default)
-
-    parsed = _coerce_int_like(value)
-    return parsed if parsed is not None else int(default)
+    text = to_numlike_str(value).strip()
+    if text and text.lstrip("-").isdigit():
+        try:
+            return int(text)
+        except Exception:
+            pass
+    return int(default)
 
 
 def normalize_capacity_values(current: Any, special: Any, *, default: int = 0) -> tuple[int, int, int]:
@@ -896,15 +967,12 @@ def _prepare_base_rows(
         manager_name = str(row.get(COL_MANAGER_NAME, "")).strip()
         postal_raw = row.get(postal_col, "")
 
-        alias_val = row.get(COL_POSTAL, "")
-        alias_num = None
-        alias_str = to_numlike_str(alias_val)
-        if alias_str.isdigit():
-            alias_int = int(alias_str)
-            if MIN_POSTAL_CODE <= alias_int <= MAX_POSTAL_CODE:
-                alias_num = alias_int
-
-        school_codes = collect_school_codes_from_row(pd.Series(row), school_name_to_code, school_cols)
+        school_codes = collect_school_codes_from_row(
+            pd.Series(row),
+            school_name_to_code,
+            school_cols,
+            domain_cfg=domain_cfg,
+        )
         school_count = safe_int_value(row.get(COL_SCHOOL_COUNT, 0), default=0)
 
         covered_now, special_limit, remaining_capacity = normalize_capacity_values(
@@ -1019,6 +1087,10 @@ def _explode_rows(
     code_to_name_school: dict[str, str],
     cfg: BuildConfig,
     domain_cfg: DomainBuildConfig,
+    cap_current_col: str,
+    cap_special_col: str,
+    remaining_col: str,
+    school_code_col: str,
 ) -> pd.DataFrame:
     if base.empty:
         return pd.DataFrame()
@@ -1058,6 +1130,11 @@ def _explode_rows(
     df.loc[blank_school_mask.fillna(True), "کد مدرسه"] = 0
     df["کد مدرسه"] = df["کد مدرسه"].astype("int64")
     df["نام مدرسه"] = df["کد مدرسه"].astype(str).map(code_to_name_school).fillna("")
+    if school_code_col != "کد مدرسه":
+        df = df.rename(columns={"کد مدرسه": school_code_col})
+        school_code_display = school_code_col
+    else:
+        school_code_display = "کد مدرسه"
 
     alias_series = df[alias_col]
     df["جایگزین"] = alias_series.map(to_numlike_str)
@@ -1112,7 +1189,7 @@ def _explode_rows(
         "دانش آموز فارغ",
         "مرکز گلستان صدرا",
         "مالی حکمت بنیاد",
-        school_code_col,
+        school_code_display,
         "نام مدرسه",
         "عادی مدرسه",
         "جنسیت2",
@@ -1173,7 +1250,11 @@ def build_matrix(
     Returns:
         شش‌تایی دیتافریم شامل ماتریس و جداول کنترلی.
     """
+    insp_df = resolve_aliases(insp_df, "inspactor")
+    _require_columns(insp_df, REQUIRED_INSPACTOR_COLUMNS, "inspactor")
     insp_df, _ = normalize_input_columns(insp_df, kind="InspactorReport")
+    schools_df = resolve_aliases(schools_df, "school")
+    _require_columns(schools_df, REQUIRED_SCHOOL_COLUMNS, "school")
     schools_df, _ = normalize_input_columns(schools_df, kind="SchoolReport")
 
     progress(5, "preparing crosswalk mappings")
@@ -1236,6 +1317,10 @@ def build_matrix(
     )
 
     progress(55, "assembling matrix variants")
+    cap_current_col = cfg.capacity_current_column or CAPACITY_CURRENT_COL
+    cap_special_col = cfg.capacity_special_column or CAPACITY_SPECIAL_COL
+    remaining_col = cfg.remaining_capacity_column or "remaining_capacity"
+    school_code_col = cfg.school_code_column or COL_SCHOOL
     normal_df = _explode_rows(
         base_df.loc[base_df["can_normal"]],
         alias_col="alias_normal",
@@ -1245,6 +1330,10 @@ def build_matrix(
         code_to_name_school=code_to_name_school,
         cfg=cfg,
         domain_cfg=domain_cfg,
+        cap_current_col=cap_current_col,
+        cap_special_col=cap_special_col,
+        remaining_col=remaining_col,
+        school_code_col=school_code_col,
     )
     school_df = _explode_rows(
         base_df.loc[base_df["can_school"]],
@@ -1255,13 +1344,13 @@ def build_matrix(
         code_to_name_school=code_to_name_school,
         cfg=cfg,
         domain_cfg=domain_cfg,
+        cap_current_col=cap_current_col,
+        cap_special_col=cap_special_col,
+        remaining_col=remaining_col,
+        school_code_col=school_code_col,
     )
 
     matrix = pd.concat([normal_df, school_df], ignore_index=True, sort=False)
-    school_code_col = cfg.school_code_column or COL_SCHOOL
-    cap_current_col = cfg.capacity_current_column or CAPACITY_CURRENT_COL
-    cap_special_col = cfg.capacity_special_column or CAPACITY_SPECIAL_COL
-    remaining_col = cfg.remaining_capacity_column or "remaining_capacity"
     finance_col = cfg.policy.stage_column("finance")
     center_col = cfg.policy.stage_column("center")
 
@@ -1297,50 +1386,45 @@ def build_matrix(
     )
 
     if not matrix.empty:
+        matrix = matrix.copy()
         matrix["ردیف پشتیبان"] = matrix["ردیف پشتیبان"].map(_coerce_int_like)
-        matrix["کد مدرسه"] = pd.Series(
-            matrix["کد مدرسه"].map(_coerce_int_like), index=matrix.index
-        ).fillna(0).astype("int64")
-        matrix["جایگزین"] = matrix["جایگزین"].map(to_numlike_str)
-        matrix["_school_sort"] = matrix["کد مدرسه"].map(
-            lambda v: safe_int_value(v, default=SCHOOL_CODE_NULL_SORT)
+        matrix[school_code_col] = (
+            matrix[school_code_col]
+            .map(lambda v: safe_int_value(v, default=0))
+            .astype("int64")
         )
-        matrix["_alias_sort"] = matrix["جایگزین"].map(
-            lambda v: safe_int_value(v, default=ALIAS_FALLBACK_SORT)
+        matrix["کد کارمندی پشتیبان"] = (
+            matrix["کد کارمندی پشتیبان"].astype("string").str.strip().fillna("").astype(object)
         )
-        matrix = matrix.sort_values(
-            by=[center_col, school_code_col, "_alias_sort"],
-            kind="stable",
-        )
-        matrix = matrix.drop(columns=["_alias_sort"])
+        matrix["پشتیبان"] = matrix["پشتیبان"].astype("string").str.strip().fillna("").astype(object)
+        matrix["مدیر"] = matrix["مدیر"].astype("string").str.strip().fillna("").astype(object)
+        matrix["نام رشته"] = matrix["نام رشته"].astype("string").str.strip().fillna("").astype(object)
+        matrix["نام مدرسه"] = matrix["نام مدرسه"].astype("string").fillna("").astype(object)
+        matrix["عادی مدرسه"] = matrix["عادی مدرسه"].astype("string").str.strip().fillna("").astype(object)
+        matrix["جایگزین"] = matrix["جایگزین"].astype("string").str.strip().fillna("").astype(object)
+        if finance_col in matrix.columns:
+            matrix[finance_col] = matrix[finance_col].astype("Int64")
+        if center_col in matrix.columns:
+            matrix[center_col] = matrix[center_col].astype("int64")
+        matrix["جنسیت"] = matrix["جنسیت"].astype("Int64")
+        matrix["دانش آموز فارغ"] = matrix["دانش آموز فارغ"].astype("Int64")
 
-        # Invariant: ensure finance variants available for each join key combination
-        join_key_cols = [col for col in cfg.policy.join_keys if col in matrix.columns]
-        key_without_finance = [col for col in join_key_cols if col != finance_col]
-        if key_without_finance:
-            expected_finance = set(cfg.finance_variants)
-            finance_check = (
-                matrix.groupby(key_without_finance)[finance_col]
-                .agg(lambda vals: set(int(v) for v in vals if pd.notna(v)))
-            )
-            missing_finance = finance_check[~finance_check.apply(lambda present: expected_finance.issubset(present))]
-            if not missing_finance.empty:
-                raise AssertionError("finance variants missing for some join-key combinations")
+        dedupe_cols = [col for col in DEDUP_KEY_ORDER if col in matrix.columns]
+        if dedupe_cols:
+            matrix = matrix.drop_duplicates(subset=dedupe_cols, keep="first")
+        sort_cols = [col for col in SORT_COLUMNS if col in matrix.columns]
+        if sort_cols:
+            matrix = matrix.sort_values(sort_cols, kind="stable")
 
-        # Validation: ensure alias numeric range matches row type expectations
-        postal_min, postal_max = cfg.postal_valid_range or (1000, 9999)
-        alias_numeric = pd.to_numeric(matrix["جایگزین"], errors="coerce")
-        positive_alias = alias_numeric.notna() & (alias_numeric > 0)
-        low_mask = positive_alias & (alias_numeric < postal_min)
-        high_mask = positive_alias & alias_numeric.between(postal_min, postal_max, inclusive="both")
-        if (low_mask & (matrix["عادی مدرسه"] != "مدرسه‌ای")).any():
-            raise AssertionError("postal codes below minimum must be school rows")
-        if (high_mask & (matrix["عادی مدرسه"] != "عادی")).any():
-            raise AssertionError("postal codes in valid range must map to normal rows")
-        if (low_mask & (matrix[school_code_col] == 0)).any():
-            raise AssertionError("school rows with low postal codes must carry school codes")
+        _validate_finance_invariants(matrix, cfg=cfg, finance_col=finance_col)
+        _validate_alias_contract(matrix, cfg=cfg)
+        _validate_school_code_contract(matrix, school_code_col=school_code_col)
 
     matrix.insert(0, "counter", range(1, len(matrix) + 1))
+
+    nodup = matrix.drop(columns=["counter"]).drop_duplicates()
+    if len(matrix) != len(nodup):
+        raise AssertionError("Duplicate rows before counter!")
 
     validation = pd.DataFrame(
         [
@@ -1514,3 +1598,35 @@ def validate_with_students(
 
     return stud, breakdown, summary
 
+# =============================================================================
+# DEDUPE KEYS
+# =============================================================================
+DEDUP_KEY_ORDER = [
+    "جایگزین",
+    "پشتیبان",
+    "کد کارمندی پشتیبان",
+    "مدیر",
+    "نام رشته",
+    "کدرشته",
+    "جنسیت",
+    "دانش آموز فارغ",
+    "مرکز گلستان صدرا",
+    "مالی حکمت بنیاد",
+    "کد مدرسه",
+    "عادی مدرسه",
+]
+
+SORT_COLUMNS = ["مرکز گلستان صدرا", "کدرشته", "کد مدرسه", "جایگزین"]
+
+REQUIRED_INSPACTOR_COLUMNS = {
+    COL_MENTOR_NAME,
+    COL_MANAGER_NAME,
+    COL_MENTOR_ID,
+    COL_POSTAL,
+    COL_SCHOOL_COUNT,
+    CAPACITY_CURRENT_COL,
+    CAPACITY_SPECIAL_COL,
+    COL_GROUP,
+}
+
+REQUIRED_SCHOOL_COLUMNS = {COL_SCHOOL_CODE}

@@ -144,6 +144,8 @@ class AllocationLogRecord(TypedDict, total=False):
     error_type: Optional[AllocationErrorLiteral]
     detailed_reason: Optional[str]
     suggested_actions: List[str]
+    capacity_before: Optional[int]
+    capacity_after: Optional[int]
 
 
 TraceStageLiteral = Literal[

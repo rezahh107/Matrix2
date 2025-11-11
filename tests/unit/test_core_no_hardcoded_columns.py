@@ -21,6 +21,7 @@ ALLOWED_FILES = {
     Path("app/core/policy_loader.py"),
     Path("app/core/build_matrix.py"),
     Path("app/core/common/domain.py"),
+    Path("app/core/common/columns.py"),
 }
 
 

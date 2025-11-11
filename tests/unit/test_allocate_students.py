@@ -124,6 +124,16 @@ def test_allocate_batch_join_keys_are_typed(_base_pool: pd.DataFrame) -> None:
     ]
 
 
+def test_allocate_batch_logs_capacity_transition(_base_pool: pd.DataFrame) -> None:
+    students = _single_student()
+
+    _, updated_pool, logs, _ = allocate_batch(students, _base_pool)
+
+    assert logs.iloc[0]["capacity_before"] == 2
+    assert logs.iloc[0]["capacity_after"] == 1
+    assert int(updated_pool.loc[0, "remaining_capacity"]) == 1
+
+
 def test_allocate_batch_invalid_join_value_raises(_base_pool: pd.DataFrame) -> None:
     students = _single_student(**{"کدرشته": ""})
 

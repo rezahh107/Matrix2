@@ -12,7 +12,7 @@ import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence
 from typing import Literal
 
 VersionMismatchMode = Literal["raise", "warn", "ignore"]
@@ -86,6 +86,7 @@ class PolicyConfig:
     school_code_empty_as_zero: bool
     alias_rule: PolicyAliasRule
     columns: PolicyColumns
+    column_aliases: Mapping[str, Dict[str, str]]
 
     @property
     def ranking(self) -> List[str]:
@@ -168,6 +169,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     school_code_empty_as_zero = _ensure_bool("school_code_empty_as_zero", data["school_code_empty_as_zero"])
     alias_rule = _normalize_alias_rule(data["alias_rule"])
     columns = _normalize_columns(data["columns"])
+    column_aliases = _normalize_column_aliases(data.get("column_aliases", {}))
 
     return {
         "version": version,
@@ -182,6 +184,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "school_code_empty_as_zero": school_code_empty_as_zero,
         "alias_rule": alias_rule,
         "columns": columns,
+        "column_aliases": column_aliases,
     }
 
 
@@ -279,6 +282,25 @@ def _normalize_columns(value: object) -> Mapping[str, str]:
         if not isinstance(item, (str, bytes)) or not str(item).strip():
             raise ValueError(f"columns['{key}'] must be a non-empty string")
         normalized[key] = str(item).strip()
+    return normalized
+
+
+def _normalize_column_aliases(value: object) -> Mapping[str, Dict[str, str]]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError("column_aliases must be a mapping from source to alias map")
+    normalized: Dict[str, Dict[str, str]] = {}
+    for source, alias_map in value.items():
+        if not isinstance(source, str):
+            raise TypeError("column_aliases keys must be strings")
+        if not isinstance(alias_map, Mapping):
+            raise TypeError("column_aliases values must be mappings")
+        normalized[source] = {
+            str(k): str(v)
+            for k, v in alias_map.items()
+            if isinstance(k, (str, bytes)) and isinstance(v, (str, bytes)) and str(v).strip()
+        }
     return normalized
 
 
@@ -442,6 +464,8 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
             capacity_special=str(data["columns"]["capacity_special"]),
             remaining_capacity=str(data["columns"]["remaining_capacity"]),
         ),
+        column_aliases={str(source): {str(k): str(v) for k, v in aliases.items()}
+                        for source, aliases in data["column_aliases"].items()},
     )
 
 
@@ -519,3 +543,9 @@ def load_policy(
 
 load_policy.cache_clear = _load_policy_cached.cache_clear  # type: ignore[attr-defined]
 load_policy.cache_info = _load_policy_cached.cache_info  # type: ignore[attr-defined]
+
+
+def get_policy() -> PolicyConfig:
+    """دسترسی ساده برای دریافت Policy کش‌شده."""
+
+    return load_policy()

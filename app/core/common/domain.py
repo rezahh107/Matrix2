@@ -7,6 +7,7 @@ Deterministic and fail-safe, adhering to Policy v1.0.3.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from enum import Enum, IntEnum
 from typing import Any, Iterable, Mapping, Literal, Sequence, TypedDict, final, TypeGuard
 
@@ -173,18 +174,37 @@ def is_valid_postal_code(postal_code: Any) -> TypeGuard[str]:
 
 
 def _compute_school_alias(mentor_id: Any) -> str:
-    """تولید کد جایگزین برای ردیف‌های مدرسه‌ای (همیشه شناسهٔ پشتیبان)."""
+    """تولید alias شاخهٔ مدرسه‌ای؛ متن خام بدون اعشار ساختگی."""
 
-    return to_numlike_str(mentor_id) or normalize_fa(mentor_id) or ""
+    if mentor_id is None:
+        return ""
+    if isinstance(mentor_id, (int,)):
+        return str(int(mentor_id))
+    if isinstance(mentor_id, float):
+        if math.isnan(mentor_id):
+            return ""
+        if mentor_id.is_integer():
+            return str(int(mentor_id))
+        return str(mentor_id)
+    text = str(mentor_id).strip()
+    if text.endswith(".0") and text[:-2].isdigit():
+        return text[:-2]
+    return text
 
 
 def _compute_normal_or_dual_alias(postal_code: Any, mentor_id: Any, cfg: BuildConfig) -> str:
-    """کد جایگزین برای ردیف‌های عادی یا دوگانه (کدپستی معتبر یا شناسهٔ پشتیبان)."""
+    """کد جایگزین برای ردیف‌های عادی یا دوگانه (کدپستی چهارنمری معتبر)."""
 
-    postal_str = to_numlike_str(postal_code)
-    if _postal_valid(postal_str, cfg=cfg):
-        return postal_str
-    return to_numlike_str(mentor_id) or normalize_fa(mentor_id) or ""
+    postal_str = to_numlike_str(postal_code).strip()
+    if not postal_str.isdigit():
+        return ""
+    if len(postal_str) != 4:
+        return ""
+    value = int(postal_str)
+    min_val, max_val = cfg.postal_valid_range
+    if not (min_val <= value <= max_val):
+        return ""
+    return postal_str
 
 
 # ---------------------------------------------------------------------------

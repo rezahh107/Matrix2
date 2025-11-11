@@ -180,6 +180,7 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
             TraceStageDefinition(stage="school", column="کد مدرسه"),
             TraceStageDefinition(stage="capacity_gate", column="remaining_capacity"),
         ],
+        column_aliases={},
     )
 
     with pytest.raises(ValueError, match="canonical 8-stage order"):
