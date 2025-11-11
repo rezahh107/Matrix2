@@ -61,6 +61,7 @@ COL_GROUP_INCLUDED = "شامل گروه های آزمایشی"
 _RE_BIDI = re.compile("[\u200c-\u200f\u202a-\u202e]")
 _RE_NONWORD = re.compile(r"[^\w\u0600-\u06FF0-9\s]+", flags=re.UNICODE)
 _RE_WHITESPACE = re.compile(r"\s+")
+_RE_INT = re.compile(r"^[+-]?\d+$")
 _TRANS_PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
 _RE_SPLIT_ITEMS = re.compile(r"[,\u060C]\s*")
 _RE_RANGE = re.compile(r"^\s*(\d+)\s*[:\-–]\s*(\d+)\s*$")
@@ -143,13 +144,66 @@ def normalize_fa(text: Any) -> str:
     return _RE_WHITESPACE.sub(" ", s).strip().lower()
 
 
+def _standardize_numeric_text(value: str) -> str:
+    """یکسان‌سازی ارقام فارسی، جداکننده‌ها و علائم اعشاری."""
+
+    sanitized = value.strip()
+    if not sanitized:
+        return ""
+    sanitized = sanitized.translate(_TRANS_PERSIAN_DIGITS)
+    sanitized = sanitized.replace("،", ",")
+    sanitized = sanitized.replace(",", "")
+    sanitized = sanitized.replace("٫", ".")
+    return sanitized
+
+
+def _parse_int_from_text(text: str) -> int | None:
+    """استخراج مقدار صحیح از رشتهٔ استانداردشده در صورت امکان."""
+
+    if not text:
+        return None
+    sign = ""
+    digits = text
+    if text[0] in {"+", "-"}:
+        sign, digits = text[0], text[1:]
+    if not digits:
+        return None
+    if _RE_INT.match(digits):
+        return int(f"{sign}{digits}")
+    if "." in digits:
+        integer_part, decimal_part = digits.split(".", 1)
+        if integer_part and integer_part.isdigit() and (not decimal_part or set(decimal_part) <= {"0"}):
+            return int(f"{sign}{integer_part}")
+    return None
+
+
+def _coerce_int_like(value: Any) -> int | None:
+    """تبدیل ورودی به int در صورت امکان بدون تبدیل‌های ناخواسته به float."""
+
+    if value is None:
+        return None
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        if math.isnan(value):
+            return None
+        as_int = int(value)
+        if value == as_int:
+            return as_int
+        return None
+    text = _standardize_numeric_text(str(value))
+    return _parse_int_from_text(text)
+
+
 def to_numlike_str(value: Any) -> str:
-    s = str(value).strip()
-    try:
-        f = float(s)
-        return str(int(f)) if f.is_integer() else s
-    except ValueError:
-        return s
+    if value is None or pd.isna(value):
+        return ""
+    raw = str(value).strip()
+    if not raw:
+        return ""
+    normalized = _standardize_numeric_text(raw)
+    parsed = _parse_int_from_text(normalized)
+    return str(parsed) if parsed is not None else normalized
 
 
 def ensure_list(values: Iterable[Any]) -> list[str]:
@@ -361,7 +415,16 @@ def build_school_maps(schools_df: pd.DataFrame) -> tuple[dict[str, str], dict[st
 
 
 def safe_int_column(df: pd.DataFrame, col: str, default: int = 0) -> pd.Series:
-    return pd.to_numeric(df.get(col), errors="coerce").fillna(default).astype(int)
+    """تبدیل ستونی از DataFrame به نوع صحیح بدون تبدیل موقت به float."""
+
+    series = df.get(col)
+    if series is None:
+        return pd.Series([int(default)] * len(df), index=df.index, dtype="Int64")
+    coerced = series.map(_coerce_int_like)
+    result = pd.Series(coerced, index=series.index, dtype="Int64")
+    if default is not None:
+        result = result.fillna(int(default))
+    return result
 
 
 def safe_int_value(value: Any, default: int = 0) -> int:
@@ -382,17 +445,11 @@ def safe_int_value(value: Any, default: int = 0) -> int:
         مقدار صحیح نرمال‌شده (حداقل برابر با ``default``).
     """
 
-    if value is None or (isinstance(value, float) and math.isnan(value)):
+    if value is None:
         return int(default)
 
-    text = str(value).strip().replace(",", "")
-    if not text:
-        return int(default)
-
-    try:
-        return int(float(text))
-    except (ValueError, TypeError):
-        return int(default)
+    parsed = _coerce_int_like(value)
+    return parsed if parsed is not None else int(default)
 
 
 def normalize_capacity_values(current: Any, special: Any, *, default: int = 0) -> tuple[int, int, int]:
@@ -466,16 +523,10 @@ def capacity_gate(
 # SCHOOL CODE EXTRACTION
 # =============================================================================
 def to_int_str_or_none(value: Any) -> str | None:
-    if value is None or (isinstance(value, float) and math.isnan(value)):
+    parsed = _coerce_int_like(value)
+    if parsed is None or parsed == 0:
         return None
-    t = str(value).strip()
-    if not t:
-        return None
-    try:
-        iv = int(float(t))
-        return None if iv == 0 else str(iv)
-    except ValueError:
-        return None
+    return str(parsed)
 
 
 def collect_school_codes_from_row(r: pd.Series, name_to_code: dict[str, str], school_cols: list[str]) -> list[str]:
@@ -687,12 +738,7 @@ def _prepare_base_rows(
                 alias_num = alias_int
 
         school_codes = collect_school_codes_from_row(pd.Series(row), school_name_to_code, school_cols)
-        school_count = 0
-        if COL_SCHOOL_COUNT in row:
-            try:
-                school_count = int(float(str(row.get(COL_SCHOOL_COUNT, "0")).strip() or "0"))
-            except ValueError:
-                school_count = 0
+        school_count = safe_int_value(row.get(COL_SCHOOL_COUNT, 0), default=0)
 
         covered_now, special_limit, remaining_capacity = normalize_capacity_values(
             row.get(CAPACITY_CURRENT_COL, 0),
@@ -810,22 +856,29 @@ def _explode_rows(
     if df.empty:
         return pd.DataFrame()
 
-    gender_series = df["genders"].fillna("")
-    df["gender_code"] = (
-        pd.to_numeric(gender_series, errors="coerce").fillna(0).astype(int).where(gender_series != "", "")
-    )
-    status_series = df[status_col]
-    df["status_code"] = pd.to_numeric(status_series, errors="coerce").fillna("")
+    def _optional_int(value: Any) -> int | type(pd.NA):
+        if pd.isna(value):
+            return pd.NA
+        if isinstance(value, str) and not value.strip():
+            return pd.NA
+        parsed = _coerce_int_like(value)
+        return parsed if parsed is not None else pd.NA
 
-    school_raw = df["school_list"].fillna("")
-    is_blank = school_raw.eq("")
-    school_numeric = pd.to_numeric(school_raw, errors="coerce")
-    df["کد مدرسه"] = school_numeric.fillna(0).astype(int)
-    df.loc[is_blank, "کد مدرسه"] = 0
+    gender_series = df["genders"]
+    df["gender_code"] = gender_series.map(_optional_int).astype("Int64")
+
+    status_series = df[status_col]
+    df["status_code"] = status_series.map(_optional_int).astype("Int64")
+
+    blank_school_mask = df["school_list"].map(lambda v: pd.isna(v) or (isinstance(v, str) and not v.strip()))
+    school_codes = df["school_list"].map(_coerce_int_like)
+    df["کد مدرسه"] = pd.Series(school_codes, index=df.index).fillna(0).astype("int64")
+    df.loc[blank_school_mask.fillna(True), "کد مدرسه"] = 0
+    df["کد مدرسه"] = df["کد مدرسه"].astype("int64")
     df["نام مدرسه"] = df["کد مدرسه"].astype(str).map(code_to_name_school).fillna("")
 
     alias_series = df[alias_col]
-    df["جایگزین"] = alias_series.apply(lambda v: int(v) if str(v).isdigit() else str(v))
+    df["جایگزین"] = alias_series.map(to_numlike_str)
 
     df = df.drop(columns=["genders", status_col, "school_list", alias_col])
     df["عادی مدرسه"] = type_label
@@ -847,17 +900,11 @@ def _explode_rows(
     df[CAPACITY_SPECIAL_COL] = safe_int_column(df, "capacity_special")
     df["remaining_capacity"] = safe_int_column(df, "capacity_remaining")
 
-    df["مالی حکمت بنیاد"] = pd.to_numeric(df["مالی حکمت بنیاد"], errors="coerce").astype("Int64")
-    df["جنسیت"] = pd.to_numeric(df["gender_code"], errors="coerce").astype("Int64")
-    df["دانش آموز فارغ"] = pd.to_numeric(df["status_code"], errors="coerce").astype("Int64")
-    df["جنسیت"] = df["جنسیت"].where(df["جنسیت"].notna(), pd.NA)
-    df["دانش آموز فارغ"] = df["دانش آموز فارغ"].where(df["دانش آموز فارغ"].notna(), pd.NA)
-    df["جنسیت2"] = df["جنسیت"].map(
-        lambda v: gender_text(v) if pd.notna(v) and v != "" else ""
-    )
-    df["دانش آموز فارغ2"] = df["دانش آموز فارغ"].map(
-        lambda v: status_text(v) if pd.notna(v) and v != "" else ""
-    )
+    df["مالی حکمت بنیاد"] = safe_int_column(df, "مالی حکمت بنیاد")
+    df["جنسیت"] = df["gender_code"].astype("Int64")
+    df["دانش آموز فارغ"] = df["status_code"].astype("Int64")
+    df["جنسیت2"] = df["جنسیت"].map(lambda v: gender_text(v) if pd.notna(v) else "")
+    df["دانش آموز فارغ2"] = df["دانش آموز فارغ"].map(lambda v: status_text(v) if pd.notna(v) else "")
     df["مرکز گلستان صدرا3"] = df["center_text"]
 
     df = df.drop(
@@ -1033,22 +1080,16 @@ def build_matrix(
     )
 
     if not matrix.empty:
-        matrix["ردیف پشتیبان"] = matrix["ردیف پشتیبان"].apply(
-            lambda v: int(v) if str(v).strip().isdigit() else str(v).strip()
+        matrix["ردیف پشتیبان"] = matrix["ردیف پشتیبان"].map(_coerce_int_like)
+        matrix["کد مدرسه"] = pd.Series(
+            matrix["کد مدرسه"].map(_coerce_int_like), index=matrix.index
+        ).fillna(0).astype("int64")
+        matrix["جایگزین"] = matrix["جایگزین"].map(to_numlike_str)
+        matrix["_school_sort"] = matrix["کد مدرسه"].map(
+            lambda v: safe_int_value(v, default=SCHOOL_CODE_NULL_SORT)
         )
-        matrix["کد مدرسه"] = pd.to_numeric(matrix["کد مدرسه"], errors="coerce").fillna(0).astype(int)
-        matrix["جایگزین"] = matrix["جایگزین"].apply(
-            lambda v: int(v) if str(v).strip().isdigit() else str(v).strip()
-        )
-        matrix["_school_sort"] = (
-            pd.to_numeric(matrix["کد مدرسه"], errors="coerce")
-            .fillna(SCHOOL_CODE_NULL_SORT)
-            .astype(int)
-        )
-        matrix["_alias_sort"] = (
-            pd.to_numeric(matrix["جایگزین"], errors="coerce")
-            .fillna(ALIAS_FALLBACK_SORT)
-            .astype(int)
+        matrix["_alias_sort"] = matrix["جایگزین"].map(
+            lambda v: safe_int_value(v, default=ALIAS_FALLBACK_SORT)
         )
         matrix = matrix.sort_values(
             by=["مرکز گلستان صدرا", "کدرشته", "_school_sort", "_alias_sort"],
