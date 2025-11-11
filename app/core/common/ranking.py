@@ -26,11 +26,35 @@ from pathlib import Path
 import pandas as pd
 
 from ..policy_loader import PolicyConfig, load_policy
-from .ids import ensure_ranking_columns
+from .ids import ensure_ranking_columns as _prepare_ranking_columns
 
-__all__ = ["apply_ranking_policy"]
+__all__ = ["apply_ranking_policy", "ensure_ranking_columns"]
 
 _DEFAULT_POLICY_PATH = Path("config/policy.json")
+
+
+def ensure_ranking_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """تضمین وجود ستون‌های ضروری رتبه‌بندی با پیش‌فرض‌های امن.
+
+    مثال::
+
+        >>> import pandas as pd
+        >>> raw = pd.DataFrame({"کد کارمندی پشتیبان": ["001", "EMP-2"]})
+        >>> prepared = ensure_ranking_columns(raw)
+        >>> prepared[["occupancy_ratio", "allocations_new"]].iloc[0].tolist()
+        [0.0, 0]
+    """
+
+    out = df.copy()
+    if "occupancy_ratio" not in out.columns:
+        out["occupancy_ratio"] = 0.0
+    if "allocations_new" not in out.columns:
+        out["allocations_new"] = 0
+    if "کد کارمندی پشتیبان" in out.columns:
+        out["کد کارمندی پشتیبان"] = (
+            out["کد کارمندی پشتیبان"].fillna("").astype(str).str.strip()
+        )
+    return _prepare_ranking_columns(out)
 
 
 def apply_ranking_policy(

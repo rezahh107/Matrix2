@@ -139,6 +139,17 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
     progress(0, "loading inputs")
     students_df = reader_students(students_path)
     pool_df = reader_pool(pool_path)
+    # Normalize mentor_id to string (حفظ صفرهای پیشرو/آلفانامبر)
+    if "کد کارمندی پشتیبان" in pool_df.columns:
+        pool_df["کد کارمندی پشتیبان"] = (
+            pool_df["کد کارمندی پشتیبان"].fillna("").astype(str).str.strip()
+        )
+
+    # Optional: پیش‌فرض‌های رتبه‌بندی اگر بخواهیم در Infra هم مطمئن باشیم
+    if "occupancy_ratio" not in pool_df.columns:
+        pool_df["occupancy_ratio"] = 0.0
+    if "allocations_new" not in pool_df.columns:
+        pool_df["allocations_new"] = 0
 
     allocations_df, updated_pool_df, logs_df, trace_df = allocate_batch(
         students_df,
