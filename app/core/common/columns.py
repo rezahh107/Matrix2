@@ -285,7 +285,7 @@ def _coerce_identifier_column(df: pd.DataFrame, canonical_en: str) -> None:
     if column is None:
         return
     coerced = df[column].map(_identifier_to_string)
-    df[column] = coerced.astype("string").astype(object)
+    df[column] = coerced.astype("string")
 
 
 def _coerce_report_semantics(df: pd.DataFrame) -> None:
