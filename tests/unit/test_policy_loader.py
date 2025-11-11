@@ -32,6 +32,11 @@ def _valid_payload() -> dict[str, object]:
         "version": "1.0.3",
         "normal_statuses": [1, 0],
         "school_statuses": [1],
+        "postal_valid_range": [1000, 9999],
+        "finance_variants": [0, 1, 3],
+        "center_map": {"شهدخت کشاورز": 1, "آیناز هوشمند": 2, "*": 0},
+        "school_code_empty_as_zero": True,
+        "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
             "کدرشته",
             "جنسیت",
@@ -55,6 +60,14 @@ def _valid_payload() -> dict[str, object]:
             {"stage": "school", "column": "کد مدرسه"},
             {"stage": "capacity_gate", "column": "remaining_capacity"},
         ],
+        "columns": {
+            "postal_code": "کدپستی",
+            "school_count": "تعداد مدارس تحت پوشش",
+            "school_code": "کد مدرسه",
+            "capacity_current": "تعداد داوطلبان تحت پوشش",
+            "capacity_special": "تعداد تحت پوشش خاص",
+            "remaining_capacity": "remaining_capacity",
+        },
     }
 
 
@@ -202,6 +215,10 @@ def test_load_policy_reads_default_config(tmp_path: Path) -> None:
         "min_mentor_id",
     ]
     assert policy.capacity_column == "remaining_capacity"
+    assert policy.postal_valid_range == (1000, 9999)
+    assert policy.finance_variants == (0, 1, 3)
+    assert policy.center_map["شهدخت کشاورز"] == 1
+    assert policy.columns.postal_code == "کدپستی"
     assert load_policy(config_path) is policy
 
 
