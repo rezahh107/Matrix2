@@ -94,6 +94,7 @@ def build_mentor_state(
             "alloc_new": 0,
             "occupancy_ratio": 0.0,
         }
+        state[mentor_id] = {"initial": value, "remaining": value, "alloc_new": 0}
     return state
 
 
@@ -128,6 +129,7 @@ def apply_ranking_policy(
         try:
             return int(raw)  # type: ignore[arg-type]
         except Exception:  # pragma: no cover - نگهبان ورودی پیش‌بینی‌نشده
+        except (ValueError, TypeError):  # pragma: no cover - نگهبان ورودی پیش‌بینی‌نشده
             return 0
 
     initial = mentor_ids.map(lambda mentor: _state_value(mentor, "initial"))
@@ -190,3 +192,13 @@ def consume_capacity(state: Dict[Any, Dict[str, int]], mentor_id: Any) -> tuple[
     occupancy_ratio = (initial - after) / denominator
     entry["occupancy_ratio"] = float(occupancy_ratio)
     return before, after, float(occupancy_ratio)
+    before = int(entry.get("remaining", 0))
+    if before <= 0:
+        raise ValueError("CAPACITY_UNDERFLOW")
+    entry["remaining"] = before - 1
+    entry["alloc_new"] = int(entry.get("alloc_new", 0)) + 1
+    initial = int(entry.get("initial", before))
+    if initial <= 0:
+        initial = before
+    occupancy = (initial - entry["remaining"]) / max(initial, 1)
+    return before, entry["remaining"], float(occupancy)

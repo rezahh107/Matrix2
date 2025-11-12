@@ -283,6 +283,7 @@ def allocate_student(
             }
         )
         return AllocationResult(None, trace, log)
+    before, after, occupancy = consume_capacity(active_state, mentor_identifier)
 
     mentor_name = chosen_row.get("پشتیبان", chosen_row.get("mentor_name", ""))
     mentor_id_text = chosen_row.get("کد کارمندی پشتیبان", chosen_en.get("mentor_id", ""))
@@ -312,6 +313,11 @@ def allocate_student(
             "tie_breakers": tie_breakers,
             "capacity_before": int(capacity_before),
             "capacity_after": int(capacity_after),
+            "occupancy_ratio": float(occupancy),
+            "selection_reason": "policy: min occ → min alloc → natural mentor_id",
+            "tie_breakers": tie_breakers,
+            "capacity_before": int(before),
+            "capacity_after": int(after),
         }
     )
     return AllocationResult(capacity_filtered.loc[chosen_index], trace, log)
@@ -404,6 +410,7 @@ def allocate_batch(
             pool_internal.loc[chosen_index, "occupancy_ratio"] = (
                 (int(state_entry.get("initial", 0)) - state_entry["remaining"]) / initial_value
             )
+            pool_internal.loc[chosen_index, "occupancy_ratio"] = occupancy
             pool_with_ids.loc[chosen_index, resolved_capacity_column] = state_entry[
                 "remaining"
             ]
