@@ -79,6 +79,19 @@ def test_allocate_student_dict_missing_school_field_skips_filter(
     assert school_trace["total_after"] == school_trace["total_before"]
 
 
+@pytest.mark.parametrize("raw_code", ["35-81", "35/81", "35\\81", "۳۵-۸۱", "35–81"])
+def test_allocate_student_sanitizes_school_code_separators(
+    raw_code: str, _base_pool: pd.DataFrame
+) -> None:
+    student_row = _single_student(کد_مدرسه=raw_code).iloc[0].to_dict()
+
+    result = allocate_student(student_row, _base_pool)
+
+    assert result.log["allocation_status"] == "success"
+    assert result.log["error_type"] is None
+    assert result.log["join_keys"]["کد_مدرسه"] == 3581
+
+
 def test_allocate_batch_no_match_sets_error(_base_pool: pd.DataFrame) -> None:
     students = _single_student(**{"کد_مدرسه": 9999})
 

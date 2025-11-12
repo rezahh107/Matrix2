@@ -43,6 +43,24 @@ import pandas as pd
 from ..policy_loader import PolicyConfig, load_policy
 from .normalization import to_numlike_str
 
+_SCHOOL_CODE_TRANSLATION = str.maketrans(
+    {
+        "-": " ",
+        "−": " ",  # minus sign
+        "‑": " ",  # non-breaking hyphen
+        "–": " ",  # en dash
+        "—": " ",  # em dash
+        "―": " ",  # horizontal bar
+        "﹘": " ",  # small em dash
+        "﹣": " ",  # small hyphen-minus
+        "／": " ",  # full-width slash
+        "/": " ",
+        "\\": " ",
+        "⁄": " ",
+        "ـ": "",  # kashida
+    }
+)
+
 
 @dataclass(frozen=True)
 class StudentSchoolCode:
@@ -54,7 +72,11 @@ class StudentSchoolCode:
 
 
 def _coerce_school_candidate(candidate: object) -> tuple[int | None, bool]:
-    """تبدیل مقدار خام کد مدرسه به int یا علامت‌گذاری کمبود."""
+    """تبدیل مقدار خام کد مدرسه به int یا علامت‌گذاری کمبود.
+
+    این تابع پیش از تفسیر مقدار، همهٔ جداکننده‌های رایج (خط تیره، اسلش، کشیده)
+    را حذف می‌کند تا مقادیر نظیر «۳۵-۸۱» یا «35/81» نیز به‌درستی به 3581 تبدیل شوند.
+    """
 
     if candidate is None or candidate is pd.NA:
         return None, True
@@ -62,6 +84,13 @@ def _coerce_school_candidate(candidate: object) -> tuple[int | None, bool]:
         if pd.isna(candidate):  # type: ignore[arg-type]
             return None, True
         return int(candidate), False
+    if isinstance(candidate, (bytes, bytearray)):
+        try:
+            candidate = candidate.decode("utf-8", "ignore")
+        except Exception:
+            return None, True
+    if isinstance(candidate, str):
+        candidate = candidate.translate(_SCHOOL_CODE_TRANSLATION)
     text = to_numlike_str(candidate).strip()
     if not text:
         return None, True
