@@ -1,6 +1,7 @@
 import pandas as pd
 
 from app.core.common.column_normalizer import normalize_input_columns
+from app.core.common.columns import ensure_series
 
 
 def test_normalize_input_columns_adds_aliases_and_cleans_values() -> None:
@@ -38,3 +39,14 @@ def test_normalize_input_columns_handles_english_headers() -> None:
     assert "کد مدرسه" in normalized.columns
     assert list(normalized["کد مدرسه"]) == [4001, 4002]
     assert not report.unmatched
+
+
+def test_normalize_input_columns_handles_duplicate_numeric_columns() -> None:
+    df = pd.DataFrame([["4001", "4002"]], columns=["کد مدرسه", "کد مدرسه"])
+
+    normalized, _ = normalize_input_columns(
+        df, kind="SchoolReport", include_alias=False, report=False
+    )
+
+    values = ensure_series(normalized["کد مدرسه"]).astype("Int64")
+    assert list(values) == [4001]

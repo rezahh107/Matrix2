@@ -12,6 +12,7 @@ import warnings
 
 import pandas as pd
 
+from .columns import ensure_series
 from .domain import (
     COL_EDU_CODE,
     COL_FULL_SCHOOL_CODE,
@@ -151,7 +152,7 @@ def normalize_input_columns(
                 unmatched.append(column)
             continue
         positions.setdefault(rule.persian, idx)
-        series = result[column]
+        series = ensure_series(result[column])
         canonical_series, alias_series = _normalize_for_rule(series, rule.normalizer)
         _set_column(result, rule.persian, canonical_series, positions[rule.persian])
         if column != rule.persian and column != rule.standard:
@@ -164,6 +165,7 @@ def normalize_input_columns(
 
     if to_drop:
         result = result.drop(columns=list(to_drop))
+
 
     if report and unmatched:
         warnings.warn(
