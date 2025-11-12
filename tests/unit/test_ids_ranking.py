@@ -66,7 +66,7 @@ def _base_policy_payload() -> dict[str, object]:
         "virtual_name_patterns": ["در\\s+انتظار\\s+تخصیص"],
         "excel": {
             "rtl": True,
-            "font_name": "Vazirmatn",
+            "font_name": "Tahoma",
             "header_mode_internal": "en",
             "header_mode_write": "fa_en",
         },

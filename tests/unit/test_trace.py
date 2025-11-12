@@ -74,7 +74,7 @@ def _policy_payload() -> dict[str, object]:
         "virtual_name_patterns": ["در\\s+انتظار\\s+تخصیص"],
         "excel": {
             "rtl": True,
-            "font_name": "Vazirmatn",
+            "font_name": "Tahoma",
             "header_mode_internal": "en",
             "header_mode_write": "fa_en",
         },
@@ -214,7 +214,7 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
         column_aliases={},
         excel=ExcelOptions(
             rtl=True,
-            font_name="Vazirmatn",
+            font_name="Tahoma",
             header_mode_internal="en",
             header_mode_write="fa",
         ),

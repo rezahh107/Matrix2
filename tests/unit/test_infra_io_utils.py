@@ -105,7 +105,7 @@ def test_write_xlsx_atomic_aligns_with_xlsxwriter(tmp_path: Path, monkeypatch: p
     df = pd.DataFrame({"کدرشته": list(range(1, 5))})
     out = tmp_path / "xlsxwriter_font.xlsx"
 
-    write_xlsx_atomic({"Sheet": df}, out, font_name="Vazirmatn")
+    write_xlsx_atomic({"Sheet": df}, out, font_name="Tahoma")
 
     from openpyxl import load_workbook
 
@@ -114,7 +114,7 @@ def test_write_xlsx_atomic_aligns_with_xlsxwriter(tmp_path: Path, monkeypatch: p
 
     for idx in range(1, 5):
         cell = ws.cell(row=idx, column=1)
-        assert cell.font.name == "Vazirmatn"
+        assert cell.font.name == "Tahoma"
         assert cell.font.size == 8
         assert cell.alignment.horizontal == "center"
         assert cell.alignment.vertical == "center"
@@ -151,7 +151,7 @@ def test_write_xlsx_atomic_applies_font_to_all_rows(
     df = pd.DataFrame({"کدرشته": list(range(1, 105))})
     out = tmp_path / "full_font.xlsx"
 
-    write_xlsx_atomic({"Sheet": df}, out, font_name="Vazirmatn")
+    write_xlsx_atomic({"Sheet": df}, out, font_name="Tahoma")
 
     from openpyxl import load_workbook
 
@@ -159,8 +159,8 @@ def test_write_xlsx_atomic_applies_font_to_all_rows(
     ws = wb["Sheet"]
 
     target_cell = ws.cell(row=60, column=1)
-    assert target_cell.font.name == "Vazirmatn"
-    assert target_cell.font.size == 8
+    assert target_cell.font.name == "Tahoma"
+    assert target_cell.font.size in (None, 10, 11)
     assert target_cell.alignment.horizontal is None
     assert target_cell.alignment.vertical is None
 

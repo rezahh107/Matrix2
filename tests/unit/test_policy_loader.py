@@ -77,7 +77,7 @@ def _valid_payload() -> dict[str, object]:
         "virtual_name_patterns": ["در\\s+انتظار\\s+تخصیص"],
         "excel": {
             "rtl": True,
-            "font_name": "Vazirmatn",
+            "font_name": "Tahoma",
             "header_mode_internal": "en",
             "header_mode_write": "fa_en",
         },
@@ -220,7 +220,7 @@ def test_excel_options_parsing() -> None:
     assert policy.excel.header_mode_write == "fa_en"
     assert policy.excel.header_mode == policy.excel.header_mode_write
     assert policy.excel.rtl is True
-    assert policy.excel.font_name == "Vazirmatn"
+    assert policy.excel.font_name == "Tahoma"
 
     payload_override = _valid_payload()
     payload_override["excel"] = {

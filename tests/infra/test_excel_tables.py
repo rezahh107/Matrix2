@@ -44,7 +44,7 @@ def test_table_names_are_unique_and_slugged(
     out = tmp_path / f"{engine}-slug.xlsx"
     monkeypatch.setenv("EXCEL_ENGINE", engine)
 
-    write_xlsx_atomic(sheets, out, font_name="Vazirmatn")
+    write_xlsx_atomic(sheets, out, font_name="Tahoma")
 
     wb = load_workbook(out)
     seen: set[str] = set()
@@ -69,7 +69,7 @@ def test_table_not_created_for_empty_frames(
     out = tmp_path / f"{engine}-empty.xlsx"
     monkeypatch.setenv("EXCEL_ENGINE", engine)
 
-    write_xlsx_atomic({"خالی": df}, out, font_name="Vazirmatn")
+    write_xlsx_atomic({"خالی": df}, out, font_name="Tahoma")
 
     wb = load_workbook(out)
     ws = wb[wb.sheetnames[0]]
