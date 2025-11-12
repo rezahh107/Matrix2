@@ -1,17 +1,19 @@
-"""ابزار ممیزی خروجی تخصیص برای تضمین معیارهای پذیرش."""
+"""ابزار ممیزی خروجی تخصیص مطابق Policy-First."""
 
 from __future__ import annotations
 
+import argparse
+import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping
 
 import pandas as pd
 
 from app.core.common.columns import canonicalize_headers
 from app.core.policy_loader import PolicyConfig, get_policy
 
-__all__ = ["audit_allocations"]
+__all__ = ["audit_allocations", "audit_allocations_cli", "summarize_report"]
 
 
 def _load_sheet(
@@ -20,6 +22,8 @@ def _load_sheet(
     *,
     header_mode_internal: str,
 ) -> pd.DataFrame:
+    """خواندن شیت و کاننیکال‌سازی ستون‌ها مطابق حالت داخلی."""
+
     if sheet_name not in workbook.sheet_names:
         return pd.DataFrame()
     frame = workbook.parse(sheet_name)
@@ -27,6 +31,8 @@ def _load_sheet(
 
 
 def _compile_virtual_pattern(policy: PolicyConfig) -> re.Pattern[str] | None:
+    """تولید regex ترکیبی برای تشخیص منتورهای مجازی."""
+
     if not policy.virtual_name_patterns:
         return None
     joined = "|".join(f"(?:{pattern})" for pattern in policy.virtual_name_patterns)
@@ -38,6 +44,8 @@ def _virtual_hits(
     policy: PolicyConfig,
     regex: re.Pattern[str] | None,
 ) -> tuple[int, List[Mapping[str, Any]]]:
+    """شمارش تخصیص‌های منتور مجازی بر اساس Policy."""
+
     if allocations.empty:
         return 0, []
 
@@ -54,13 +62,20 @@ def _virtual_hits(
             mask |= alias_numeric.between(start, end, inclusive="both")
 
     rows = allocations.loc[mask]
-    samples = rows.head(10)[[col for col in rows.columns if col in {"student_id", "mentor_name", "mentor_id", "alias"}]]
+    sample_columns = [
+        column
+        for column in rows.columns
+        if column in {"student_id", "mentor_name", "mentor_id", "alias"}
+    ]
+    samples = rows.head(10)[sample_columns]
     return int(mask.sum()), samples.to_dict("records")
 
 
 def _capacity_stuck(
     logs: pd.DataFrame,
 ) -> tuple[int, List[Mapping[str, Any]]]:
+    """پیدا کردن تخصیص‌هایی که ظرفیت قبل/بعد ثابت مانده است."""
+
     if logs.empty:
         return 0, []
     required = {"capacity_before", "capacity_after"}
@@ -70,7 +85,11 @@ def _capacity_stuck(
     after = pd.to_numeric(logs["capacity_after"], errors="coerce")
     mask = before.eq(after)
     stuck = logs.loc[mask]
-    columns = [col for col in stuck.columns if col in {"student_id", "mentor_id", "capacity_before", "capacity_after"}]
+    columns = [
+        column
+        for column in stuck.columns
+        if column in {"student_id", "mentor_id", "capacity_before", "capacity_after"}
+    ]
     return int(mask.sum()), stuck.head(10)[columns].to_dict("records")
 
 
@@ -79,6 +98,8 @@ def _trace_mismatch(
     *,
     expected_stage_count: int,
 ) -> tuple[int, List[Mapping[str, Any]]]:
+    """شناسایی دانش‌آموزانی که Trace کامل یا True ندارند."""
+
     if trace.empty or "student_id" not in trace.columns:
         return 0, []
 
@@ -112,15 +133,7 @@ def _trace_mismatch(
 
 
 def audit_allocations(path: str | Path) -> Dict[str, Dict[str, Any]]:
-    """اجرای ممیزی روی خروجی Excel تخصیص و برگرداندن خلاصهٔ متریک‌ها.
-
-    مثال::
-
-        >>> from pathlib import Path
-        >>> report = audit_allocations(Path("allocations.xlsx"))  # doctest: +SKIP
-        >>> report["VirtualMentorHits"]["count"]
-        0
-    """
+    """اجرای ممیزی روی خروجی Excel تخصیص و بازگشت گزارش ساخت‌یافته."""
 
     target = Path(path)
     if not target.exists():
@@ -158,3 +171,48 @@ def audit_allocations(path: str | Path) -> Dict[str, Dict[str, Any]]:
         "CapacityStuck": {"count": stuck_count, "samples": stuck_samples},
         "TraceMismatch": {"count": trace_count, "samples": trace_samples},
     }
+
+
+def summarize_report(report: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
+    """خلاصهٔ شمارشی ممیزی با حفظ ترتیب کلیدها."""
+
+    summary: Dict[str, Any] = {}
+    for key, payload in report.items():
+        count = int(payload.get("count", 0))
+        samples = payload.get("samples")
+        summary[key] = {
+            "count": count,
+            "samples": list(samples)[:3] if isinstance(samples, Iterable) else [],
+        }
+    return summary
+
+
+def audit_allocations_cli(path: str | Path) -> int:
+    """اجرای ممیزی از خط فرمان و چاپ JSON؛ بازگشت کد وضعیت مناسب."""
+
+    report = audit_allocations(path)
+    summary = summarize_report(report)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    exit_code = 0
+    for payload in summary.values():
+        if int(payload.get("count", 0)) > 0:
+            exit_code = 1
+    return exit_code
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Audit allocation outputs")
+    parser.add_argument("path", help="مسیر فایل Excel تخصیص")
+    return parser
+
+
+def main(argv: Iterable[str] | None = None) -> int:
+    """نقطهٔ ورود CLI برای ممیزی خروجی تخصیص."""
+
+    parser = _build_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    return audit_allocations_cli(args.path)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

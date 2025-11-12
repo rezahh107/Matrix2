@@ -45,6 +45,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="پس از اجرا، ممیزی خروجی را چاپ کن",
     )
+    parser.add_argument(
+        "--metrics",
+        action="store_true",
+        help="پس از اجرا، خلاصهٔ JSON ممیزی را نمایش بده",
+    )
+    parser.add_argument(
+        "--determinism-check",
+        action="store_true",
+        help="اجرای مجدد تخصیص برای اطمینان از دترمینیسم",
+    )
 
     args = parser.parse_args(argv)
 
@@ -61,12 +71,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     ]
     if args.capacity_column:
         cli_args.extend(["--capacity-column", str(args.capacity_column)])
+    if args.determinism_check:
+        cli_args.append("--determinism-check")
+    if args.metrics:
+        cli_args.append("--metrics")
+    if args.audit:
+        cli_args.append("--audit")
 
     exit_code = cli.main(cli_args)
     if exit_code != 0:
         return exit_code
 
-    if args.audit:
+    if args.audit or args.metrics:
         report = audit_allocations(Path(args.output))
         _print_summary(report)
 

@@ -11,6 +11,7 @@ import json
 import os
 import re
 import tempfile
+import warnings
 from os import PathLike
 from pathlib import Path
 from typing import Dict, Iterator, List, Sequence
@@ -236,7 +237,7 @@ def _temporary_file_path(*, suffix: str = "", directory: Path | str | None = Non
         path.unlink(missing_ok=True)
 
 
-def _pick_engine() -> str:
+def _pick_engine() -> str | None:
     """انتخاب بهترین engine نصب‌شده برای نوشتن Excel."""
 
     forced = os.getenv("EXCEL_ENGINE")
@@ -249,7 +250,7 @@ def _pick_engine() -> str:
         except Exception:
             continue
         return engine
-    raise RuntimeError("هیچ‌کدام از 'openpyxl' یا 'xlsxwriter' نصب نیستند.")
+    return None
 
 
 def write_xlsx_atomic(
@@ -283,6 +284,18 @@ def write_xlsx_atomic(
         if header_mode:
             prepared = canonicalize_headers(prepared, header_mode=header_mode)
         processed_data[sheet_name] = prepared
+
+    if engine is None:
+        warnings.warn(
+            "No Excel engine available; falling back to CSV outputs.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        for sheet_name, df in processed_data.items():
+            safe_name = _safe_sheet_name(str(sheet_name), taken)
+            csv_name = f"{target_path.stem}-{safe_name}.csv"
+            df.to_csv(target_path.with_name(csv_name), index=False)
+        return
 
     with _temporary_file_path(suffix=".xlsx", directory=target_path.parent) as tmp_path:
         with pd.ExcelWriter(tmp_path, engine=engine) as writer:

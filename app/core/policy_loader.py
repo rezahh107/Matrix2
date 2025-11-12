@@ -15,11 +15,23 @@ from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from typing import Literal
 
-VersionMismatchMode = Literal["raise", "warn", "ignore"]
+VersionMismatchMode = Literal["raise", "warn", "migrate"]
 
 DEFAULT_POLICY_VERSION = "1.0.3"
 _EXPECTED_JOIN_KEYS_COUNT = 6
 _EXPECTED_RANKING_ITEMS_COUNT = 3
+
+_DEFAULT_VIRTUAL_ALIAS_RANGES: tuple[tuple[int, int], ...] = ((7000, 7999),)
+_DEFAULT_VIRTUAL_NAME_PATTERNS: tuple[str, ...] = (
+    r"در\s+انتظار\s+تخصیص",
+    "فراگیر",
+)
+_DEFAULT_EXCEL_OPTIONS: Mapping[str, object] = {
+    "rtl": True,
+    "font_name": "Vazirmatn",
+    "header_mode_internal": "en",
+    "header_mode_write": "fa_en",
+}
 
 _TRACE_STAGE_ORDER: tuple[str, ...] = (
     "type",
@@ -160,6 +172,7 @@ class TraceStageDefinition:
 
 
 def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object]:
+    data = _apply_schema_defaults(dict(data))
     required = [
         "version",
         "normal_statuses",
@@ -613,7 +626,7 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         ),
         column_aliases={str(source): {str(k): str(v) for k, v in aliases.items()}
                         for source, aliases in data["column_aliases"].items()},
-        excel=data["excel"],
+        excel=ExcelOptions(**_normalize_excel_options(data["excel"])),
         virtual_alias_ranges=tuple(
             (int(start), int(end)) for start, end in data["virtual_alias_ranges"]
         ),
@@ -640,10 +653,109 @@ def parse_policy_dict(
 ) -> PolicyConfig:
     """مسیر خالص برای تبدیل dict به :class:`PolicyConfig`."""
 
-    normalized = _normalize_policy_payload(data)
+    prepared = _prepare_policy_payload(data, expected_version, on_version_mismatch)
+    normalized = _normalize_policy_payload(prepared)
     config = _to_config(normalized)
     _version_gate(config.version, expected_version, on_version_mismatch)
     return config
+
+
+def _apply_schema_defaults(data: Dict[str, object]) -> Dict[str, object]:
+    """تزریق کلیدهای ضروری در صورت فقدان برای مهاجرت نسخه."""
+
+    data.setdefault("virtual_alias_ranges", list(_DEFAULT_VIRTUAL_ALIAS_RANGES))
+    data.setdefault("virtual_name_patterns", list(_DEFAULT_VIRTUAL_NAME_PATTERNS))
+
+    excel_options = data.get("excel") or {}
+    if not isinstance(excel_options, Mapping):
+        excel_options = dict(_DEFAULT_EXCEL_OPTIONS)
+    else:
+        excel_options = dict(_DEFAULT_EXCEL_OPTIONS) | {str(k): v for k, v in excel_options.items()}
+    data["excel"] = excel_options
+
+    if "column_aliases" not in data or not isinstance(data["column_aliases"], Mapping):
+        data["column_aliases"] = {}
+
+    return data
+
+
+def _normalize_excel_options(payload: Mapping[str, object]) -> Dict[str, object]:
+    """اعتبارسنجی و نرمال‌سازی گزینه‌های Excel."""
+
+    rtl = bool(payload.get("rtl", _DEFAULT_EXCEL_OPTIONS["rtl"]))
+    font_name = str(payload.get("font_name", _DEFAULT_EXCEL_OPTIONS["font_name"]))
+    internal = str(payload.get("header_mode_internal", _DEFAULT_EXCEL_OPTIONS["header_mode_internal"]))
+    write = str(payload.get("header_mode_write", _DEFAULT_EXCEL_OPTIONS["header_mode_write"]))
+    return {
+        "rtl": rtl,
+        "font_name": font_name,
+        "header_mode_internal": internal,
+        "header_mode_write": write,
+    }
+
+
+def _prepare_policy_payload(
+    data: Mapping[str, object],
+    expected_version: Optional[str],
+    mode: VersionMismatchMode,
+) -> Mapping[str, object]:
+    """آماده‌سازی اولیهٔ دادهٔ Policy با لحاظ مهاجرت و هشدار نسخه."""
+
+    payload = _apply_schema_defaults(dict(data))
+    if expected_version is None:
+        return payload
+
+    version = str(payload.get("version", ""))
+    if not version:
+        raise ValueError("Policy payload missing 'version'")
+
+    if version == expected_version:
+        return payload
+
+    loaded_semver = _parse_semver(version)
+    expected_semver = _parse_semver(expected_version)
+    message = (
+        f"Policy version mismatch: loaded='{version}' expected='{expected_version}'"
+    )
+
+    if loaded_semver[0] != expected_semver[0]:
+        raise ValueError(message + " (major incompatible)")
+
+    if mode == "raise":
+        raise ValueError(message)
+
+    if mode == "warn":
+        warnings.warn(message, RuntimeWarning, stacklevel=3)
+        return payload
+
+    if mode != "migrate":
+        raise ValueError(f"Unsupported version mismatch mode: {mode}")
+
+    warnings.warn(
+        "Policy schema migrated in-memory to match expected version. Persist the updated policy.json to avoid runtime migrations.",
+        RuntimeWarning,
+        stacklevel=3,
+    )
+
+    migrated = dict(payload)
+    migrated["version"] = expected_version
+
+    if "trace_stages" not in migrated or not migrated["trace_stages"]:
+        migrated["trace_stages"] = [
+            {"stage": stage, "column": column} for stage, column in _LEGACY_TRACE_DEFAULTS.items()
+        ]
+
+    if "ranking_rules" not in migrated:
+        ranking_names = migrated.get("ranking") or [rule for rule in _RANKING_RULE_LIBRARY]
+        ranking_rules = []
+        for name in ranking_names:
+            if name not in _RANKING_RULE_LIBRARY:
+                raise ValueError(f"Unknown ranking rule '{name}' in legacy policy")
+            column, ascending = _RANKING_RULE_LIBRARY[name]
+            ranking_rules.append({"name": name, "column": column, "ascending": ascending})
+        migrated["ranking_rules"] = ranking_rules
+
+    return migrated
 
 
 @lru_cache(maxsize=8)
@@ -658,7 +770,8 @@ def _load_policy_cached(
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in policy file: {resolved_path}") from exc
-    normalized = _normalize_policy_payload(data)
+    prepared = _prepare_policy_payload(data, expected_version, on_version_mismatch)
+    normalized = _normalize_policy_payload(prepared)
     config = _to_config(normalized)
     _version_gate(config.version, expected_version, on_version_mismatch)
     return config
