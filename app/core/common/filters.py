@@ -34,6 +34,7 @@ pandas را اجرا می‌کند. هر تابع یکی از مراحل «Alloc
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from numbers import Number
 from typing import Callable, Mapping, Sequence
 
@@ -42,9 +43,72 @@ import pandas as pd
 from ..policy_loader import PolicyConfig, load_policy
 from .normalization import to_numlike_str
 
+
+@dataclass(frozen=True)
+class StudentSchoolCode:
+    """نمایش نرمال‌شدهٔ «کد مدرسه» همراه با وضعیت کمبود و wildcard."""
+
+    value: int | None
+    missing: bool
+    wildcard: bool
+
+
+def _coerce_school_candidate(candidate: object) -> tuple[int | None, bool]:
+    """تبدیل مقدار خام کد مدرسه به int یا علامت‌گذاری کمبود."""
+
+    if candidate is None or candidate is pd.NA:
+        return None, True
+    if isinstance(candidate, Number) and not isinstance(candidate, bool):
+        if pd.isna(candidate):  # type: ignore[arg-type]
+            return None, True
+        return int(candidate), False
+    text = to_numlike_str(candidate).strip()
+    if not text:
+        return None, True
+    try:
+        return int(float(text)), False
+    except ValueError:
+        return None, True
+
+
+def resolve_student_school_code(
+    student: Mapping[str, object],
+    policy: PolicyConfig,
+) -> StudentSchoolCode:
+    """استخراج مقدار استاندارد کد مدرسه با درنظرگرفتن سیاست wildcard."""
+
+    column = policy.stage_column("school")
+    allow_zero = policy.school_code_empty_as_zero and (
+        column == policy.columns.school_code
+    )
+    normalized = column.replace(" ", "_")
+    candidate_keys = (
+        column,
+        normalized,
+        "school_code_norm",
+        "school_code",
+        "school_code_raw",
+    )
+    candidates: list[object] = []
+    for key in candidate_keys:
+        if key in student:
+            candidates.append(student[key])
+
+    for candidate in candidates:
+        value, missing = _coerce_school_candidate(candidate)
+        if not missing:
+            wildcard = bool(allow_zero and value == 0)
+            return StudentSchoolCode(value=value, missing=False, wildcard=wildcard)
+
+    if allow_zero:
+        return StudentSchoolCode(value=0, missing=False, wildcard=True)
+
+    return StudentSchoolCode(value=None, missing=True, wildcard=False)
+
 FilterFunc = Callable[[pd.DataFrame, Mapping[str, object], PolicyConfig], pd.DataFrame]
 
 __all__ = [
+    "StudentSchoolCode",
     "filter_by_type",
     "filter_by_group",
     "filter_by_gender",
@@ -52,6 +116,7 @@ __all__ = [
     "filter_by_center",
     "filter_by_finance",
     "filter_by_school",
+    "resolve_student_school_code",
     "apply_join_filters",
 ]
 
@@ -165,33 +230,12 @@ def filter_by_school(
     if policy is None:
         policy = load_policy()
     column = policy.stage_column("school")
-    allow_zero = policy.school_code_empty_as_zero and (
-        column == policy.columns.school_code
-    )
-    if allow_zero:
-        try:
-            value = _student_value(student, column)
-        except KeyError:
-            return pool
-
-        if isinstance(value, Number):
-            if pd.isna(value):  # type: ignore[arg-type]
-                return pool
-            normalized_value = int(value)
-        else:
-            text = to_numlike_str(value).strip()
-            if not text:
-                return pool
-            try:
-                normalized_value = int(float(text))
-            except ValueError:
-                return pool
-
-        if normalized_value == 0:
-            return pool
-        return _eq_filter(pool, column, normalized_value)
-
-    return _filter_by_stage(pool, student, policy, "school")
+    school_code = resolve_student_school_code(student, policy)
+    if school_code.wildcard or school_code.missing:
+        return pool
+    if school_code.value is None:
+        return pool
+    return _eq_filter(pool, column, int(school_code.value))
 
 
 def apply_join_filters(
