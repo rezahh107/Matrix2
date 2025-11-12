@@ -136,6 +136,28 @@ def test_allocate_batch_logs_capacity_transition(_base_pool: pd.DataFrame) -> No
     assert int(updated_pool.loc[0, "remaining_capacity"]) == 1
 
 
+def test_allocate_batch_handles_missing_state(monkeypatch: pytest.MonkeyPatch, _base_pool: pd.DataFrame) -> None:
+    students = _single_student()
+
+    def _raise_missing_state(_: object, __: object) -> tuple[int, int, float]:
+        raise KeyError("Mentor 'EMP-001' missing from state")
+
+    monkeypatch.setattr(
+        "app.core.allocate_students.consume_capacity",
+        _raise_missing_state,
+        raising=True,
+    )
+
+    allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool)
+
+    assert allocations.empty
+    assert updated_pool.equals(_base_pool)
+    record = logs.iloc[0]
+    assert record["allocation_status"] == "failed"
+    assert record["error_type"] == "INTERNAL_ERROR"
+    assert "missing" in str(record["detailed_reason"]).lower()
+
+
 def test_allocate_batch_invalid_join_value_raises(_base_pool: pd.DataFrame) -> None:
     students = _single_student(**{"کدرشته": ""})
 
