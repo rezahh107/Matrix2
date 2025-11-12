@@ -11,7 +11,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.core.allocate_students import allocate_batch, build_selection_reason_rows
+from app.core.allocate_students import (
+    _normalize_pool,
+    allocate_batch,
+    build_selection_reason_rows,
+)
 from app.core.common.types import JoinKeyValues
 from app.core.policy_loader import load_policy, parse_policy_dict
 from app.infra.excel_writer import write_selection_reasons_sheet
@@ -24,12 +28,18 @@ def _base_pool() -> pd.DataFrame:
             "پشتیبان": ["زهرا", "علی"],
             "کد کارمندی پشتیبان": ["EMP-001", "EMP-002"],
             "کدرشته": [1201, 1201],
+            "کدرشته | group_code": [1201, 1201],
             "گروه آزمایشی": ["تجربی", "تجربی"],
             "جنسیت": [1, 1],
+            "جنسیت | gender": [1, 1],
             "دانش آموز فارغ": [0, 0],
+            "دانش آموز فارغ | graduation_status": [0, 0],
             "مرکز گلستان صدرا": [1, 1],
+            "مرکز گلستان صدرا | center": [1, 1],
             "مالی حکمت بنیاد": [0, 0],
+            "مالی حکمت بنیاد | finance": [0, 0],
             "کد مدرسه": [3581, 3581],
+            "کد مدرسه | school_code": [3581, 3581],
             "remaining_capacity": [2, 2],
             "occupancy_ratio": [0.1, 0.2],
             "allocations_new": [0, 0],
@@ -58,9 +68,51 @@ def test_allocate_batch_no_match_sets_error(_base_pool: pd.DataFrame) -> None:
     allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool)
 
     assert allocations.empty
-    assert updated_pool.equals(_base_pool)
+    pd.testing.assert_frame_equal(
+        updated_pool[_base_pool.columns], _base_pool, check_dtype=False
+    )
+    assert "school_code" in updated_pool.columns
     assert logs.iloc[0]["error_type"] == "ELIGIBILITY_NO_MATCH"
     assert logs.iloc[0]["detailed_reason"] == "No candidates matched join keys"
+
+
+def test_normalize_pool_appends_pipe_alias_columns() -> None:
+    policy = load_policy()
+    pool = pd.DataFrame(
+        {
+            "پشتیبان": ["زهرا"],
+            "کد کارمندی پشتیبان": ["EMP-001"],
+            "کدرشته": [1201],
+            "جنسیت": [1],
+            "دانش آموز فارغ": [0],
+            "مرکز گلستان صدرا": [1],
+            "مالی حکمت بنیاد": [0],
+            "کد مدرسه": [3581],
+            "remaining_capacity": [2],
+            "allocations_new": [0],
+            "occupancy_ratio": [0.0],
+        }
+    )
+
+    normalized = _normalize_pool(pool, policy)
+
+    expected_pairs = [
+        ("کدرشته", "کدرشته | group_code"),
+        ("جنسیت", "جنسیت | gender"),
+        ("دانش آموز فارغ", "دانش آموز فارغ | graduation_status"),
+        ("مرکز گلستان صدرا", "مرکز گلستان صدرا | center"),
+        ("مالی حکمت بنیاد", "مالی حکمت بنیاد | finance"),
+        ("کد مدرسه", "کد مدرسه | school_code"),
+    ]
+
+    for fa_name, bilingual in expected_pairs:
+        assert bilingual in normalized.columns
+        pd.testing.assert_series_equal(
+            normalized[fa_name],
+            normalized[bilingual],
+            check_dtype=False,
+            check_names=False,
+        )
 
 
 def test_allocate_batch_capacity_full_sets_error(_base_pool: pd.DataFrame) -> None:
@@ -157,7 +209,9 @@ def test_allocate_batch_missing_school_code_requires_data_when_disabled(
     allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool, policy=policy)
 
     assert allocations.empty
-    assert updated_pool.equals(_base_pool)
+    pd.testing.assert_frame_equal(
+        updated_pool[_base_pool.columns], _base_pool, check_dtype=False
+    )
     record = logs.iloc[0]
     assert record["error_type"] == "ELIGIBILITY_NO_MATCH"
     assert record["detailed_reason"] == "No candidates matched join keys"
@@ -178,7 +232,9 @@ def test_allocate_batch_missing_school_code_requires_data_when_disabled(
     allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool, policy=policy)
 
     assert allocations.empty
-    assert updated_pool.equals(_base_pool)
+    pd.testing.assert_frame_equal(
+        updated_pool[_base_pool.columns], _base_pool, check_dtype=False
+    )
     record = logs.iloc[0]
     assert record["error_type"] == "DATA_MISSING"
     assert "کد مدرسه" in str(record["detailed_reason"])
@@ -212,7 +268,9 @@ def test_allocate_batch_handles_missing_state(monkeypatch: pytest.MonkeyPatch, _
     allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool)
 
     assert allocations.empty
-    assert updated_pool.equals(_base_pool)
+    pd.testing.assert_frame_equal(
+        updated_pool[_base_pool.columns], _base_pool, check_dtype=False
+    )
     record = logs.iloc[0]
     assert record["allocation_status"] == "failed"
     assert record["error_type"] == "INTERNAL_ERROR"
@@ -225,7 +283,9 @@ def test_allocate_batch_invalid_join_value_sets_error(_base_pool: pd.DataFrame) 
     allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool)
 
     assert allocations.empty
-    assert updated_pool.equals(_base_pool)
+    pd.testing.assert_frame_equal(
+        updated_pool[_base_pool.columns], _base_pool, check_dtype=False
+    )
     record = logs.iloc[0]
     assert record["error_type"] == "DATA_MISSING"
     assert "کدرشته" in str(record["detailed_reason"])
