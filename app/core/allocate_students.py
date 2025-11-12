@@ -14,6 +14,7 @@ from .common.columns import (
     canonicalize_headers,
     coerce_semantics,
     enrich_school_columns_en,
+    ensure_series,
     resolve_aliases,
 )
 from .common.filters import apply_join_filters
@@ -166,15 +167,16 @@ def _normalize_pool(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
 
     capacity_alias = policy.columns.remaining_capacity
     if capacity_alias in normalized.columns and "remaining_capacity" not in normalized.columns:
-        normalized["remaining_capacity"] = normalized[capacity_alias]
+        normalized["remaining_capacity"] = ensure_series(normalized[capacity_alias])
 
     for column_name in {
         capacity_alias,
         "remaining_capacity",
     }:
         if column_name in normalized.columns:
+            series = ensure_series(normalized[column_name])
             normalized[column_name] = (
-                pd.to_numeric(normalized[column_name], errors="coerce")
+                pd.to_numeric(series, errors="coerce")
                 .fillna(0)
                 .astype("Int64")
             )
@@ -246,7 +248,7 @@ def allocate_student(
             f"Capacity column '{resolved_capacity_column}' not found after canonicalization"
         )
 
-    capacity_series = state_view_en.loc[eligible.index, capacity_column_name]
+    capacity_series = ensure_series(state_view_en.loc[eligible.index, capacity_column_name])
     capacity_numeric = pd.to_numeric(capacity_series, errors="coerce").fillna(0).astype(int)
     capacity_mask = capacity_numeric > 0
     capacity_filtered = eligible.loc[capacity_mask.values]
@@ -488,7 +490,9 @@ def allocate_batch(
         if entry["remaining"] < 0:
             raise ValueError("Negative remaining capacity detected after allocation")
 
-    internal_remaining = pd.to_numeric(pool_internal[capacity_internal], errors="coerce").fillna(0)
+    internal_remaining = pd.to_numeric(
+        ensure_series(pool_internal[capacity_internal]), errors="coerce"
+    ).fillna(0)
     if (internal_remaining < 0).any():
         raise ValueError("Pool capacity column contains negative values after allocation")
 

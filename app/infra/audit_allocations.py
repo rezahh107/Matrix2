@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterable, List, Mapping
 
 import pandas as pd
 
-from app.core.common.columns import canonicalize_headers
+from app.core.common.columns import canonicalize_headers, ensure_series
 from app.core.policy_loader import PolicyConfig, get_policy
 
 __all__ = ["audit_allocations", "audit_allocations_cli", "summarize_report"]
@@ -104,7 +104,7 @@ def _virtual_hits(
     for column_name in ("alias", "mentor_id"):
         if column_name not in allocations.columns:
             continue
-        alias_numeric = pd.to_numeric(allocations[column_name], errors="coerce")
+        alias_numeric = pd.to_numeric(ensure_series(allocations[column_name]), errors="coerce")
         for start, end in range_pairs:
             mask |= alias_numeric.between(start, end, inclusive="both")
 
@@ -128,8 +128,8 @@ def _capacity_stuck(
     required = {"capacity_before", "capacity_after"}
     if not required.issubset(logs.columns):
         return 0, []
-    before = pd.to_numeric(logs["capacity_before"], errors="coerce")
-    after = pd.to_numeric(logs["capacity_after"], errors="coerce")
+    before = pd.to_numeric(ensure_series(logs["capacity_before"]), errors="coerce")
+    after = pd.to_numeric(ensure_series(logs["capacity_after"]), errors="coerce")
     mask = before.eq(after)
     stuck = logs.loc[mask]
     columns = [

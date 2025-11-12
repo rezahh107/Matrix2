@@ -43,6 +43,7 @@ from app.core.common.columns import (
     canonicalize_headers,
     coerce_semantics,
     enrich_school_columns_en,
+    ensure_series,
     resolve_aliases,
 )
 from app.core.common.column_normalizer import normalize_input_columns
@@ -122,7 +123,7 @@ def _sanitize_pool_for_allocation(
     for column_name in ("alias", "mentor_id"):
         if column_name not in frame.columns:
             continue
-        alias_numeric = pd.to_numeric(frame[column_name], errors="coerce")
+        alias_numeric = pd.to_numeric(ensure_series(frame[column_name]), errors="coerce")
         for start, end in alias_ranges:
             mask_virtual |= alias_numeric.between(start, end, inclusive="both")
 
@@ -144,7 +145,7 @@ def _sanitize_pool_for_allocation(
         if column not in sanitized.columns:
             sanitized[column] = pd.Series([default] * len(sanitized), dtype=dtype)
         else:
-            series = pd.Series(sanitized[column])
+            series = ensure_series(sanitized[column])
             if dtype == "Int64":
                 series = pd.to_numeric(series, errors="coerce").astype("Int64")
             else:

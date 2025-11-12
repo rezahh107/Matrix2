@@ -103,6 +103,14 @@ def test_canonicalize_headers_bilingual() -> None:
     ]
 
 
+def test_ensure_series_handles_duplicate_column_selection() -> None:
+    df = pd.DataFrame([[1, 2]], columns=["x", "x"])
+    extracted = columns.ensure_series(df["x"])
+
+    assert isinstance(extracted, pd.Series)
+    assert extracted.tolist() == [1]
+
+
 def test_missing_column_error_reports_synonyms() -> None:
     df = pd.DataFrame({"نام": ["نمونه"]})
 

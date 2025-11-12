@@ -18,7 +18,12 @@ from typing import Dict, Iterator, List, Sequence
 
 import pandas as pd
 
-from app.core.common.columns import CANON_EN_TO_FA, HeaderMode, canonicalize_headers
+from app.core.common.columns import (
+    CANON_EN_TO_FA,
+    HeaderMode,
+    canonicalize_headers,
+    ensure_series,
+)
 from app.core.policy_loader import get_policy
 from app.infra.excel import apply_workbook_formatting
 
@@ -157,7 +162,9 @@ def _prepare_dataframe_for_excel(df: pd.DataFrame) -> pd.DataFrame:
         fa_name = CANON_EN_TO_FA.get(key, key)
         for column_name in (fa_name, key):
             if column_name in converted.columns:
-                numeric = pd.to_numeric(converted[column_name], errors="coerce")
+                numeric = pd.to_numeric(
+                    ensure_series(converted[column_name]), errors="coerce"
+                )
                 converted[column_name] = numeric.astype("Int64")
 
     return converted
