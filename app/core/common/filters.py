@@ -34,11 +34,13 @@ pandas را اجرا می‌کند. هر تابع یکی از مراحل «Alloc
 
 from __future__ import annotations
 
+from numbers import Number
 from typing import Callable, Mapping, Sequence
 
 import pandas as pd
 
 from ..policy_loader import PolicyConfig, load_policy
+from .normalization import to_numlike_str
 
 FilterFunc = Callable[[pd.DataFrame, Mapping[str, object], PolicyConfig], pd.DataFrame]
 
@@ -162,6 +164,33 @@ def filter_by_school(
 
     if policy is None:
         policy = load_policy()
+    column = policy.stage_column("school")
+    allow_zero = policy.school_code_empty_as_zero and (
+        column == policy.columns.school_code
+    )
+    if allow_zero:
+        try:
+            value = _student_value(student, column)
+        except KeyError:
+            return pool
+
+        if isinstance(value, Number):
+            if pd.isna(value):  # type: ignore[arg-type]
+                return pool
+            normalized_value = int(value)
+        else:
+            text = to_numlike_str(value).strip()
+            if not text:
+                return pool
+            try:
+                normalized_value = int(float(text))
+            except ValueError:
+                return pool
+
+        if normalized_value == 0:
+            return pool
+        return _eq_filter(pool, column, normalized_value)
+
     return _filter_by_stage(pool, student, policy, "school")
 
 
