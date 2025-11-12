@@ -361,10 +361,7 @@ def allocate_batch(
                     "remaining"
                 ]
             pool_internal.loc[chosen_index, "allocations_new"] = state_entry["alloc_new"]
-            initial_value = max(int(state_entry.get("initial", 0)), 1)
-            pool_internal.loc[chosen_index, "occupancy_ratio"] = (
-                (int(state_entry.get("initial", 0)) - state_entry["remaining"]) / initial_value
-            )
+            pool_internal.loc[chosen_index, "occupancy_ratio"] = occupancy
             pool_with_ids.loc[chosen_index, resolved_capacity_column] = state_entry[
                 "remaining"
             ]
