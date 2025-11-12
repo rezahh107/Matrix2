@@ -220,7 +220,7 @@ def _apply_excel_tables(
     try:
         from openpyxl.utils import get_column_letter
         from openpyxl.worksheet.table import Table, TableStyleInfo
-    except Exception:  # pragma: no cover - وابستگی اختیاری
+    except ImportError:  # pragma: no cover - وابستگی اختیاری
         return
 
     workbook = writer.book  # type: ignore[attr-defined]
