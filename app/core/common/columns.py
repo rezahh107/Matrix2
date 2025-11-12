@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Collection, Dict, Iterable, List, Literal, Mapping, Sequence
 
 import pandas as pd
@@ -20,6 +21,10 @@ __all__ = [
     "canonicalize_headers",
     "collect_aliases_for",
     "accepted_synonyms",
+    "sanitize_digits",
+    "to_int64",
+    "normalize_bool_like",
+    "enrich_school_columns_en",
 ]
 
 Source = Literal["report", "inspactor", "school"]
@@ -78,6 +83,11 @@ ALIASES_DEFAULT: Mapping[Source, Mapping[str, str]] = {
         "گروه آزمایشی": "گروه آزمایشی",
         "group_code": "کدرشته",
         "major_code": "کدرشته",
+        "مدرسه نهایی": "کد مدرسه",
+        "مدرسه‌ نهایی": "کد مدرسه",
+        "مدرسه نهايی": "کد مدرسه",
+        "school final": "کد مدرسه",
+        "school_code": "کد مدرسه",
     },
     "inspactor": {
         "کد رشته": "کدرشته",
@@ -103,6 +113,10 @@ ALIASES_DEFAULT: Mapping[Source, Mapping[str, str]] = {
         "کد مدرسه": "کد مدرسه",
         "کد‌مدرسه": "کد مدرسه",
         "school_code": "کد مدرسه",
+        "مدرسه نهایی": "کد مدرسه",
+        "مدرسه‌ نهایی": "کد مدرسه",
+        "مدرسه نهايی": "کد مدرسه",
+        "school final": "کد مدرسه",
         "school id": "کد مدرسه",
         "نام مدرسه": "نام مدرسه",
         "نام‌مدرسه": "نام مدرسه",
@@ -136,6 +150,123 @@ _INT_COLUMNS_BY_SOURCE: Mapping[Source, Sequence[str]] = {
     ),
     "school": _INT_COLUMNS_BASE,
 }
+
+
+_BIDI_PATTERN = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+_DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+_TRUTHY_TOKENS = {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "t",
+    "مدرسه‌ای",
+    "مدرسه اي",
+    "مدرسه",
+    "school",
+    "school-based",
+}
+_FALSY_TOKENS = {"0", "false", "no", "n", "f", "عادی", "normal"}
+
+
+def sanitize_digits(series: pd.Series | None) -> pd.Series:
+    """پاک‌سازی ایمن ارقام فارسی/عربی و حذف کنترل‌های جهت متن.
+
+    مثال::
+
+        >>> import pandas as pd
+        >>> sanitize_digits(pd.Series(["\u200f۶۶۳ ", "٠١"])).tolist()
+        ['663', '01']
+    """
+
+    if series is None:
+        return pd.Series(dtype="string")
+    text = series.astype("string")
+    text = text.fillna("")
+    text = text.str.replace(_BIDI_PATTERN, "", regex=True)
+    text = text.str.translate(_DIGIT_TRANSLATION)
+    text = text.str.strip()
+    return text.astype("string")
+
+
+def to_int64(series: pd.Series | None) -> pd.Series:
+    """تبدیل ستون به نوع عددی «Int64» پس از پاک‌سازی ارقام.
+
+    مقدار خالی یا نامعتبر → «<NA>».
+    """
+
+    sanitized = sanitize_digits(series)
+    numeric = pd.to_numeric(sanitized.replace("", pd.NA), errors="coerce")
+    return numeric.astype("Int64")
+
+
+def normalize_bool_like(series: pd.Series | None) -> pd.Series:
+    """نرمال‌سازی مقادیر متنی/عددی به ۰ و ۱ (Int64).
+
+    ورودی‌های نامعتبر به ۰ نگاشت می‌شوند تا رفتار قطعی حفظ گردد.
+    """
+
+    if series is None:
+        return pd.Series(dtype="Int64")
+    text = sanitize_digits(series).str.lower()
+    result = pd.Series(0, index=text.index, dtype="Int64")
+    mask_truthy = text.isin(_TRUTHY_TOKENS)
+    mask_falsy = text.isin(_FALSY_TOKENS)
+    numeric = pd.to_numeric(text.replace("", pd.NA), errors="coerce")
+    result = result.astype("Int64")
+    result.loc[mask_truthy] = 1
+    result.loc[mask_falsy] = 0
+    if numeric.notna().any():
+        result.loc[numeric == 1] = 1
+        result.loc[numeric == 0] = 0
+    return result.fillna(0).astype("Int64")
+
+
+def enrich_school_columns_en(df: pd.DataFrame) -> pd.DataFrame:
+    """تولید ستون‌های خام و نرمال مدرسه روی DataFrame انگلیسی.
+
+    ستون‌های اضافه‌شده:
+        - ``school_code_raw``: مقدار متنی اولیه (trim شده)
+        - ``school_code`` و ``school_code_norm``: مقدار Int64 پس از پاک‌سازی ارقام
+        - ``school_status_resolved``: نتیجهٔ نهایی تشخیص مدرسه (Int64: ۰ یا ۱)
+    """
+
+    result = df.copy()
+    index = result.index
+
+    raw_column = result.get("school_code_raw")
+    if isinstance(raw_column, pd.DataFrame):
+        raw_column = raw_column.iloc[:, 0]
+    school_code_column = result.get("school_code")
+    if isinstance(school_code_column, pd.DataFrame):
+        school_code_column = school_code_column.iloc[:, 0]
+
+    if raw_column is not None:
+        raw = raw_column.astype("string").str.strip()
+    elif school_code_column is not None:
+        raw = school_code_column.astype("string").str.strip()
+    else:
+        raw = pd.Series(pd.NA, dtype="string", index=index)
+    # حذف نسخه‌های قدیمی برای جلوگیری از ستون‌های تکراری
+    result = result.drop(columns=[col for col in result.columns if col == "school_code_raw"], errors="ignore")
+    result = result.drop(columns=[col for col in result.columns if col == "school_code"], errors="ignore")
+
+    result["school_code_raw"] = raw
+    normalized = to_int64(raw)
+    result["school_code_norm"] = normalized
+    result["school_code"] = normalized
+
+    flag_series: pd.Series | None = None
+    for candidate in ("school_flag", "is_school"):
+        if candidate in result.columns:
+            flag_series = normalize_bool_like(result[candidate])
+            break
+    if flag_series is None:
+        flag_series = pd.Series(0, dtype="Int64", index=index)
+
+    status = (normalized.fillna(0) > 0) | (flag_series.fillna(0) == 1)
+    result["school_status_resolved"] = status.astype("Int64")
+    return result
 
 
 @dataclass(frozen=True)

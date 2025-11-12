@@ -25,11 +25,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Mapping, Sequence
+from typing import Any, Iterable, List, Mapping, Sequence
 
 import pandas as pd
 
 from ..policy_loader import PolicyConfig, load_policy
+from .columns import normalize_bool_like, to_int64
 from .types import StudentRow, TraceStageLiteral, TraceStageRecord
 
 __all__ = ["TraceStagePlan", "build_trace_plan", "build_allocation_trace"]
@@ -102,6 +103,85 @@ def _filter_stage(frame: pd.DataFrame, column: str, value: object) -> pd.DataFra
     return frame.loc[mask]
 
 
+def _string_or_none(value: object) -> str | None:
+    if value is None or value is pd.NA:
+        return None
+    text = str(value)
+    text = text.strip()
+    return text or None
+
+
+def _coerce_optional_int(value: object) -> int | None:
+    if value is None or value is pd.NA:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)) and not pd.isna(value):
+        try:
+            return int(value)
+        except Exception:
+            return None
+    try:
+        numeric = to_int64(pd.Series([value])).iloc[0]
+    except Exception:
+        return None
+    if pd.isna(numeric):
+        return None
+    return int(numeric)
+
+
+def _resolve_school_status(student: Mapping[str, object], norm_value: int | None) -> bool:
+    status_value = student.get("school_status_resolved")
+    if status_value is not None and status_value is not pd.NA:
+        try:
+            normalized = normalize_bool_like(pd.Series([status_value])).iloc[0]
+            if not pd.isna(normalized):
+                return bool(int(normalized))
+        except Exception:
+            pass
+    fallback = norm_value is not None and norm_value > 0
+    flag_value = None
+    for candidate in ("school_flag", "is_school"):
+        if candidate in student:
+            flag_value = student[candidate]
+            break
+    if flag_value is not None and flag_value is not pd.NA:
+        try:
+            normalized_flag = normalize_bool_like(pd.Series([flag_value])).iloc[0]
+            if not pd.isna(normalized_flag):
+                return bool(int(normalized_flag)) or fallback
+        except Exception:
+            return fallback
+    return fallback
+
+
+def _school_stage_filter(
+    frame: pd.DataFrame,
+    column: str,
+    student: Mapping[str, object],
+) -> tuple[pd.DataFrame, dict[str, Any], object]:
+    value = _student_value(student, column)
+    norm_candidate = student.get("school_code_norm", value)
+    norm_value = _coerce_optional_int(norm_candidate)
+    status = _resolve_school_status(student, norm_value)
+    raw = _string_or_none(student.get("school_code_raw"))
+
+    if status:
+        if norm_value is not None:
+            filtered = frame.loc[frame[column] == norm_value]
+        else:
+            filtered = frame.loc[frame[column] > 0]
+    else:
+        filtered = frame.loc[frame[column] == 0]
+
+    extras = {
+        "school_code_raw": raw,
+        "school_code_norm": norm_value,
+        "school_status_resolved": bool(status),
+    }
+    return filtered, extras, norm_value
+
+
 def build_allocation_trace(
     student: StudentRow,
     candidate_pool: pd.DataFrame,
@@ -130,16 +210,30 @@ def build_allocation_trace(
     current = candidate_pool
     for plan in non_capacity_plan:
         before = int(current.shape[0])
-        value = _student_value(student, plan.column)
-        filtered = _filter_stage(current, plan.column, value)
+        expected_value: object
+        expected_op: str | None = None
+        expected_threshold: object | None = None
+        extras: Mapping[str, Any] | None = None
+        if plan.stage == "school":
+            filtered, extras, norm_value = _school_stage_filter(current, plan.column, student)
+            expected_value = norm_value
+            expected_op = ">"
+            expected_threshold = 0
+        else:
+            value = _student_value(student, plan.column)
+            filtered = _filter_stage(current, plan.column, value)
+            expected_value = value
         trace.append(
             TraceStageRecord(
                 stage=plan.stage,
                 column=plan.column,
-                expected_value=value,
+                expected_value=expected_value,
                 total_before=before,
                 total_after=int(filtered.shape[0]),
                 matched=bool(filtered.shape[0]),
+                expected_op=expected_op,
+                expected_threshold=expected_threshold,
+                extras=extras,
             )
         )
         current = filtered
@@ -154,6 +248,9 @@ def build_allocation_trace(
             total_before=before_capacity,
             total_after=int(capacity_filtered.shape[0]),
             matched=bool(capacity_filtered.shape[0]),
+            expected_op=">",
+            expected_threshold=0,
+            extras=None,
         )
     )
     return trace
