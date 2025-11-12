@@ -96,6 +96,29 @@ def test_write_xlsx_atomic_respects_env_override(tmp_path: Path, monkeypatch: py
     assert out.exists() and out.stat().st_size > 0
 
 
+@pytest.mark.skipif(
+    not (_HAS_OPENPYXL and _HAS_XLSXWRITER),
+    reason="xlsxwriter و openpyxl باید نصب باشند",
+)
+def test_write_xlsx_atomic_aligns_with_xlsxwriter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EXCEL_ENGINE", "xlsxwriter")
+    df = pd.DataFrame({"کدرشته": list(range(1, 5))})
+    out = tmp_path / "xlsxwriter_font.xlsx"
+
+    write_xlsx_atomic({"Sheet": df}, out, font_name="Vazirmatn")
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(out)
+    ws = wb["Sheet"]
+
+    for idx in range(1, 5):
+        cell = ws.cell(row=idx, column=1)
+        assert cell.font.name == "Vazirmatn"
+        assert cell.alignment.horizontal == "center"
+        assert cell.alignment.vertical == "center"
+
+
 @pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای بررسی RTL/فونت")
 def test_write_xlsx_atomic_applies_rtl_and_font(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EXCEL_ENGINE", "openpyxl")
@@ -111,6 +134,27 @@ def test_write_xlsx_atomic_applies_rtl_and_font(tmp_path: Path, monkeypatch: pyt
 
     assert ws.sheet_view.rightToLeft is True
     assert ws.cell(row=1, column=1).font.name == "Tahoma"
+
+
+@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای بررسی فونت/تراز")
+def test_write_xlsx_atomic_applies_font_and_alignment_to_all_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EXCEL_ENGINE", "openpyxl")
+    df = pd.DataFrame({"کدرشته": list(range(1, 105))})
+    out = tmp_path / "full_font.xlsx"
+
+    write_xlsx_atomic({"Sheet": df}, out, font_name="Vazirmatn")
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(out)
+    ws = wb["Sheet"]
+
+    target_cell = ws.cell(row=60, column=1)
+    assert target_cell.font.name == "Vazirmatn"
+    assert target_cell.alignment.horizontal == "center"
+    assert target_cell.alignment.vertical == "center"
 
 
 @pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای خواندن .xlsx")
