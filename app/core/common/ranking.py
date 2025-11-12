@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from numbers import Number
 from typing import Any, Dict, Mapping
 
 import pandas as pd
@@ -87,6 +88,12 @@ def build_mentor_state(
     state: Dict[Any, Dict[str, int]] = {}
     for mentor_id, capacity in initial.items():
         value = int(max(capacity, 0))
+        state[mentor_id] = {
+            "initial": value,
+            "remaining": value,
+            "alloc_new": 0,
+            "occupancy_ratio": 0.0,
+        }
         state[mentor_id] = {"initial": value, "remaining": value, "alloc_new": 0}
     return state
 
@@ -121,6 +128,7 @@ def apply_ranking_policy(
         raw = entry.get(key, 0)
         try:
             return int(raw)  # type: ignore[arg-type]
+        except Exception:  # pragma: no cover - نگهبان ورودی پیش‌بینی‌نشده
         except (ValueError, TypeError):  # pragma: no cover - نگهبان ورودی پیش‌بینی‌نشده
             return 0
 
@@ -148,12 +156,42 @@ def apply_ranking_policy(
     return ranked.reset_index(drop=True)
 
 
+def _coerce_capacity_value(value: Any) -> int:
+    """تبدیل امن مقادیر ظرفیت به عدد صحیح غیرمنفی."""
+
+    if isinstance(value, Number):
+        if pd.isna(value):  # type: ignore[arg-type]
+            return 0
+        return int(value)
+
+    text = str(value).strip()
+    if not text:
+        return 0
+    try:
+        return int(float(text))
+    except Exception:  # pragma: no cover - نگهبان ورودی غیرمنتظره
+        return 0
+
+
 def consume_capacity(state: Dict[Any, Dict[str, int]], mentor_id: Any) -> tuple[int, int, float]:
     """به‌روزرسانی ظرفیت پشتیبان پس از تخصیص و بازگشت ظرفیت قبل/بعد."""
 
     if mentor_id not in state:
         raise KeyError(f"Mentor '{mentor_id}' missing from state")
     entry = state[mentor_id]
+    before = _coerce_capacity_value(entry.get("remaining", 0))
+    if before <= 0:
+        raise ValueError("CAPACITY_UNDERFLOW")
+    after = before - 1
+    entry["remaining"] = after
+    entry["alloc_new"] = _coerce_capacity_value(entry.get("alloc_new", 0)) + 1
+    initial = _coerce_capacity_value(entry.get("initial", before))
+    if initial <= 0:
+        initial = max(before, 1)
+    denominator = max(initial, 1)
+    occupancy_ratio = (initial - after) / denominator
+    entry["occupancy_ratio"] = float(occupancy_ratio)
+    return before, after, float(occupancy_ratio)
     before = int(entry.get("remaining", 0))
     if before <= 0:
         raise ValueError("CAPACITY_UNDERFLOW")

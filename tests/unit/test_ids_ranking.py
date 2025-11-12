@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.common.domain import BuildConfig, MentorType, compute_alias
 from app.core.common.ids import build_mentor_id_map, ensure_ranking_columns, inject_mentor_id
-from app.core.common.ranking import apply_ranking_policy
+from app.core.common.ranking import apply_ranking_policy, consume_capacity
 from app.core.policy_loader import PolicyConfig, parse_policy_dict
 
 
@@ -189,6 +189,29 @@ def test_ranking_payloads_equivalent(payload: dict[str, object]) -> None:
         "EMP-002",
         "EMP-010",
     ]
+
+
+def test_consume_capacity_handles_str_values_and_updates_state() -> None:
+    state = {
+        "EMP-1": {"remaining": "3", "initial": "5", "alloc_new": "2"},
+    }
+
+    before, after, ratio = consume_capacity(state, "EMP-1")
+
+    assert before == 3
+    assert after == 2
+    assert ratio == pytest.approx((5 - 2) / 5)
+    entry = state["EMP-1"]
+    assert entry["remaining"] == 2
+    assert entry["alloc_new"] == 3
+    assert entry["occupancy_ratio"] == pytest.approx(ratio)
+
+
+def test_consume_capacity_underflow_raises_value_error() -> None:
+    state = {"EMP-2": {"remaining": "0", "initial": "4", "alloc_new": 1}}
+
+    with pytest.raises(ValueError, match="CAPACITY_UNDERFLOW"):
+        consume_capacity(state, "EMP-2")
 
 
 def test_compute_alias_respects_policy_rules() -> None:

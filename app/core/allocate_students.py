@@ -243,6 +243,46 @@ def allocate_student(
     chosen_en = ranked_en.iloc[0]
 
     mentor_identifier = chosen_row.get("mentor_id_en", chosen_en.get("mentor_id"))
+    state_entry_snapshot = active_state.get(mentor_identifier, {}) if active_state else {}
+    capacity_before = int(state_entry_snapshot.get("remaining", 0))
+    capacity_after = capacity_before
+    occupancy_value = float(chosen_row.get("occupancy_ratio", 0.0))
+
+    try:
+        capacity_before, capacity_after, occupancy_value = consume_capacity(
+            active_state, mentor_identifier
+        )
+    except KeyError as exc:
+        log.update(
+            {
+                "allocation_status": "failed",
+                "mentor_selected": None,
+                "mentor_id": None,
+                "error_type": "INTERNAL_ERROR",
+                "detailed_reason": str(exc),
+                "suggested_actions": [
+                    "بازسازی state ظرفیت",
+                    "بررسی داده‌های استخر",
+                ],
+            }
+        )
+        return AllocationResult(None, trace, log)
+    except ValueError as exc:
+        error_code = str(exc) or "CAPACITY_UNDERFLOW"
+        log.update(
+            {
+                "allocation_status": "failed",
+                "mentor_selected": None,
+                "mentor_id": None,
+                "error_type": error_code,
+                "detailed_reason": "Mentor capacity underflow detected",
+                "suggested_actions": [
+                    "بازبینی ظرفیت ورودی",
+                    "اجرای مجدد sanitize pool",
+                ],
+            }
+        )
+        return AllocationResult(None, trace, log)
     before, after, occupancy = consume_capacity(active_state, mentor_identifier)
 
     mentor_name = chosen_row.get("پشتیبان", chosen_row.get("mentor_name", ""))
@@ -268,6 +308,11 @@ def allocate_student(
             "allocation_status": "success",
             "mentor_selected": str(mentor_name),
             "mentor_id": str(mentor_id_text),
+            "occupancy_ratio": float(occupancy_value),
+            "selection_reason": "policy: min occ → min alloc → natural mentor_id",
+            "tie_breakers": tie_breakers,
+            "capacity_before": int(capacity_before),
+            "capacity_after": int(capacity_after),
             "occupancy_ratio": float(occupancy),
             "selection_reason": "policy: min occ → min alloc → natural mentor_id",
             "tie_breakers": tie_breakers,
@@ -361,6 +406,10 @@ def allocate_batch(
                     "remaining"
                 ]
             pool_internal.loc[chosen_index, "allocations_new"] = state_entry["alloc_new"]
+            initial_value = max(int(state_entry.get("initial", 0)), 1)
+            pool_internal.loc[chosen_index, "occupancy_ratio"] = (
+                (int(state_entry.get("initial", 0)) - state_entry["remaining"]) / initial_value
+            )
             pool_internal.loc[chosen_index, "occupancy_ratio"] = occupancy
             pool_with_ids.loc[chosen_index, resolved_capacity_column] = state_entry[
                 "remaining"
