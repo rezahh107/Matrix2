@@ -40,10 +40,21 @@ def natural_key(value: Any) -> tuple[Any, ...]:
     if not text:
         return ("",)
     parts: list[Any] = []
+    has_text = False
     for token in _NUMERIC.split(text):
         if not token:
             continue
-        parts.append(int(token) if token.isdigit() else token.lower())
+        if token.isdigit():
+            if not parts:
+                parts.append("")
+            parts.append(int(token))
+        else:
+            parts.append(token.lower())
+            has_text = True
+    if not parts:
+        return ("",)
+    if not has_text and not isinstance(parts[0], str):
+        parts.insert(0, "")
     return tuple(parts)
 
 
@@ -94,7 +105,6 @@ def build_mentor_state(
             "alloc_new": 0,
             "occupancy_ratio": 0.0,
         }
-        state[mentor_id] = {"initial": value, "remaining": value, "alloc_new": 0}
     return state
 
 
@@ -110,9 +120,30 @@ def apply_ranking_policy(
     if policy is None:
         policy = load_policy(policy_path)
 
-    ranked = ensure_ranking_columns(candidate_pool.copy())
+    ranked = candidate_pool.copy()
+    en_view = canonicalize_headers(ranked, header_mode="en")
+
+    if "allocations_new" not in ranked.columns and "allocations_new" in en_view.columns:
+        ranked["allocations_new"] = en_view["allocations_new"]
+    if "allocations_new" not in ranked.columns:
+        ranked["allocations_new"] = 0
+    if "occupancy_ratio" not in ranked.columns and "occupancy_ratio" in en_view.columns:
+        ranked["occupancy_ratio"] = en_view["occupancy_ratio"]
+    if "occupancy_ratio" not in ranked.columns:
+        ranked["occupancy_ratio"] = 0.0
+    if "کد کارمندی پشتیبان" not in ranked.columns:
+        mentor_id_series = en_view.get("mentor_id")
+        if mentor_id_series is None:
+            raise KeyError("candidate pool must include mentor identifier column")
+        if isinstance(mentor_id_series, pd.DataFrame):
+            mentor_id_series = mentor_id_series.iloc[:, 0]
+        ranked["کد کارمندی پشتیبان"] = mentor_id_series
+
+    ranked = ensure_ranking_columns(ranked)
     en_view = canonicalize_headers(ranked, header_mode="en")
     mentor_ids = en_view.get("mentor_id")
+    if isinstance(mentor_ids, pd.DataFrame):
+        mentor_ids = mentor_ids.iloc[:, 0]
     if mentor_ids is None:
         raise KeyError("candidate pool must include 'mentor_id' column after canonicalization")
 
@@ -128,7 +159,6 @@ def apply_ranking_policy(
         raw = entry.get(key, 0)
         try:
             return int(raw)  # type: ignore[arg-type]
-        except Exception:  # pragma: no cover - نگهبان ورودی پیش‌بینی‌نشده
         except (ValueError, TypeError):  # pragma: no cover - نگهبان ورودی پیش‌بینی‌نشده
             return 0
 
@@ -192,13 +222,3 @@ def consume_capacity(state: Dict[Any, Dict[str, int]], mentor_id: Any) -> tuple[
     occupancy_ratio = (initial - after) / denominator
     entry["occupancy_ratio"] = float(occupancy_ratio)
     return before, after, float(occupancy_ratio)
-    before = int(entry.get("remaining", 0))
-    if before <= 0:
-        raise ValueError("CAPACITY_UNDERFLOW")
-    entry["remaining"] = before - 1
-    entry["alloc_new"] = int(entry.get("alloc_new", 0)) + 1
-    initial = int(entry.get("initial", before))
-    if initial <= 0:
-        initial = before
-    occupancy = (initial - entry["remaining"]) / max(initial, 1)
-    return before, entry["remaining"], float(occupancy)
