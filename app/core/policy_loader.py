@@ -12,7 +12,7 @@ import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from typing import Literal
 
 VersionMismatchMode = Literal["raise", "warn", "ignore"]
@@ -76,7 +76,14 @@ class ExcelOptions:
 
     rtl: bool
     font_name: str
-    header_mode: str
+    header_mode_internal: str
+    header_mode_write: str
+
+    @property
+    def header_mode(self) -> str:
+        """سازگاری رو به عقب: حالت هدر خروجی."""
+
+        return self.header_mode_write
 
 
 @dataclass(frozen=True)
@@ -99,6 +106,8 @@ class PolicyConfig:
     columns: PolicyColumns
     column_aliases: Mapping[str, Dict[str, str]]
     excel: ExcelOptions
+    virtual_alias_ranges: Tuple[Tuple[int, int], ...]
+    virtual_name_patterns: Tuple[str, ...]
 
     @property
     def ranking(self) -> List[str]:
@@ -163,6 +172,8 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "prefer_major_code",
         "alias_rule",
         "columns",
+        "virtual_alias_ranges",
+        "virtual_name_patterns",
     ]
     missing = [key for key in required if key not in data]
     if "ranking_rules" not in data and "ranking" not in data:
@@ -188,6 +199,8 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     columns = _normalize_columns(data["columns"])
     column_aliases = _normalize_column_aliases(data.get("column_aliases", {}))
     excel = _normalize_excel_options(data.get("excel"))
+    virtual_alias_ranges = _normalize_virtual_alias_ranges(data["virtual_alias_ranges"])
+    virtual_name_patterns = _normalize_virtual_name_patterns(data["virtual_name_patterns"])
 
     return {
         "version": version,
@@ -206,6 +219,8 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "columns": columns,
         "column_aliases": column_aliases,
         "excel": excel,
+        "virtual_alias_ranges": virtual_alias_ranges,
+        "virtual_name_patterns": virtual_name_patterns,
     }
 
 
@@ -326,17 +341,73 @@ def _normalize_column_aliases(value: object) -> Mapping[str, Dict[str, str]]:
 
 
 def _normalize_excel_options(value: object | None) -> ExcelOptions:
+    allowed_modes = {"fa", "en", "fa_en"}
     if value is None:
-        return ExcelOptions(rtl=True, font_name="Vazirmatn", header_mode="fa")
+        return ExcelOptions(
+            rtl=True,
+            font_name="Vazirmatn",
+            header_mode_internal="en",
+            header_mode_write="fa_en",
+        )
     if not isinstance(value, Mapping):
         raise TypeError("excel must be a mapping")
     rtl = _ensure_bool("excel.rtl", value.get("rtl", True))
     font_raw = value.get("font_name", "Vazirmatn")
     font_name = str(font_raw or "Vazirmatn")
-    header_mode = str(value.get("header_mode", "fa"))
-    if header_mode not in {"fa", "en", "fa_en"}:
-        raise ValueError("excel.header_mode must be one of {'fa','en','fa_en'}")
-    return ExcelOptions(rtl=rtl, font_name=font_name, header_mode=header_mode)
+    header_internal = str(value.get("header_mode_internal", "en"))
+    header_write = value.get("header_mode_write")
+    if header_write is None:
+        header_write = value.get("header_mode", "fa_en")
+    header_write = str(header_write or "fa_en")
+    if header_internal not in allowed_modes:
+        raise ValueError("excel.header_mode_internal must be one of {'fa','en','fa_en'}")
+    if header_write not in allowed_modes:
+        raise ValueError("excel.header_mode_write must be one of {'fa','en','fa_en'}")
+    return ExcelOptions(
+        rtl=rtl,
+        font_name=font_name,
+        header_mode_internal=header_internal,
+        header_mode_write=header_write,
+    )
+
+
+def _normalize_virtual_alias_ranges(raw: object) -> Tuple[Tuple[int, int], ...]:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise TypeError("virtual_alias_ranges must be a sequence of [start, end]")
+    ranges: list[Tuple[int, int]] = []
+    for item in raw:
+        if not isinstance(item, Sequence) or isinstance(item, (str, bytes)) or len(item) != 2:
+            raise ValueError("Each virtual_alias_range must be a pair [start, end]")
+        start_raw, end_raw = item
+        try:
+            start = int(start_raw)
+            end = int(end_raw)
+        except Exception as exc:
+            raise ValueError("virtual_alias_ranges values must be integers") from exc
+        if start > end:
+            start, end = end, start
+        ranges.append((start, end))
+    if not ranges:
+        raise ValueError("virtual_alias_ranges must define at least one range")
+    return tuple(ranges)
+
+
+def _normalize_virtual_name_patterns(raw: object) -> Tuple[str, ...]:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise TypeError("virtual_name_patterns must be a sequence of strings")
+    patterns: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, (str, bytes)):
+            raise TypeError("virtual_name_patterns items must be strings")
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        patterns.append(text)
+    if not patterns:
+        raise ValueError("virtual_name_patterns must define at least one regex pattern")
+    return tuple(patterns)
 
 
 def _normalize_join_keys(raw: object) -> List[str]:
@@ -543,6 +614,10 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         column_aliases={str(source): {str(k): str(v) for k, v in aliases.items()}
                         for source, aliases in data["column_aliases"].items()},
         excel=data["excel"],
+        virtual_alias_ranges=tuple(
+            (int(start), int(end)) for start, end in data["virtual_alias_ranges"]
+        ),
+        virtual_name_patterns=tuple(str(item) for item in data["virtual_name_patterns"]),
     )
 
 

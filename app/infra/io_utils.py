@@ -1,31 +1,42 @@
-"""توابع ورودی/خروجی Excel در لایهٔ زیرساخت (بدون منطق دامنه).
-این ماژول فقط عملیات فایل را مدیریت می‌کند و در Core فراخوانی نمی‌شود.
+"""ابزارهای ورودی/خروجی Excel در لایهٔ زیرساخت.
+
+این ماژول صرفاً مسئول تطبیق داده‌ها با محدودیت‌های Excel است و هیچ منطق
+دامنه‌ای در آن قرار ندارد تا اصل جداسازی Core/Infra حفظ شود.
 """
+
 from __future__ import annotations
+
 import contextlib
+import json
 import os
 import re
 import tempfile
 from os import PathLike
 from pathlib import Path
-from typing import Dict, Iterator, List, Tuple
+from typing import Dict, Iterator, List, Sequence
+
 import pandas as pd
+
 from app.core.common.columns import CANON_EN_TO_FA, HeaderMode, canonicalize_headers
 from app.core.policy_loader import get_policy
 
 __all__ = [
+    "ALT_CODE_COLUMN",
     "write_xlsx_atomic",
     "read_excel_first_sheet",
     "read_crosswalk_workbook",
 ]
 
+
 ALT_CODE_COLUMN = "کد جایگزین"
 _INVALID_SHEET_CHARS = re.compile(r"[\\/*?:\[\]]")
-_STRING_EXPORT_KEYS: Tuple[str, ...] = ("alias", "mentor_id", "postal_code")
-_INT_EXPORT_KEYS: Tuple[str, ...] = ("group_code", "school_code")
+_STRING_EXPORT_KEYS: Sequence[str] = ("alias", "mentor_id", "postal_code")
+_INT_EXPORT_KEYS: Sequence[str] = ("group_code", "school_code")
+
 
 def _safe_sheet_name(name: str, taken: set[str]) -> str:
     """اصلاح و یکتا‌سازی نام شیت مطابق محدودیت‌های Excel."""
+
     base = _INVALID_SHEET_CHARS.sub(" ", (name or "Sheet").strip()) or "Sheet"
     base = base[:31]
     candidate = base
@@ -37,64 +48,118 @@ def _safe_sheet_name(name: str, taken: set[str]) -> str:
     taken.add(candidate)
     return candidate
 
+
+def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """تخت‌سازی MultiIndex ستون‌ها برای سازگاری با Excel.
+
+    مثال::
+
+        >>> import pandas as pd
+        >>> frame = pd.DataFrame({("الف", "ب"): [1, 2]})
+        >>> _flatten_columns(frame).columns.tolist()
+        ['الف__ب']
+    """
+
+    if not isinstance(df.columns, pd.MultiIndex):
+        columns = [str(col).strip() if str(col).strip() else "column" for col in df.columns]
+        return df.rename(columns=dict(zip(df.columns, columns)))
+
+    flattened = ["__".join(map(str, level)).strip() for level in df.columns.to_flat_index()]
+    cleaned = [col if col else "column" for col in flattened]
+    return df.copy().set_axis(cleaned, axis="columns")
+
+
+def _make_unique_columns(columns: Sequence[str]) -> List[str]:
+    """ساخت نام ستون یکتا با حفظ ترتیب اولیه."""
+
+    seen: dict[str, int] = {}
+    unique: List[str] = []
+    for original in columns:
+        base = (original or "column").strip() or "column"
+        count = seen.get(base, 0)
+        suffix = "" if count == 0 else f" ({count + 1})"
+        candidate = f"{base}{suffix}"
+        while candidate in seen:
+            count += 1
+            suffix = f" ({count + 1})"
+            candidate = f"{base}{suffix}"
+        unique.append(candidate)
+        seen[candidate] = 1
+        seen[base] = count + 1
+    return unique
+
+
 def _coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    ادغام ستون‌های تکراری در یک دیتافریم.
-    اگر چندین ستون با نام یکسان وجود داشته باشد، فقط یک ستون نگهداری می‌شود
-    (اولین ستون پر شده با مقادیر خالی از ستون‌های بعدی).
-    """
-    if df.empty:
-        return df
-    # بررسی وجود ستون تکراری
-    if not any(df.columns.duplicated()):
-        return df
-    
-    unique_columns = df.columns.unique()
+    """ادغام ستون‌های هم‌نام با پر کردن مقادیر خالی از راست به چپ."""
+
+    if df.empty or df.columns.is_unique:
+        return df.copy()
+
+    labels = [str(col) for col in df.columns]
+    groups: dict[str, List[int]] = {}
+    for idx, label in enumerate(labels):
+        groups.setdefault(label, []).append(idx)
+
     result = pd.DataFrame(index=df.index)
-    
-    for col in unique_columns:
-        # گرفتن تمام ستون‌های با این نام
-        cols_with_name = df.loc[:, df.columns == col]
-        if cols_with_name.shape[1] == 1:
-            result[col] = cols_with_name.iloc[:, 0]
+    for label, positions in groups.items():
+        subset = df.iloc[:, positions]
+        if isinstance(subset, pd.Series):
+            result[label] = subset
         else:
-            # استفاده از bfill برای پر کردن مقادیر خالی
-            filled = cols_with_name.bfill(axis=1)
-            result[col] = filled.iloc[:, 0]
-    
+            filled = subset.bfill(axis=1)
+            result[label] = filled.iloc[:, 0]
     return result
 
-def _ensure_series(df: pd.DataFrame, column: str) -> pd.Series:
-    """
-    تضمین اینکه خروجی df[column] یک Series باشد.
-    اگر ستون تکراری وجود داشته باشد، اولین ستون را برگرداند.
-    """
-    value = df[column]
-    if isinstance(value, pd.DataFrame):
-        # اگر چندین ستون با نام یکسان باشد، اولین ستون را انتخاب می‌کنیم
-        return value.iloc[:, 0]
-    return value
+
+def _stringify_cell(value: object) -> str:
+    """تبدیل امن مقادیر پیچیده به رشته برای Excel."""
+
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):  # type: ignore[arg-type]
+            return ""
+    except Exception:
+        pass
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except Exception:  # pragma: no cover - defensive branch
+            return value.decode("latin-1", "ignore")
+    if isinstance(value, (dict, list, tuple, set)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if isinstance(value, (pd.Series, pd.DataFrame)):
+        return json.dumps(value.to_dict(), ensure_ascii=False, sort_keys=True)
+    return str(value)
+
 
 def _prepare_dataframe_for_excel(df: pd.DataFrame) -> pd.DataFrame:
-    """تضمین نوع دادهٔ مناسب برای خروجی Excel."""
-    result = df.copy()
-    # اول از همه، ستون‌های تکراری را ادغام می‌کنیم
-    result = _coalesce_duplicate_columns(result)
-    
+    """پاک‌سازی کامل DataFrame پیش از نوشتن در Excel."""
+
+    frame = _flatten_columns(df)
+    frame = _coalesce_duplicate_columns(frame)
+    frame.columns = _make_unique_columns(list(map(str, frame.columns)))
+
+    converted = frame.copy()
+    for column, dtype in converted.dtypes.items():
+        if pd.api.types.is_object_dtype(dtype):
+            converted[column] = converted[column].map(_stringify_cell)
+
     for key in _STRING_EXPORT_KEYS:
         fa_name = CANON_EN_TO_FA.get(key, key)
         for column_name in (fa_name, key):
-            if column_name in result.columns:
-                result[column_name] = result[column_name].astype("string")
-    
+            if column_name in converted.columns:
+                converted[column_name] = converted[column_name].astype("string")
+
     for key in _INT_EXPORT_KEYS:
         fa_name = CANON_EN_TO_FA.get(key, key)
         for column_name in (fa_name, key):
-            if column_name in result.columns:
-                numeric = pd.to_numeric(result[column_name], errors="coerce")
-                result[column_name] = numeric.astype("Int64")
-    
-    return result
+            if column_name in converted.columns:
+                numeric = pd.to_numeric(converted[column_name], errors="coerce")
+                converted[column_name] = numeric.astype("Int64")
+
+    return converted
+
 
 def _apply_excel_formatting(
     writer: pd.ExcelWriter,
@@ -105,9 +170,10 @@ def _apply_excel_formatting(
     sheet_frames: Dict[str, pd.DataFrame],
 ) -> None:
     """اعمال تنظیمات RTL و فونت پیش‌فرض برای خروجی Excel."""
+
     if not rtl and not font_name:
         return
-    
+
     if engine == "xlsxwriter":
         workbook = writer.book  # type: ignore[attr-defined]
         fmt = workbook.add_format({"font_name": font_name}) if font_name else None
@@ -123,7 +189,7 @@ def _apply_excel_formatting(
 
     try:
         from openpyxl.styles import Font
-    except Exception:  # pragma: no cover - dependency edge case
+    except Exception:  # pragma: no cover - وابستگی اختیاری
         Font = None  # type: ignore[assignment]
 
     workbook = writer.book  # type: ignore[attr-defined]
@@ -133,24 +199,18 @@ def _apply_excel_formatting(
             worksheet.sheet_view.rightToLeft = True
         if not font_name or Font is None:
             continue
-        
-        # اضافه کردن چک ستون‌های تکراری قبل از پردازش
-        df = _coalesce_duplicate_columns(df)
-        
+
         header_font = Font(name=font_name)
         for cell in next(worksheet.iter_rows(min_row=1, max_row=1), []):
             cell.font = header_font
         if df.empty:
             continue
-        
-        # تغییر روش شناسایی ستون‌های متنی برای اجتناب از خطا
-        text_columns = []
-        for idx, column in enumerate(df.columns, start=1):
-            # استفاده از تابع ایمن برای دسترسی به ستون
-            column_data = _ensure_series(df, column)
-            if pd.api.types.is_string_dtype(column_data) or str(column_data.dtype) in {"object", "string"}:
-                text_columns.append(idx)
-        
+
+        text_columns = [
+            idx
+            for idx, dtype in enumerate(df.dtypes, start=1)
+            if pd.api.types.is_string_dtype(dtype) or str(dtype) in {"object", "string"}
+        ]
         max_rows = min(len(df) + 1, 50)
         for col_idx in text_columns:
             for row in worksheet.iter_rows(
@@ -162,9 +222,11 @@ def _apply_excel_formatting(
                 for cell in row:
                     cell.font = header_font
 
+
 @contextlib.contextmanager
 def _temporary_file_path(*, suffix: str = "", directory: Path | str | None = None) -> Iterator[Path]:
     """مدیریت مسیر فایل موقتی با پاک‌سازی خودکار پس از اتمام کار."""
+
     fd, name = tempfile.mkstemp(suffix=suffix, dir=directory)
     os.close(fd)
     path = Path(name)
@@ -173,8 +235,10 @@ def _temporary_file_path(*, suffix: str = "", directory: Path | str | None = Non
     finally:
         path.unlink(missing_ok=True)
 
+
 def _pick_engine() -> str:
     """انتخاب بهترین engine نصب‌شده برای نوشتن Excel."""
+
     forced = os.getenv("EXCEL_ENGINE")
     if forced in {"openpyxl", "xlsxwriter"}:
         return forced
@@ -187,6 +251,7 @@ def _pick_engine() -> str:
         return engine
     raise RuntimeError("هیچ‌کدام از 'openpyxl' یا 'xlsxwriter' نصب نیستند.")
 
+
 def write_xlsx_atomic(
     data_dict: Dict[str, pd.DataFrame],
     filepath: Path | str | PathLike[str],
@@ -196,64 +261,66 @@ def write_xlsx_atomic(
     header_mode: HeaderMode | None = None,
 ) -> None:
     """نوشتن امن و اتمیک Excel با مدیریت نام شیت و انتخاب engine."""
+
     target_path = Path(filepath)
     target_path.parent.mkdir(parents=True, exist_ok=True)
+
     policy = get_policy()
     if rtl is None:
         rtl = policy.excel.rtl
     if font_name is None:
         font_name = policy.excel.font_name
     if header_mode is None:
-        header_mode = policy.excel.header_mode
+        header_mode = policy.excel.header_mode_write
+
     engine = _pick_engine()
     taken: set[str] = set()
     written_frames: Dict[str, pd.DataFrame] = {}
-    
-    # پیش‌پردازش دیتافریم‌ها
-    processed_data = {}
+
+    processed_data: Dict[str, pd.DataFrame] = {}
     for sheet_name, df in data_dict.items():
-        # ادغام ستون‌های تکراری قبل از هر پردازش دیگر
-        df_clean = _coalesce_duplicate_columns(df.copy())
-        processed_data[sheet_name] = df_clean
-    
+        prepared = _prepare_dataframe_for_excel(df)
+        if header_mode:
+            prepared = canonicalize_headers(prepared, header_mode=header_mode)
+        processed_data[sheet_name] = prepared
+
     with _temporary_file_path(suffix=".xlsx", directory=target_path.parent) as tmp_path:
         with pd.ExcelWriter(tmp_path, engine=engine) as writer:
             for sheet_name, df in processed_data.items():
                 safe_name = _safe_sheet_name(str(sheet_name), taken)
-                prepared = _prepare_dataframe_for_excel(df)
-                if header_mode:
-                    prepared = canonicalize_headers(prepared, header_mode=header_mode)
-                prepared.to_excel(writer, sheet_name=safe_name, index=False)
-                written_frames[safe_name] = prepared
-            
+                df.to_excel(writer, sheet_name=safe_name, index=False)
+                written_frames[safe_name] = df
+
             _apply_excel_formatting(
                 writer,
                 engine=engine,
-                rtl=rtl,
+                rtl=bool(rtl),
                 font_name=font_name,
                 sheet_frames=written_frames,
             )
         os.replace(tmp_path, target_path)
 
+
 def read_excel_first_sheet(path: Path | str | PathLike[str]) -> pd.DataFrame:
     """خواندن شیت اول فایل Excel به‌صورت DataFrame."""
+
     source = Path(path)
     try:
         with pd.ExcelFile(source) as workbook:
             if not workbook.sheet_names:
                 raise ValueError(f"هیچ شیتی در فایل {source} یافت نشد.")
-            return workbook.parse(
-                workbook.sheet_names[0], dtype={ALT_CODE_COLUMN: str}
-            )
+            return workbook.parse(workbook.sheet_names[0], dtype={ALT_CODE_COLUMN: str})
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"فایل یافت نشد: {source}") from exc
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover - سناریوهای پیش‌بینی‌نشده
         raise ValueError(f"خطا در خواندن فایل {source}: {exc}") from exc
+
 
 def read_crosswalk_workbook(
     path: Path | str | PathLike[str],
-) -> Tuple[pd.DataFrame, pd.DataFrame | None]:
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """خواندن شیت‌های موردنیاز Crosswalk."""
+
     source = Path(path)
     sheet_groups = "پایه تحصیلی (گروه آزمایشی)"
     try:
@@ -268,5 +335,6 @@ def read_crosswalk_workbook(
             return groups_df, synonyms_df
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"فایل Crosswalk یافت نشد: {source}") from exc
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover - سناریوهای پیش‌بینی‌نشده
         raise ValueError(f"خطا در باز کردن Crosswalk: {exc}") from exc
+
