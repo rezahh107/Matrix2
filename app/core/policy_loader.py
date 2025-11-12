@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from typing import Literal
 
+from app.core.policy.loader import compute_schema_hash, validate_policy_columns
+
 VersionMismatchMode = Literal["raise", "warn", "migrate"]
 
 DEFAULT_POLICY_VERSION = "1.0.3"
@@ -32,6 +34,40 @@ _DEFAULT_EXCEL_OPTIONS: Mapping[str, object] = {
     "font_name": "Vazirmatn",
     "header_mode_internal": "en",
     "header_mode_write": "fa_en",
+}
+_DEFAULT_REASON_TRACE_LABELS: tuple[str, ...] = (
+    "جنسیت",
+    "مدرسه",
+    "گروه/رشته",
+    "سیاست رتبه‌بندی",
+)
+_DEFAULT_SELECTION_REASON_OPTIONS: Mapping[str, object] = {
+    "enabled": True,
+    "sheet_name": "دلایل انتخاب پشتیبان",
+    "template": (
+        "دانش‌آموز {gender_label} — مدرسه {school_name} (پس‌مدرسه‌ای={is_after_school}) — "
+        "رشته/گروه {track_label} — طبق سیاست رتبه‌بندی: {ranking_chain} — پشتیبان: {mentor_id} / {mentor_name}"
+    ),
+    "trace_stage_labels": _DEFAULT_REASON_TRACE_LABELS,
+    "locale": "fa",
+    "labels": {
+        "reason": {
+            "gender": ("جنسیت",),
+            "school": ("مدرسه",),
+            "track": ("رشته/گروه",),
+            "capacity": ("ظرفیت",),
+            "result": ("نتیجه",),
+            "tiebreak": ("سیاست رتبه‌بندی",),
+        }
+    },
+    "columns": (
+        "شمارنده",
+        "کدملی",
+        "نام",
+        "نام خانوادگی",
+        "شناسه پشتیبان",
+        "دلیل انتخاب پشتیبان",
+    ),
 }
 
 _TRACE_STAGE_ORDER: tuple[str, ...] = (
@@ -116,6 +152,27 @@ class ExcelOptions:
 
 
 @dataclass(frozen=True)
+class SelectionReasonOptions:
+    """تنظیمات شیت دلایل انتخاب پشتیبان."""
+
+    enabled: bool
+    sheet_name: str
+    template: str
+    trace_stage_labels: tuple[str, ...]
+    locale: str
+    labels: Mapping[str, tuple[str, ...]]
+    columns: tuple[str, ...]
+    schema_hash: str
+
+
+@dataclass(frozen=True)
+class EmissionOptions:
+    """گزینه‌های انتشار خروجی‌های توضیحی."""
+
+    selection_reasons: SelectionReasonOptions
+
+
+@dataclass(frozen=True)
 class PolicyConfig:
     """ساختار دادهٔ فقط‌خواندنی برای نگهداری سیاست بارگذاری‌شده."""
 
@@ -138,6 +195,7 @@ class PolicyConfig:
     excel: ExcelOptions
     virtual_alias_ranges: Tuple[Tuple[int, int], ...]
     virtual_name_patterns: Tuple[str, ...]
+    emission: EmissionOptions
 
     @property
     def ranking(self) -> List[str]:
@@ -257,6 +315,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "excel": excel,
         "virtual_alias_ranges": virtual_alias_ranges,
         "virtual_name_patterns": virtual_name_patterns,
+        "emission": data.get("emission", {}),
     }
 
 
@@ -655,6 +714,7 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
             (int(start), int(end)) for start, end in data["virtual_alias_ranges"]
         ),
         virtual_name_patterns=tuple(str(item) for item in data["virtual_name_patterns"]),
+        emission=_to_emission_options(data.get("emission", {})),
     )
 
 
@@ -725,6 +785,29 @@ def _apply_schema_defaults(data: Dict[str, object]) -> Dict[str, object]:
     if "column_aliases" not in data or not isinstance(data["column_aliases"], Mapping):
         data["column_aliases"] = {}
 
+    emission = data.get("emission") or {}
+    if not isinstance(emission, Mapping):
+        emission = {}
+    selection_reasons = emission.get("selection_reasons") or {}
+    selection_payload = dict(_DEFAULT_SELECTION_REASON_OPTIONS)
+    if isinstance(selection_reasons, Mapping):
+        for key, value in selection_reasons.items():
+            if key == "trace_stage_labels":
+                selection_payload["trace_stage_labels"] = _normalize_reason_trace_labels(value)
+            elif key == "labels":
+                selection_payload["labels"] = _normalize_reason_labels(value)
+            else:
+                selection_payload[str(key)] = value
+    if not isinstance(selection_payload.get("trace_stage_labels"), tuple):
+        selection_payload["trace_stage_labels"] = _normalize_reason_trace_labels(
+            selection_payload.get("trace_stage_labels")
+        )
+    if not isinstance(selection_payload.get("labels"), Mapping):
+        selection_payload["labels"] = _normalize_reason_labels(
+            selection_payload.get("labels")
+        )
+    data["emission"] = {"selection_reasons": selection_payload}
+
     return data
 
 
@@ -741,6 +824,111 @@ def _normalize_excel_options(payload: Mapping[str, object]) -> Dict[str, object]
         "header_mode_internal": internal,
         "header_mode_write": write,
     }
+
+
+def _normalize_reason_trace_labels(value: object) -> tuple[str, ...]:
+    if isinstance(value, Mapping):
+        ordered = [
+            value.get("gender"),
+            value.get("school"),
+            value.get("track"),
+            value.get("ranking"),
+        ]
+        return _finalize_reason_trace_labels(ordered)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return _finalize_reason_trace_labels(list(value))
+    return _DEFAULT_REASON_TRACE_LABELS
+
+
+def _finalize_reason_trace_labels(values: Sequence[object]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    for idx in range(len(_DEFAULT_REASON_TRACE_LABELS)):
+        if idx < len(values):
+            item = str(values[idx] or "").strip()
+            normalized.append(item or _DEFAULT_REASON_TRACE_LABELS[idx])
+        else:
+            normalized.append(_DEFAULT_REASON_TRACE_LABELS[idx])
+    return tuple(normalized[: len(_DEFAULT_REASON_TRACE_LABELS)])
+
+
+def _normalize_reason_labels(value: object) -> Mapping[str, tuple[str, ...]]:
+    default_reason = _DEFAULT_SELECTION_REASON_OPTIONS["labels"].get("reason", {})
+    resolved: Dict[str, tuple[str, ...]] = {}
+    source: Mapping[str, object] | None = None
+    if isinstance(value, Mapping):
+        candidate = value.get("reason") if "reason" in value else value
+        if isinstance(candidate, Mapping):
+            source = candidate
+    if source is None:
+        source = {}
+
+    for key, fallback in default_reason.items():
+        resolved[key] = _normalize_label_tuple(source.get(key), fallback)
+    return resolved
+
+
+def _normalize_reason_columns(value: object) -> tuple[str, ...]:
+    candidates: list[str] = []
+    if isinstance(value, (list, tuple)):
+        candidates = [str(item).strip() for item in value if str(item or "").strip()]
+    elif isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned:
+            candidates = [cleaned]
+
+    if not candidates:
+        defaults = _DEFAULT_SELECTION_REASON_OPTIONS.get("columns", ())
+        candidates = [str(item) for item in defaults]
+
+    return validate_policy_columns(candidates)
+
+
+def _normalize_label_tuple(value: object, fallback: object) -> tuple[str, ...]:
+    options: list[str] = []
+    if isinstance(value, (list, tuple)):
+        options = [str(item).strip() for item in value if str(item or "").strip()]
+    elif isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned:
+            options = [cleaned]
+    if not options:
+        if isinstance(fallback, (list, tuple)):
+            options = [str(item).strip() for item in fallback if str(item or "").strip()]
+        elif isinstance(fallback, str):
+            cleaned = fallback.strip()
+            if cleaned:
+                options = [cleaned]
+    return tuple(options) if options else ("",)
+
+
+def _to_selection_reason_options(data: Mapping[str, object]) -> SelectionReasonOptions:
+    enabled = bool(data.get("enabled", True))
+    sheet_name = str(data.get("sheet_name", _DEFAULT_SELECTION_REASON_OPTIONS["sheet_name"]))
+    template = str(data.get("template", _DEFAULT_SELECTION_REASON_OPTIONS["template"]))
+    labels = _normalize_reason_trace_labels(data.get("trace_stage_labels"))
+    locale = str(data.get("locale", _DEFAULT_SELECTION_REASON_OPTIONS["locale"]))
+    reason_labels = _normalize_reason_labels(data.get("labels"))
+    columns = _normalize_reason_columns(data.get("columns"))
+    schema_hash = compute_schema_hash(columns)
+    return SelectionReasonOptions(
+        enabled=enabled,
+        sheet_name=sheet_name,
+        template=template,
+        trace_stage_labels=labels,
+        locale=locale,
+        labels=reason_labels,
+        columns=columns,
+        schema_hash=schema_hash,
+    )
+
+
+def _to_emission_options(data: Mapping[str, object]) -> EmissionOptions:
+    if not isinstance(data, Mapping):
+        data = {}
+    selection = data.get("selection_reasons", {})
+    if not isinstance(selection, Mapping):
+        selection = {}
+    return EmissionOptions(selection_reasons=_to_selection_reason_options(selection))
 
 
 def _prepare_policy_payload(

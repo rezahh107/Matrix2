@@ -524,6 +524,70 @@ def safe_int_value(x, default: int = 0) -> int:
     return int(default)
 
 
+_BIDI_REMOVALS = {
+    0x200E,  # LRM
+    0x200F,  # RLM
+    0x202A,
+    0x202B,
+    0x202C,
+    0x202D,
+    0x202E,
+}
+_ZWJ = "\u200d"
+_ZWNJ = "\u200c"
+_PERSIAN_DIGIT_TABLE = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+
+
+def sanitize_bidi(text: object) -> str:
+    """حذف کاراکترهای کنترل جهت و فشرده‌سازی نیم‌فاصله."""
+
+    if text is None:
+        return ""
+    result: list[str] = []
+    previous_zwnj = False
+    for char in str(text):
+        codepoint = ord(char)
+        if codepoint in _BIDI_REMOVALS or char == _ZWJ:
+            continue
+        if char == _ZWNJ:
+            if previous_zwnj:
+                continue
+            previous_zwnj = True
+            result.append(char)
+            continue
+        previous_zwnj = False
+        if unicodedata.category(char) in {"Cc", "Cf"} and char not in {"\t", "\n", "\r"}:
+            continue
+        result.append(char)
+    return "".join(result)
+
+
+def fa_digitize(text: object) -> str:
+    """تبدیل ارقام لاتین به فارسی برای نمایش."""
+
+    if text is None:
+        return ""
+    sanitized = sanitize_bidi(text)
+    return sanitized.translate(_PERSIAN_DIGIT_TABLE)
+
+
+def safe_truncate(text: object, max_len: int) -> str:
+    """ترانکیشن یونیکد-ایمن با حفظ نیم‌فاصله و افزودن «…» در صورت نیاز."""
+
+    if max_len <= 0:
+        return ""
+    value = fa_digitize(text)
+    if len(value) <= max_len:
+        return value
+    if max_len == 1:
+        return "…"
+    limit = max_len - 1
+    trimmed = value[:limit]
+    while trimmed and unicodedata.combining(trimmed[-1]):
+        trimmed = trimmed[:-1]
+    return f"{trimmed}…"
+
+
 __all__ = [
     "normalize_fa",
     "normalize_header",
@@ -532,4 +596,7 @@ __all__ = [
     "parse_int_safe",
     "resolve_group_code",
     "safe_int_value",
+    "sanitize_bidi",
+    "fa_digitize",
+    "safe_truncate",
 ]

@@ -11,9 +11,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.core.allocate_students import allocate_batch
+from app.core.allocate_students import allocate_batch, build_selection_reason_rows
 from app.core.common.types import JoinKeyValues
-from app.core.policy_loader import parse_policy_dict
+from app.core.policy_loader import load_policy, parse_policy_dict
+from app.infra.excel_writer import write_selection_reasons_sheet
 
 
 @pytest.fixture()
@@ -191,7 +192,17 @@ def test_allocation_outputs_excel_openable(tmp_path: Path, _base_pool: pd.DataFr
         ignore_index=True,
     )
 
-    allocations, updated_pool, logs, trace = allocate_batch(students, _base_pool)
+    policy = load_policy()
+    allocations, updated_pool, logs, trace = allocate_batch(students, _base_pool, policy=policy)
+    reasons = build_selection_reason_rows(
+        allocations,
+        students,
+        _base_pool,
+        policy=policy,
+        logs=logs,
+        trace=trace,
+    )
+    _, reasons = write_selection_reasons_sheet(reasons, writer=None, policy=policy)
 
     out_path = tmp_path / "allocation_bundle.xlsx"
     write_xlsx_atomic(
@@ -200,12 +211,19 @@ def test_allocation_outputs_excel_openable(tmp_path: Path, _base_pool: pd.DataFr
             "pool": updated_pool,
             "logs": logs,
             "trace": trace,
+            "دلایل انتخاب پشتیبان": reasons,
         },
         out_path,
     )
 
     workbook = load_workbook(out_path)
-    assert set(workbook.sheetnames) == {"allocations", "pool", "logs", "trace"}
+    assert set(workbook.sheetnames) == {
+        "allocations",
+        "pool",
+        "logs",
+        "trace",
+        "دلایل انتخاب پشتیبان",
+    }
 
 
 @pytest.mark.skipif(

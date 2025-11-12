@@ -11,12 +11,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.common.trace import build_allocation_trace, build_trace_plan
 from app.core.policy_loader import (
     ExcelOptions,
+    EmissionOptions,
     GenderCode,
     GenderCodes,
     PolicyAliasRule,
     PolicyColumns,
     PolicyConfig,
     RankingRule,
+    SelectionReasonOptions,
     TraceStageDefinition,
     parse_policy_dict,
 )
@@ -218,6 +220,32 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
         ),
         virtual_alias_ranges=((7000, 7999),),
         virtual_name_patterns=("در\\s+انتظار\\s+تخصیص",),
+        emission=EmissionOptions(
+            selection_reasons=SelectionReasonOptions(
+                enabled=True,
+                sheet_name="دلایل انتخاب پشتیبان",
+                template="{mentor_id}",
+                trace_stage_labels={},
+                locale="fa",
+                labels={
+                    "gender": ("جنسیت",),
+                    "school": ("مدرسه",),
+                    "track": ("رشته/گروه",),
+                    "capacity": ("ظرفیت",),
+                    "result": ("نتیجه",),
+                    "tiebreak": ("سیاست",),
+                },
+                columns=(
+                    "شمارنده",
+                    "کدملی",
+                    "نام",
+                    "نام خانوادگی",
+                    "شناسه پشتیبان",
+                    "دلیل انتخاب پشتیبان",
+                ),
+                schema_hash="hash",
+            )
+        ),
     )
 
     with pytest.raises(ValueError, match="canonical 8-stage order"):

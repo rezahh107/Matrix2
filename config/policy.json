@@ -1,9 +1,21 @@
 {
   "version": "1.0.3",
-  "normal_statuses": [1, 0],
-  "school_statuses": [1],
-  "postal_valid_range": [1000, 9999],
-  "finance_variants": [0, 1, 3],
+  "normal_statuses": [
+    1,
+    0
+  ],
+  "school_statuses": [
+    1
+  ],
+  "postal_valid_range": [
+    1000,
+    9999
+  ],
+  "finance_variants": [
+    0,
+    1,
+    3
+  ],
   "center_map": {
     "شهدخت کشاورز": 1,
     "آیناز هوشمند": 2,
@@ -15,14 +27,25 @@
     "normal": "postal_or_fallback_mentor_id",
     "school": "mentor_id"
   },
-  "virtual_alias_ranges": [[7000, 7999]],
+  "virtual_alias_ranges": [
+    [
+      7000,
+      7999
+    ]
+  ],
   "virtual_name_patterns": [
     "در\\s+انتظار\\s+تخصیص",
     "فراگیر"
   ],
   "gender_codes": {
-    "male": {"value": 1, "counter_code": "357"},
-    "female": {"value": 0, "counter_code": "373"}
+    "male": {
+      "value": 1,
+      "counter_code": "357"
+    },
+    "female": {
+      "value": 0,
+      "counter_code": "373"
+    }
   },
   "join_keys": [
     "کدرشته",
@@ -42,19 +65,55 @@
     "کد مدرسه"
   ],
   "ranking_rules": [
-    {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": true},
-    {"name": "min_allocations_new", "column": "allocations_new", "ascending": true},
-    {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": true}
+    {
+      "name": "min_occupancy_ratio",
+      "column": "occupancy_ratio",
+      "ascending": true
+    },
+    {
+      "name": "min_allocations_new",
+      "column": "allocations_new",
+      "ascending": true
+    },
+    {
+      "name": "min_mentor_id",
+      "column": "mentor_sort_key",
+      "ascending": true
+    }
   ],
   "trace_stages": [
-    {"stage": "type", "column": "کدرشته"},
-    {"stage": "group", "column": "کدرشته"},
-    {"stage": "gender", "column": "جنسیت"},
-    {"stage": "graduation_status", "column": "دانش آموز فارغ"},
-    {"stage": "center", "column": "مرکز گلستان صدرا"},
-    {"stage": "finance", "column": "مالی حکمت بنیاد"},
-    {"stage": "school", "column": "کد مدرسه"},
-    {"stage": "capacity_gate", "column": "remaining_capacity"}
+    {
+      "stage": "type",
+      "column": "کدرشته"
+    },
+    {
+      "stage": "group",
+      "column": "کدرشته"
+    },
+    {
+      "stage": "gender",
+      "column": "جنسیت"
+    },
+    {
+      "stage": "graduation_status",
+      "column": "دانش آموز فارغ"
+    },
+    {
+      "stage": "center",
+      "column": "مرکز گلستان صدرا"
+    },
+    {
+      "stage": "finance",
+      "column": "مالی حکمت بنیاد"
+    },
+    {
+      "stage": "school",
+      "column": "کد مدرسه"
+    },
+    {
+      "stage": "capacity_gate",
+      "column": "remaining_capacity"
+    }
   ],
   "columns": {
     "postal_code": "کدپستی",
@@ -97,6 +156,50 @@
     "school": {
       "کد مدرسه": "کد مدرسه",
       "نام مدرسه": "نام مدرسه"
+    }
+  },
+  "emission": {
+    "selection_reasons": {
+      "enabled": true,
+      "sheet_name": "دلایل انتخاب پشتیبان",
+      "columns": [
+        "شمارنده",
+        "کدملی",
+        "نام",
+        "نام خانوادگی",
+        "شناسه پشتیبان",
+        "دلیل انتخاب پشتیبان"
+      ],
+      "template": "{gender_segment} — {school_segment} — {track_segment} — {capacity_segment} — {result_segment} — {tiebreak_segment}",
+      "trace_stage_labels": [
+        "جنسیت",
+        "مدرسه",
+        "گروه/رشته",
+        "سیاست رتبه‌بندی"
+      ],
+      "locale": "fa",
+      "labels": {
+        "reason": {
+          "gender": [
+            "جنسیت"
+          ],
+          "school": [
+            "مدرسه"
+          ],
+          "track": [
+            "رشته/گروه"
+          ],
+          "capacity": [
+            "ظرفیت"
+          ],
+          "result": [
+            "نتیجه"
+          ],
+          "tiebreak": [
+            "سیاست رتبه‌بندی"
+          ]
+        }
+      }
     }
   },
   "excel": {
