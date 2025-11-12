@@ -58,6 +58,14 @@ def policy_file(tmp_path: Path) -> Path:
             {"stage": "school", "column": "کد مدرسه"},
             {"stage": "capacity_gate", "column": "remaining_capacity"},
         ],
+        "virtual_alias_ranges": [[7000, 7999]],
+        "virtual_name_patterns": ["در\\s+انتظار\\s+تخصیص"],
+        "excel": {
+            "rtl": True,
+            "font_name": "Vazirmatn",
+            "header_mode_internal": "en",
+            "header_mode_write": "fa_en",
+        },
     }
     policy_path = tmp_path / "policy.json"
     policy_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
