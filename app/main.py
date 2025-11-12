@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import Callable, Optional, NoReturn
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt, QSharedMemory, QTimer
-from PySide6.QtGui import QFont, QGuiApplication
 
 from app.infra.logging import LoggingContext, configure_logging, install_exception_hook
+from app.ui.fonts import apply_default_font
 
 
 __version__ = "1.0.1"
@@ -231,25 +231,9 @@ def setup_application() -> QApplication:
         app.setApplicationVersion(__version__)
         app.setQuitOnLastWindowClosed(True)
         
-        # فونت پیش‌فرض با پشتیبانی از زبان فارسی
-        preferred_fonts = [
-            "Segoe UI", 
-            "Tahoma", 
-            "Arial", 
-            "Verdana",
-            "Microsoft Sans Serif"  # پشتیبانی بهتر از فارسی
-        ]
-        font = QFont()
-        for font_name in preferred_fonts:
-            if font_name in QFont().families():
-                font.setFamily(font_name)
-                logger.info(f"فونت انتخاب شده: {font_name}")
-                break
-        
-        font.setPointSize(10)
-        font.setStyleHint(QFont.StyleHint.AnyStyle)
-        app.setFont(font)
-        
+        font = apply_default_font(app, point_size=10)
+        logger.info("فونت فعال برنامه: %s", font.family())
+
         logger.info("QApplication با موفقیت راه‌اندازی شد")
         return app
         
