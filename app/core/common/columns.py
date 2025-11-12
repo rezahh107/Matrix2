@@ -34,6 +34,7 @@ CANON_EN_TO_FA: Mapping[str, str] = {
     "exam_group": "گروه آزمایشی",
     "gender": "جنسیت",
     "graduation_status": "دانش آموز فارغ",
+    "national_id": "کد ملی",
     "center": "مرکز گلستان صدرا",
     "finance": "مالی حکمت بنیاد",
     "school_code": "کد مدرسه",

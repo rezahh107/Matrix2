@@ -20,6 +20,10 @@
     "در\\s+انتظار\\s+تخصیص",
     "فراگیر"
   ],
+  "gender_codes": {
+    "male": {"value": 1, "counter_code": "357"},
+    "female": {"value": 0, "counter_code": "373"}
+  },
   "join_keys": [
     "کدرشته",
     "جنسیت",

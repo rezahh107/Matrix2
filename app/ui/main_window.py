@@ -5,13 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Iterable, List, Sequence, Tuple
 
+import pandas as pd
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
-    QFileDialog,
+    QComboBox,
     QFormLayout,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -25,53 +27,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.common.columns import HeaderMode, canonicalize_headers
+from app.core.counter import (
+    detect_academic_year_from_counters,
+    find_max_sequence_by_prefix,
+    infer_year_strict,
+    pick_counter_sheet_name,
+    year_to_yy,
+)
+from app.core.policy_loader import get_policy
 from app.infra import cli
 
 from .task_runner import ProgressFn, Worker
+from .widgets import FilePicker
 
 __all__ = ["MainWindow", "run_demo", "FilePicker"]
-
-
-class FilePicker(QWidget):
-    def __init__(self, parent=None, save=False, placeholder=""):
-        super().__init__(parent)
-        self.save = save
-
-        self.edit = QLineEdit(self)
-        self.edit.setPlaceholderText(placeholder)
-
-        self.btn = QPushButton("انتخاب…", self)
-        self.btn.clicked.connect(self._pick)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.edit)
-        layout.addWidget(self.btn)
-
-    def text(self) -> str:
-        return self.edit.text().strip()
-
-    def setText(self, s: str) -> None:
-        self.edit.setText(s)
-
-    def _pick(self) -> None:
-        if self.save:
-            path, _ = QFileDialog.getSaveFileName(
-                self,
-                "ذخیره خروجی",
-                "",
-                "All Files (*.*)",
-            )
-        else:
-            path, _ = QFileDialog.getOpenFileName(
-                self,
-                "انتخاب فایل",
-                "",
-                "All Files (*.*)",
-            )
-
-        if path:
-            self.edit.setText(path)
 
 
 class MainWindow(QMainWindow):
@@ -255,6 +225,45 @@ class MainWindow(QMainWindow):
         self._edit_capacity.setObjectName("editCapacityCol")
         form.addRow("ستون ظرفیت", self._edit_capacity)
 
+        register_box = QGroupBox("شناسهٔ ثبت‌نام", page)
+        register_box.setObjectName("registrationGroupBox")
+        register_layout = QFormLayout(register_box)
+        register_layout.setLabelAlignment(Qt.AlignRight)
+        register_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        self._combo_academic_year = QComboBox(register_box)
+        self._combo_academic_year.setEditable(True)
+        self._combo_academic_year.setInsertPolicy(QComboBox.NoInsert)
+        self._combo_academic_year.setObjectName("academicYearInput")
+        self._combo_academic_year.lineEdit().setPlaceholderText("مثلاً 1404")
+        self._combo_academic_year.setToolTip("سال تحصیلی شروع (مثلاً 1404)")
+        for year in range(1395, 1411):
+            self._combo_academic_year.addItem(str(year))
+        register_layout.addRow("سال تحصیلی", self._combo_academic_year)
+
+        self._picker_prior_roster = FilePicker(
+            register_box,
+            placeholder="روستر سال قبل (اختیاری)",
+        )
+        self._picker_prior_roster.setObjectName("priorRosterPicker")
+        self._picker_prior_roster.setToolTip("برای بازیابی شمارندهٔ سال قبل در صورت وجود")
+        register_layout.addRow("روستر سال قبل", self._picker_prior_roster)
+
+        self._picker_current_roster = FilePicker(
+            register_box,
+            placeholder="روستر سال جاری / شمارنده‌ها",
+        )
+        self._picker_current_roster.setObjectName("currentRosterPicker")
+        self._picker_current_roster.setToolTip("برای کشف آخرین شمارنده‌های سال جاری")
+        register_layout.addRow("روستر سال جاری", self._picker_current_roster)
+
+        self._btn_autodetect = QPushButton("پیشنهاد خودکار", register_box)
+        self._btn_autodetect.setObjectName("autodetectCountersBtn")
+        self._btn_autodetect.clicked.connect(self._autodetect_counters)
+        register_layout.addRow("", self._btn_autodetect)
+
+        form.addRow(register_box)
+
         self._btn_allocate = QPushButton("تخصیص")
         self._btn_allocate.setObjectName("btnAllocate")
         self._btn_allocate.clicked.connect(self._start_allocate)
@@ -321,6 +330,10 @@ class MainWindow(QMainWindow):
             self._picker_policy_allocate,
             self._picker_alloc_out,
             self._edit_capacity,
+            self._combo_academic_year,
+            self._picker_prior_roster,
+            self._picker_current_roster,
+            self._btn_autodetect,
         ]
 
     # ------------------------------------------------------------------ Actions
@@ -373,7 +386,28 @@ class MainWindow(QMainWindow):
 
         capacity = self._edit_capacity.text().strip() or "remaining_capacity"
         self._edit_capacity.setText(capacity)
-        policy_path = self._picker_policy_allocate.text() or self._default_policy_path or "config/policy.json"
+        policy_path = (
+            self._picker_policy_allocate.text()
+            or self._default_policy_path
+            or "config/policy.json"
+        )
+
+        overrides = self._build_allocate_overrides()
+        academic_year = overrides.get("academic_year")
+        if academic_year is None:
+            QMessageBox.warning(
+                self,
+                "سال تحصیلی نامشخص",
+                "لطفاً سال تحصیلی را وارد کنید یا از پیشنهاد خودکار استفاده کنید.",
+            )
+            return
+
+        prior_path = str(overrides.get("prior_roster") or "").strip()
+        current_path = str(overrides.get("current_roster") or "").strip()
+        for path, label in ((prior_path, "روستر سال قبل"), (current_path, "روستر سال جاری")):
+            if path and not Path(path).exists():
+                QMessageBox.warning(self, "فایل یافت نشد", f"{label} قابل دسترسی نیست: {path}")
+                return
 
         argv = [
             "allocate",
@@ -387,8 +421,34 @@ class MainWindow(QMainWindow):
             capacity,
             "--policy",
             policy_path,
+            "--academic-year",
+            str(academic_year),
         ]
-        self._launch_cli(argv, "تخصیص")
+
+        if prior_path:
+            argv.extend(["--prior-roster", prior_path])
+        if current_path:
+            argv.extend(["--current-roster", current_path])
+
+        self._launch_cli(argv, "تخصیص", overrides=overrides)
+
+    def _build_allocate_overrides(self) -> dict[str, object]:
+        """ساخت دیکشنری پارامترهای شمارنده بر اساس ورودی UI."""
+
+        overrides: dict[str, object] = {}
+        year = self._get_academic_year()
+        if year is not None:
+            overrides["academic_year"] = year
+
+        prior = self._picker_prior_roster.text().strip()
+        if prior:
+            overrides["prior_roster"] = prior
+
+        current = self._picker_current_roster.text().strip()
+        if current:
+            overrides["current_roster"] = current
+
+        return overrides
 
     def _start_demo_task(self) -> None:
         """اجرای پیش‌نمایش پیشرفت برای تست UI."""
@@ -403,11 +463,96 @@ class MainWindow(QMainWindow):
 
         self._launch_worker(_demo_task, "دموی پیشرفت")
 
-    def _launch_cli(self, argv: Sequence[str], action: str) -> None:
+    def _autodetect_counters(self) -> None:
+        """خواندن روستر سال جاری و پیشنهاد سال و آخرین شمارنده‌ها."""
+
+        path_text = self._picker_current_roster.text().strip()
+        if not path_text:
+            QMessageBox.information(
+                self,
+                "فایل نامشخص",
+                "ابتدا روستر سال جاری را انتخاب کنید.",
+            )
+            return
+
+        try:
+            dataframe = self._load_counter_dataframe(Path(path_text))
+        except FileNotFoundError:
+            QMessageBox.warning(self, "فایل یافت نشد", f"مسیر مشخص‌شده وجود ندارد: {path_text}")
+            return
+        except ValueError as exc:
+            QMessageBox.warning(self, "خواندن فایل", str(exc))
+            return
+        except Exception as exc:  # pragma: no cover - خطای غیرمنتظره I/O
+            QMessageBox.warning(self, "خواندن فایل", f"امکان خواندن فایل نبود: {exc}")
+            return
+
+        canonical = canonicalize_headers(dataframe, header_mode=HeaderMode.en)
+        strict_year = infer_year_strict(canonical)
+        fallback_year = detect_academic_year_from_counters(canonical)
+        messages: list[str] = []
+        if strict_year is not None:
+            self._set_academic_year(strict_year)
+            messages.append(f"سال پیشنهادی: {strict_year}")
+        elif fallback_year is not None:
+            messages.append(f"سال احتمالی (غیر یکتا): {fallback_year}")
+        else:
+            messages.append("سال قابل تشخیص نیست")
+
+        try:
+            policy = get_policy()
+        except Exception as exc:  # pragma: no cover - خطای policy در UI
+            QMessageBox.warning(self, "بارگذاری سیاست", f"امکان خواندن policy نبود: {exc}")
+            self._status.setText("بارگذاری policy ناموفق")
+            return
+
+        year = strict_year or self._get_academic_year()
+        if year is not None:
+            try:
+                yy = year_to_yy(year)
+            except ValueError:
+                yy = None
+            if yy is not None:
+                male_mid3 = str(policy.gender_codes.male.counter_code).zfill(3)
+                female_mid3 = str(policy.gender_codes.female.counter_code).zfill(3)
+                male_prefix = f"{yy:02d}{male_mid3}"
+                female_prefix = f"{yy:02d}{female_mid3}"
+                last_male = find_max_sequence_by_prefix(canonical, male_prefix)
+                last_female = find_max_sequence_by_prefix(canonical, female_prefix)
+                next_male = last_male + 1 if last_male else 1
+                next_female = last_female + 1 if last_female else 1
+                if last_male:
+                    messages.append(f"آخرین پسر: {yy:02d}{male_mid3}{last_male:04d}")
+                else:
+                    messages.append("آخرین پسر یافت نشد")
+                messages.append(f"شروع بعدی پسر: {next_male:04d}")
+                if last_female:
+                    messages.append(f"آخرین دختر: {yy:02d}{female_mid3}{last_female:04d}")
+                else:
+                    messages.append("آخرین دختر یافت نشد")
+                messages.append(f"شروع بعدی دختر: {next_female:04d}")
+        else:
+            messages.append("برای محاسبهٔ شمارندهٔ آخر، سال را مشخص کنید")
+
+        status = " | ".join(messages)
+        self._status.setText(status or "پیشنهاد خودکار انجام شد")
+        self._log.append(f"ℹ️ پیشنهاد شمارنده: {status}")
+
+    def _launch_cli(
+        self,
+        argv: Sequence[str],
+        action: str,
+        *,
+        overrides: dict[str, object] | None = None,
+    ) -> None:
         """اجرای فرمان CLI با Worker و رعایت قرارداد progress."""
 
         def _task(*, progress: ProgressFn) -> None:
-            exit_code = cli.main(argv, progress_factory=lambda: progress)
+            exit_code = cli.main(
+                argv,
+                progress_factory=lambda: progress,
+                ui_overrides=overrides,
+            )
             if exit_code != 0:
                 raise RuntimeError(f"کد خروج غیرصفر: {exit_code}")
 
@@ -433,6 +578,50 @@ class MainWindow(QMainWindow):
 
         for widget in self._interactive:
             widget.setEnabled(not disabled)
+
+    def _get_academic_year(self) -> int | None:
+        """دریافت سال تحصیلی معتبر از ورودی UI."""
+
+        text = self._combo_academic_year.currentText().strip()
+        if not text:
+            return None
+        try:
+            year = int(text)
+        except ValueError:
+            return None
+        if year < 1300 or year > 1500:
+            return None
+        return year
+
+    def _set_academic_year(self, year: int) -> None:
+        """قرار دادن مقدار سال تحصیلی در کنترل مربوطه."""
+
+        self._combo_academic_year.setEditText(str(year))
+
+    def _load_counter_dataframe(self, path: Path) -> pd.DataFrame:
+        """بارگذاری دیتافریم شمارنده با تشخیص شیت مناسب."""
+
+        if not path:
+            raise ValueError("مسیر فایل مشخص نشده است")
+        if not path.exists():
+            raise FileNotFoundError(path)
+
+        suffix = path.suffix.lower()
+        if suffix in {".xlsx", ".xls", ".xlsm"}:
+            with pd.ExcelFile(path) as workbook:
+                sheet_name = pick_counter_sheet_name(workbook.sheet_names)
+                if sheet_name is None:
+                    raise ValueError("هیچ شیت سازگار با شمارنده یافت نشد")
+                return workbook.parse(sheet_name)
+        if suffix == ".csv":
+            return pd.read_csv(path)
+
+        # تلاش مجدد به عنوان Excel پیش‌فرض
+        with pd.ExcelFile(path) as workbook:
+            sheet_name = pick_counter_sheet_name(workbook.sheet_names)
+            if sheet_name is None:
+                sheet_name = workbook.sheet_names[0]
+            return workbook.parse(sheet_name)
 
     def _ensure_filled(self, fields: Iterable[Tuple[FilePicker | QLineEdit, str]]) -> bool:
         """بررسی پر بودن فیلدهای ضروری و نمایش هشدار در صورت نقص."""

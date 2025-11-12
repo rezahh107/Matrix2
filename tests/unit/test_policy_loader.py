@@ -46,6 +46,10 @@ def _valid_payload() -> dict[str, object]:
             "مالی حکمت بنیاد",
             "کد مدرسه",
         ],
+        "gender_codes": {
+            "male": {"value": 1, "counter_code": "357"},
+            "female": {"value": 0, "counter_code": "373"},
+        },
         "ranking_rules": [
             {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
             {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},

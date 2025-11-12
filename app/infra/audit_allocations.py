@@ -16,6 +16,53 @@ from app.core.policy_loader import PolicyConfig, get_policy
 __all__ = ["audit_allocations", "audit_allocations_cli", "summarize_report"]
 
 
+def _duplicate_student_ids(frame: pd.DataFrame) -> tuple[int, List[str]]:
+    """تشخیص شناسه‌های دانش‌آموز تکراری و نمونه‌برداری."""
+
+    if frame.empty or "student_id" not in frame.columns:
+        return 0, []
+
+    series = frame["student_id"].astype("string")
+    duplicates = series[series.duplicated(keep=False)].dropna()
+    if duplicates.empty:
+        return 0, []
+
+    unique_ids = duplicates.drop_duplicates().head(5).tolist()
+    return len(unique_ids), unique_ids
+
+
+def _counter_overflow_hits(frame: pd.DataFrame) -> tuple[int, List[str]]:
+    """بررسی شناسه‌هایی که به مرز 9999 رسیده‌اند."""
+
+    if frame.empty or "student_id" not in frame.columns:
+        return 0, []
+
+    series = frame["student_id"].astype("string")
+    mask = series.str.fullmatch(r"\d{9}") & series.str.endswith("9999")
+    hits = series[mask]
+    if hits.empty:
+        return 0, []
+
+    return len(hits), hits.head(5).tolist()
+
+
+def _year_ambiguity(frame: pd.DataFrame) -> tuple[int, List[str]]:
+    """بررسی اختلاف سال تحصیلی بر اساس پیشوند YY."""
+
+    if frame.empty or "student_id" not in frame.columns:
+        return 0, []
+
+    series = frame["student_id"].astype("string")
+    prefixes = {
+        value[:2]
+        for value in series
+        if value and isinstance(value, str) and value.isdigit() and len(value) == 9
+    }
+    if len(prefixes) <= 1:
+        return 0, sorted(prefixes)
+    return len(prefixes), sorted(prefixes)
+
+
 def _load_sheet(
     workbook: pd.ExcelFile,
     sheet_name: str,
@@ -165,11 +212,17 @@ def audit_allocations(path: str | Path) -> Dict[str, Dict[str, Any]]:
         trace,
         expected_stage_count=len(policy.trace_stage_names),
     )
+    duplicate_count, duplicate_samples = _duplicate_student_ids(allocations)
+    overflow_count, overflow_samples = _counter_overflow_hits(allocations)
+    ambiguity_count, ambiguity_samples = _year_ambiguity(allocations)
 
     return {
         "VirtualMentorHits": {"count": virtual_count, "samples": virtual_samples},
         "CapacityStuck": {"count": stuck_count, "samples": stuck_samples},
         "TraceMismatch": {"count": trace_count, "samples": trace_samples},
+        "duplicate_student_ids": {"count": duplicate_count, "samples": duplicate_samples},
+        "counter_overflow_hits": {"count": overflow_count, "samples": overflow_samples},
+        "year_ambiguity": {"count": ambiguity_count, "samples": ambiguity_samples},
     }
 
 

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 import warnings
 from dataclasses import dataclass
 from functools import lru_cache
@@ -83,6 +84,22 @@ class PolicyAliasRule:
 
 
 @dataclass(frozen=True)
+class GenderCode:
+    """تعریف نگاشت جنسیت به مقدار و کد شمارنده."""
+
+    value: int
+    counter_code: str
+
+
+@dataclass(frozen=True)
+class GenderCodes:
+    """مجموعهٔ نگاشت جنسیت بر اساس policy."""
+
+    male: GenderCode
+    female: GenderCode
+
+
+@dataclass(frozen=True)
 class ExcelOptions:
     """تنظیمات خروجی Excel (جهت، فونت و حالت هدر)."""
 
@@ -109,6 +126,7 @@ class PolicyConfig:
     required_student_fields: List[str]
     ranking_rules: List["RankingRule"]
     trace_stages: List["TraceStageDefinition"]
+    gender_codes: GenderCodes
     postal_valid_range: tuple[int, int]
     finance_variants: tuple[int, ...]
     center_map: Mapping[str, int]
@@ -178,6 +196,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "normal_statuses",
         "school_statuses",
         "join_keys",
+        "gender_codes",
         "postal_valid_range",
         "finance_variants",
         "center_map",
@@ -209,6 +228,9 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     school_code_empty_as_zero = _ensure_bool("school_code_empty_as_zero", data["school_code_empty_as_zero"])
     prefer_major_code = _ensure_bool("prefer_major_code", data["prefer_major_code"])
     alias_rule = _normalize_alias_rule(data["alias_rule"])
+    gender_codes = data["gender_codes"]
+    if not isinstance(gender_codes, Mapping):
+        raise TypeError("gender_codes must be a mapping")
     columns = _normalize_columns(data["columns"])
     column_aliases = _normalize_column_aliases(data.get("column_aliases", {}))
     excel = _normalize_excel_options(data.get("excel"))
@@ -229,6 +251,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "school_code_empty_as_zero": school_code_empty_as_zero,
         "prefer_major_code": prefer_major_code,
         "alias_rule": alias_rule,
+        "gender_codes": gender_codes,
         "columns": columns,
         "column_aliases": column_aliases,
         "excel": excel,
@@ -607,6 +630,7 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         ],
         ranking_rules=[_to_ranking_rule(item) for item in data["ranking_rules"]],
         trace_stages=[_to_trace_stage(item) for item in data["trace_stages"]],
+        gender_codes=_to_gender_codes(data["gender_codes"]),
         postal_valid_range=tuple(int(item) for item in data["postal_valid_range"]),
         finance_variants=tuple(int(item) for item in data["finance_variants"]),
         center_map={str(k): int(v) for k, v in data["center_map"].items()},
@@ -644,6 +668,31 @@ def _to_ranking_rule(item: Mapping[str, object]) -> RankingRule:
 
 def _to_trace_stage(item: Mapping[str, object]) -> TraceStageDefinition:
     return TraceStageDefinition(stage=str(item["stage"]), column=str(item["column"]))
+
+
+def _to_gender_codes(payload: Mapping[str, Mapping[str, object]]) -> GenderCodes:
+    """تبدیل ساختار gender_codes در policy به GenderCodes."""
+
+    try:
+        male_payload = payload["male"]
+        female_payload = payload["female"]
+    except KeyError as exc:  # pragma: no cover - نگهبان مهاجرت
+        raise ValueError("Policy missing gender_codes.male/female definitions") from exc
+
+    def _parse(entry: Mapping[str, object]) -> GenderCode:
+        if "value" not in entry or "counter_code" not in entry:
+            raise ValueError("Gender code entry must include 'value' and 'counter_code'")
+        value = int(entry["value"])
+        counter_code = str(entry["counter_code"]).strip()
+        if not counter_code:
+            raise ValueError("Gender counter_code must be non-empty")
+        if not re.fullmatch(r"\d{3}", counter_code):
+            raise ValueError("Gender counter_code must be exactly three digits")
+        return GenderCode(value=value, counter_code=counter_code)
+
+    male_code = _parse(male_payload)
+    female_code = _parse(female_payload)
+    return GenderCodes(male=male_code, female=female_code)
 
 
 def parse_policy_dict(
