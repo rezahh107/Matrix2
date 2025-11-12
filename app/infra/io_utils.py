@@ -162,6 +162,82 @@ def _prepare_dataframe_for_excel(df: pd.DataFrame) -> pd.DataFrame:
     return converted
 
 
+def _build_table_name(sheet_name: str, taken: set[str]) -> str:
+    """ساخت نام معتبر و یکتای جدول Excel بر اساس نام شیت."""
+
+    base = re.sub(r"[^0-9A-Za-z_]", "_", (sheet_name or "Table").strip()) or "Table"
+    if not re.match(r"[A-Za-z_]", base):
+        base = f"T_{base}"
+    base = base[:31]
+    candidate = base
+    index = 2
+    while candidate in taken or not candidate:
+        suffix = f"_{index}"
+        candidate = (base[: max(0, 31 - len(suffix))] + suffix).rstrip("_")
+        index += 1
+    taken.add(candidate)
+    return candidate
+
+
+def _apply_excel_tables(
+    writer: pd.ExcelWriter,
+    *,
+    engine: str,
+    sheet_frames: Dict[str, pd.DataFrame],
+) -> None:
+    """افزودن ساختار Table به شیت‌های خروجی در صورت امکان."""
+
+    if not sheet_frames:
+        return
+
+    table_names: set[str] = set()
+
+    if engine == "xlsxwriter":
+        for sheet_name, df in sheet_frames.items():
+            worksheet = writer.sheets.get(sheet_name)
+            if worksheet is None:
+                continue
+            rows, cols = df.shape
+            if cols == 0:
+                continue
+            table_name = _build_table_name(sheet_name, table_names)
+            worksheet.add_table(
+                0,
+                0,
+                max(rows, 0),
+                cols - 1,
+                {
+                    "name": table_name,
+                    "columns": [{"header": header} for header in df.columns],
+                    "style": None,
+                },
+            )
+        return
+
+    if engine != "openpyxl":
+        return
+
+    try:
+        from openpyxl.utils import get_column_letter
+        from openpyxl.worksheet.table import Table, TableStyleInfo
+    except Exception:  # pragma: no cover - وابستگی اختیاری
+        return
+
+    workbook = writer.book  # type: ignore[attr-defined]
+    for sheet_name, df in sheet_frames.items():
+        worksheet = workbook[sheet_name]
+        if worksheet.max_column == 0:
+            continue
+        table_name = _build_table_name(sheet_name, table_names)
+        end_row = max(worksheet.max_row, len(df) + 1)
+        end_col = worksheet.max_column
+        ref = f"A1:{get_column_letter(end_col)}{end_row}"
+        table = Table(displayName=table_name, ref=ref)
+        style = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True, showColumnStripes=False)
+        table.tableStyleInfo = style
+        worksheet.add_table(table)
+
+
 def _apply_excel_formatting(
     writer: pd.ExcelWriter,
     *,
@@ -177,51 +253,56 @@ def _apply_excel_formatting(
 
     if engine == "xlsxwriter":
         workbook = writer.book  # type: ignore[attr-defined]
-        fmt = workbook.add_format({"font_name": font_name}) if font_name else None
+        fmt_options: dict[str, object] = {
+            "align": "center",
+            "valign": "vcenter",
+        }
+        if font_name:
+            fmt_options["font_name"] = font_name
+            fmt_options["font_size"] = 8
+        fmt = workbook.add_format(fmt_options)
         for worksheet in writer.sheets.values():
             if rtl:
                 worksheet.right_to_left()
-            if fmt is not None:
-                worksheet.set_column(0, 16384, None, fmt)
+            worksheet.set_column(0, 16384, None, fmt)
         return
 
     if engine != "openpyxl":
         return
 
     try:
-        from openpyxl.styles import Font
+        from openpyxl.styles import Alignment, Font
     except Exception:  # pragma: no cover - وابستگی اختیاری
         Font = None  # type: ignore[assignment]
+        Alignment = None  # type: ignore[assignment]
 
     workbook = writer.book  # type: ignore[attr-defined]
     for sheet_name, df in sheet_frames.items():
         worksheet = workbook[sheet_name]
         if rtl:
             worksheet.sheet_view.rightToLeft = True
-        if not font_name or Font is None:
+        if not font_name and Alignment is None:
             continue
 
-        header_font = Font(name=font_name)
-        for cell in next(worksheet.iter_rows(min_row=1, max_row=1), []):
-            cell.font = header_font
-        if df.empty:
-            continue
+        header_font = (
+            Font(name=font_name, size=8)
+            if font_name and Font is not None
+            else None
+        )
+        cell_alignment = (
+            Alignment(horizontal="center", vertical="center")
+            if Alignment is not None
+            else None
+        )
 
-        text_columns = [
-            idx
-            for idx, dtype in enumerate(df.dtypes, start=1)
-            if pd.api.types.is_string_dtype(dtype) or str(dtype) in {"object", "string"}
-        ]
-        max_rows = min(len(df) + 1, 50)
-        for col_idx in text_columns:
-            for row in worksheet.iter_rows(
-                min_row=2,
-                max_row=max_rows,
-                min_col=col_idx,
-                max_col=col_idx,
-            ):
-                for cell in row:
+        max_row = max(worksheet.max_row, len(df) + 1)
+        max_col = worksheet.max_column
+        for row in worksheet.iter_rows(min_row=1, max_row=max_row, min_col=1, max_col=max_col):
+            for cell in row:
+                if header_font is not None:
                     cell.font = header_font
+                if cell_alignment is not None:
+                    cell.alignment = cell_alignment
 
 
 @contextlib.contextmanager
@@ -304,6 +385,11 @@ def write_xlsx_atomic(
                 df.to_excel(writer, sheet_name=safe_name, index=False)
                 written_frames[safe_name] = df
 
+            _apply_excel_tables(
+                writer,
+                engine=engine,
+                sheet_frames=written_frames,
+            )
             _apply_excel_formatting(
                 writer,
                 engine=engine,

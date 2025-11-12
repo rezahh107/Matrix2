@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
 from numbers import Number
+from pathlib import Path
+import re
+import unicodedata
 from typing import Any, Dict, Mapping
 
 import pandas as pd
@@ -47,7 +48,26 @@ def natural_key(value: Any) -> tuple[Any, ...]:
         if token.isdigit():
             if not parts:
                 parts.append("")
-            parts.append(int(token))
+            try:
+                numeric_value = int(token)
+            except ValueError:
+                normalized_digits: list[str] = []
+                convertible = True
+                for char in token:
+                    if not char.isdigit():
+                        convertible = False
+                        break
+                    try:
+                        normalized_digits.append(str(unicodedata.digit(char)))
+                    except (ValueError, TypeError):
+                        convertible = False
+                        break
+                if not convertible or not normalized_digits:
+                    parts.append(token.lower())
+                    has_text = True
+                    continue
+                numeric_value = int("".join(normalized_digits))
+            parts.append(numeric_value)
         else:
             parts.append(token.lower())
             has_text = True
