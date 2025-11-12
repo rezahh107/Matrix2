@@ -6,6 +6,7 @@ Public API:
 - normalize_fa(text: Any) -> str
 - to_numlike_str(value: Any) -> str
 - ensure_list(values: Iterable[Any]) -> List[str]
+- strip_school_code_separators(text: str) -> str
 
 Design notes:
 - Side-effect free on import and on inputs.
@@ -46,6 +47,24 @@ _SEP_SPLIT = re.compile(r"[,\|،؛]+")
 _ARABIC_TO_PERSIAN = str.maketrans({"ي": "ی", "ك": "ک"})
 _PERSIAN_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
+_SCHOOL_CODE_SEPARATOR_TRANSLATION = str.maketrans(
+    {
+        "-": " ",
+        "−": " ",  # minus sign
+        "‑": " ",  # non-breaking hyphen
+        "–": " ",  # en dash
+        "—": " ",  # em dash
+        "―": " ",  # horizontal bar
+        "﹘": " ",  # small em dash
+        "﹣": " ",  # small hyphen-minus
+        "／": " ",  # full-width slash
+        "/": " ",
+        "\\": " ",
+        "⁄": " ",
+        "ـ": "",  # kashida
+    }
+)
+
 # Arabic-Indic (0660–0669) and Extended Arabic-Indic (06F0–06F9) → ASCII digits
 _DIGIT_TRANSLATION: Dict[int, int] = {
     **{ord(chr(0x0660 + i)): ord(str(i)) for i in range(10)},
@@ -64,6 +83,18 @@ _NUM_SYM_TRANSLATION: Dict[int, int | None] = {
     ord("\u00A0"): None,      # NBSP
     ord(" "): None,           # plain space (numeric path only)
 }
+
+
+def strip_school_code_separators(text: str) -> str:
+    """حذف جداکننده‌های متداول «کد مدرسه» پیش از تبدیل به مقدار عددی.
+
+    مثال::
+
+        >>> strip_school_code_separators("35-81")
+        '35 81'
+    """
+
+    return text.translate(_SCHOOL_CODE_SEPARATOR_TRANSLATION)
 
 # Minimal Arabic → Persian letter fixes
 _AR2FA_MAP: Dict[str, str] = {
@@ -599,4 +630,5 @@ __all__ = [
     "sanitize_bidi",
     "fa_digitize",
     "safe_truncate",
+    "strip_school_code_separators",
 ]

@@ -9,7 +9,7 @@ from typing import Collection, Dict, Iterable, List, Literal, Mapping, Sequence
 import pandas as pd
 
 from app.core.policy_loader import get_policy
-from .normalization import normalize_fa, to_numlike_str
+from .normalization import normalize_fa, strip_school_code_separators, to_numlike_str
 
 __all__ = [
     "CANON_EN_TO_FA",
@@ -215,6 +215,7 @@ def sanitize_digits(series: pd.Series | None) -> pd.Series:
     text = text.fillna("")
     text = text.str.replace(_BIDI_PATTERN, "", regex=True)
     text = text.str.translate(_DIGIT_TRANSLATION)
+    text = text.str.replace(" ", "", regex=False)
     text = text.str.strip()
     return text.astype("string")
 
@@ -277,6 +278,7 @@ def enrich_school_columns_en(df: pd.DataFrame) -> pd.DataFrame:
         raw = school_code_column.astype("string").str.strip()
     else:
         raw = pd.Series(pd.NA, dtype="string", index=index)
+    raw = raw.map(lambda value: strip_school_code_separators(value) if isinstance(value, str) else value)
     # حذف نسخه‌های قدیمی برای جلوگیری از ستون‌های تکراری
     result = result.drop(columns=[col for col in result.columns if col == "school_code_raw"], errors="ignore")
     result = result.drop(columns=[col for col in result.columns if col == "school_code"], errors="ignore")
@@ -433,7 +435,7 @@ def _identifier_to_string(value: object) -> object:
 def _clean_numeric(value: object) -> str:
     if pd.isna(value):
         return ""
-    text = normalize_fa(value)
+    text = strip_school_code_separators(normalize_fa(value))
     candidate = to_numlike_str(text)
     return candidate if candidate is not None else ""
 

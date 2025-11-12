@@ -27,6 +27,7 @@ from .domain import (
     COL_SCHOOL_NAME_3,
     COL_SCHOOL_NAME_4,
 )
+from .normalization import strip_school_code_separators
 from .utils import normalize_fa, to_numlike_str
 
 __all__ = ["ColumnNormalizationReport", "normalize_input_columns"]
@@ -80,7 +81,7 @@ def _is_relevant_column(name: str) -> bool:
 def _clean_numlike(value: object) -> str:
     if pd.isna(value):
         return ""
-    text = normalize_fa(value).replace(",", "")
+    text = strip_school_code_separators(normalize_fa(value)).replace(",", "")
     if not text:
         return ""
     try:
