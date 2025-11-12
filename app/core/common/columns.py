@@ -19,6 +19,7 @@ __all__ = [
     "ensure_required_columns",
     "coerce_semantics",
     "canonicalize_headers",
+    "ensure_series",
     "collect_aliases_for",
     "accepted_synonyms",
     "sanitize_digits",
@@ -29,6 +30,35 @@ __all__ = [
 
 Source = Literal["report", "inspactor", "school"]
 HeaderMode = Literal["fa", "en", "fa_en"]
+
+
+def ensure_series(values: pd.Series | pd.DataFrame) -> pd.Series:
+    """تضمین می‌کند ورودی ستونی به‌صورت Series یک‌بعدی بازگردد.
+
+    این تابع برای سناریوهایی مفید است که بر اثر ستون‌های تکراری یا خروجی‌های
+    چندستونه، انتخاب یک ستون با نام مشخص `DataFrame` بازمی‌گرداند. در این حالت
+    تنها نخستین ستون حفظ می‌شود تا توابعی نظیر :func:`pandas.to_numeric`
+    ورودی سازگار دریافت کنند.
+
+    مثال::
+
+        >>> import pandas as pd
+        >>> df = pd.DataFrame([[1, 2]], columns=["x", "x"])
+        >>> ensure_series(df["x"]).tolist()
+        [1]
+
+    Args:
+        values: Series یا DataFrame انتخاب‌شده از روی ستون.
+
+    Returns:
+        pd.Series: ستون یک‌بعدی هم‌تراز با index ورودی.
+    """
+
+    if isinstance(values, pd.DataFrame):
+        if values.shape[1] == 0:
+            return pd.Series([pd.NA] * len(values), index=values.index, dtype="object")
+        return values.iloc[:, 0]
+    return values
 
 
 # ---------------------------------------------------------------------------
