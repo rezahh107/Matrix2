@@ -7,7 +7,7 @@ from typing import Sequence
 
 import pandas as pd
 
-from app.core.common.columns import canonicalize_headers
+from app.core.common.columns import canonicalize_headers, ensure_series
 from app.core.common.normalization import fa_digitize, sanitize_bidi, safe_truncate
 from app.core.common.policy import (
     SelectionReasonLabels,
@@ -147,7 +147,8 @@ def build_selection_reason_rows(
     if missing_keys:
         raise KeyError(f"students missing join keys: {missing_keys}")
     for key in policy.join_keys:
-        coerced = pd.to_numeric(students_fa[key], errors="coerce")
+        series = ensure_series(students_fa[key])
+        coerced = pd.to_numeric(series, errors="coerce")
         if coerced.isna().any():
             raise ValueError(f"students join key '{key}' contains non-integer values")
 
@@ -166,11 +167,11 @@ def build_selection_reason_rows(
     else:
         allocations_en["mentor_id"] = ""
 
-    student_index_key = (
-        students_en["student_id"].astype("string")
-        if "student_id" in students_en.columns
-        else pd.Index(students_en.index.map(str))
-    )
+    if "student_id" in students_en.columns:
+        student_id_series = ensure_series(students_en["student_id"]).astype("string")
+        student_index_key = student_id_series
+    else:
+        student_index_key = pd.Index(students_en.index.map(str))
     students_index = students_en.set_index(student_index_key, drop=False)
 
     def _alias(column: str) -> str:
@@ -184,6 +185,8 @@ def build_selection_reason_rows(
         if student_id not in students_index.index:
             return ""
         row = students_index.loc[student_id]
+        if isinstance(row, pd.DataFrame):
+            row = row.iloc[0]
         for column in columns:
             if column and column in row.index:
                 value = row.get(column)
