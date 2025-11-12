@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.allocate_students import (
     _normalize_pool,
     allocate_batch,
+    allocate_student,
     build_selection_reason_rows,
 )
 from app.core.common.types import JoinKeyValues
@@ -60,6 +61,22 @@ def _single_student(**overrides: object) -> pd.DataFrame:
     }
     base.update(overrides)
     return pd.DataFrame([base])
+
+
+def test_allocate_student_dict_missing_school_field_skips_filter(
+    _base_pool: pd.DataFrame,
+) -> None:
+    student_row = _single_student().iloc[0].to_dict()
+    student_row.pop("کد_مدرسه")
+    student_row["school_code_norm"] = None
+
+    result = allocate_student(student_row, _base_pool)
+
+    assert result.log["allocation_status"] == "success"
+    assert result.log["error_type"] is None
+    assert result.log["join_keys"]["کد_مدرسه"] == 0
+    school_trace = next(stage for stage in result.trace if stage["stage"] == "school")
+    assert school_trace["total_after"] == school_trace["total_before"]
 
 
 def test_allocate_batch_no_match_sets_error(_base_pool: pd.DataFrame) -> None:

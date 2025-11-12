@@ -18,7 +18,11 @@ from .common.columns import (
     ensure_series,
     resolve_aliases,
 )
-from .common.filters import apply_join_filters
+from .common.filters import (
+    StudentSchoolCode,
+    apply_join_filters,
+    resolve_student_school_code,
+)
 from .common.ids import build_mentor_id_map, inject_mentor_id, natural_key
 from .common.normalization import normalize_fa, to_numlike_str
 from .common.ranking import apply_ranking_policy, build_mentor_state, consume_capacity
@@ -124,29 +128,30 @@ def _collect_join_key_map(
     join_map: Dict[str, int] = {}
     missing_columns: list[str] = []
     school_column = policy.columns.school_code
+    school_code_resolved: StudentSchoolCode | None = None
     for column in policy.join_keys:
         normalized = column.replace(" ", "_")
         allow_zero = policy.school_code_empty_as_zero and column == school_column
+        if allow_zero:
+            if school_code_resolved is None:
+                school_code_resolved = resolve_student_school_code(student, policy)
+            school_code = school_code_resolved
+            if school_code.missing:
+                join_map[normalized] = -1
+                missing_columns.append(column)
+            else:
+                join_map[normalized] = int(school_code.value or 0)
+            continue
         try:
             value = _student_value(student, column)
         except KeyError:
-            if allow_zero:
-                join_map[normalized] = 0
-                continue
             join_map[normalized] = -1
             missing_columns.append(column)
-            continue
-
-        if allow_zero and pd.isna(value):  # type: ignore[arg-type]
-            join_map[normalized] = 0
             continue
 
         try:
             join_map[normalized] = _coerce_int(value)
         except ValueError:
-            if allow_zero:
-                join_map[normalized] = 0
-                continue
             join_map[normalized] = -1
             missing_columns.append(column)
     return join_map, tuple(missing_columns)
