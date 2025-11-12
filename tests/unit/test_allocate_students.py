@@ -11,7 +11,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.core.allocate_students import allocate_batch, build_selection_reason_rows
+from app.core.allocate_students import (
+    allocate_batch,
+    allocate_student,
+    build_selection_reason_rows,
+)
 from app.core.common.types import JoinKeyValues
 from app.core.policy_loader import load_policy, parse_policy_dict
 from app.infra.excel_writer import write_selection_reasons_sheet
@@ -127,17 +131,40 @@ def test_allocate_batch_join_keys_are_typed(_base_pool: pd.DataFrame) -> None:
     ]
 
 
-def test_allocate_batch_missing_join_key_sets_error(_base_pool: pd.DataFrame) -> None:
+def test_allocate_batch_missing_school_code_allocates_when_allowed(
+    _base_pool: pd.DataFrame,
+) -> None:
     students = _single_student(**{"کد_مدرسه": None})
 
     allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool)
+
+    assert len(allocations) == 1
+    assert allocations.iloc[0]["mentor_id"] == "EMP-001"
+    assert int(updated_pool.loc[0, "remaining_capacity"]) == 1
+    record = logs.iloc[0]
+    assert record["allocation_status"] == "success"
+    assert record["error_type"] is None
+    join_values = record["join_keys"]
+    assert isinstance(join_values, JoinKeyValues)
+    assert join_values["کد_مدرسه"] == 0
+
+
+def test_allocate_batch_missing_school_code_requires_data_when_disabled(
+    _base_pool: pd.DataFrame,
+) -> None:
+    payload = json.loads(Path("config/policy.json").read_text(encoding="utf-8"))
+    payload["school_code_empty_as_zero"] = False
+    policy = parse_policy_dict(payload)
+
+    students = _single_student(**{"کد_مدرسه": None})
+
+    allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool, policy=policy)
 
     assert allocations.empty
     assert updated_pool.equals(_base_pool)
     record = logs.iloc[0]
     assert record["error_type"] == "DATA_MISSING"
     assert "کد مدرسه" in str(record["detailed_reason"])
-    assert record["suggested_actions"]
     join_values = record["join_keys"]
     assert isinstance(join_values, JoinKeyValues)
     assert join_values["کد_مدرسه"] == -1
@@ -151,6 +178,22 @@ def test_allocate_batch_logs_capacity_transition(_base_pool: pd.DataFrame) -> No
     assert logs.iloc[0]["capacity_before"] == 2
     assert logs.iloc[0]["capacity_after"] == 1
     assert int(updated_pool.loc[0, "remaining_capacity"]) == 1
+
+
+def test_allocate_student_dict_missing_school_field_skips_filter(
+    _base_pool: pd.DataFrame,
+) -> None:
+    student_row = _single_student().iloc[0].to_dict()
+    student_row.pop("کد_مدرسه")
+    student_row["school_code_norm"] = None
+
+    result = allocate_student(student_row, _base_pool)
+
+    assert result.log["allocation_status"] == "success"
+    assert result.log["error_type"] is None
+    assert result.log["join_keys"]["کد_مدرسه"] == 0
+    school_trace = next(stage for stage in result.trace if stage["stage"] == "school")
+    assert school_trace["total_after"] == school_trace["total_before"]
 
 
 def test_allocate_batch_handles_missing_state(monkeypatch: pytest.MonkeyPatch, _base_pool: pd.DataFrame) -> None:

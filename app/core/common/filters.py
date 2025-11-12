@@ -34,11 +34,14 @@ pandas را اجرا می‌کند. هر تابع یکی از مراحل «Alloc
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from numbers import Number
 from typing import Callable, Mapping, Sequence
 
 import pandas as pd
 
 from ..policy_loader import PolicyConfig, load_policy
+from .normalization import to_numlike_str
 
 FilterFunc = Callable[[pd.DataFrame, Mapping[str, object], PolicyConfig], pd.DataFrame]
 
@@ -51,6 +54,8 @@ __all__ = [
     "filter_by_finance",
     "filter_by_school",
     "apply_join_filters",
+    "resolve_student_school_code",
+    "StudentSchoolCode",
 ]
 
 
@@ -79,6 +84,85 @@ def _filter_by_stage(
 ) -> pd.DataFrame:
     column = policy.stage_column(stage)
     return _eq_filter(pool, column, _student_value(student, column))
+
+
+def _coerce_school_candidate(value: object) -> tuple[int | None, bool]:
+    """تبدیل امن مقدار ستون مدرسه به int یا تشخیص کمبود داده."""
+
+    if value is None:
+        return None, True
+    if isinstance(value, Number):
+        if pd.isna(value):  # type: ignore[arg-type]
+            return None, True
+        try:
+            return int(value), False
+        except (TypeError, ValueError):
+            return None, True
+    text = to_numlike_str(value).strip()
+    if not text:
+        return None, True
+    try:
+        return int(float(text)), False
+    except ValueError:
+        return None, True
+
+
+@dataclass(frozen=True)
+class StudentSchoolCode:
+    """نتیجهٔ استخراج کد مدرسهٔ دانش‌آموز با توجه به Policy."""
+
+    value: int | None
+    missing: bool
+    wildcard: bool
+
+
+def resolve_student_school_code(
+    student: Mapping[str, object],
+    policy: PolicyConfig,
+) -> StudentSchoolCode:
+    """بازیابی کد مدرسه دانش‌آموز با درنظرگرفتن فallback Policy.
+
+    مثال ساده::
+
+        >>> from app.core.common.filters import resolve_student_school_code
+        >>> from app.core.policy_loader import load_policy
+        >>> policy = load_policy()
+        >>> student = {"school_code_norm": None}
+        >>> resolve_student_school_code(student, policy).value
+        0
+
+    Returns:
+        نمونهٔ ``StudentSchoolCode`` شامل مقدار نرمال‌شده، پرچم کمبود داده و
+        وضعیت wildcard برای عبور از فیلتر مدرسه.
+    """
+
+    column = policy.stage_column("school")
+    allow_zero = policy.school_code_empty_as_zero and (
+        column == policy.columns.school_code
+    )
+    normalized = column.replace(" ", "_")
+    candidate_keys = (
+        column,
+        normalized,
+        "school_code_norm",
+        "school_code",
+        "school_code_raw",
+    )
+    candidates: list[object] = []
+    for key in candidate_keys:
+        if key in student:
+            candidates.append(student[key])
+
+    for candidate in candidates:
+        value, missing = _coerce_school_candidate(candidate)
+        if not missing:
+            wildcard = bool(allow_zero and value == 0)
+            return StudentSchoolCode(value=value, missing=False, wildcard=wildcard)
+
+    if allow_zero:
+        return StudentSchoolCode(value=0, missing=False, wildcard=True)
+
+    return StudentSchoolCode(value=None, missing=True, wildcard=False)
 
 
 def filter_by_type(
@@ -162,7 +246,16 @@ def filter_by_school(
 
     if policy is None:
         policy = load_policy()
-    return _filter_by_stage(pool, student, policy, "school")
+    column = policy.stage_column("school")
+    allow_zero = policy.school_code_empty_as_zero and (
+        column == policy.columns.school_code
+    )
+    school_code = resolve_student_school_code(student, policy)
+    if school_code.missing or school_code.wildcard:
+        return pool
+    if school_code.value is None:
+        return pool
+    return _eq_filter(pool, column, school_code.value)
 
 
 def apply_join_filters(

@@ -50,4 +50,7 @@ def test_school_status_false_for_zero_or_empty() -> None:
     assert statuses == [0, 0]
     norm_values = normalized["school_code_norm"].tolist()
     assert norm_values[0] == 0
-    assert pd.isna(norm_values[1])
+    if policy.school_code_empty_as_zero:
+        assert norm_values[1] == 0
+    else:
+        assert pd.isna(norm_values[1])

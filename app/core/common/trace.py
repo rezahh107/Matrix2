@@ -30,6 +30,7 @@ from typing import Any, Iterable, List, Mapping, Sequence
 import pandas as pd
 
 from ..policy_loader import PolicyConfig, load_policy
+from .filters import resolve_student_school_code
 from .columns import normalize_bool_like, to_int64
 from .types import StudentRow, TraceStageLiteral, TraceStageRecord
 
@@ -159,14 +160,16 @@ def _school_stage_filter(
     frame: pd.DataFrame,
     column: str,
     student: Mapping[str, object],
+    policy: PolicyConfig,
 ) -> tuple[pd.DataFrame, dict[str, Any], object]:
-    value = _student_value(student, column)
-    norm_candidate = student.get("school_code_norm", value)
-    norm_value = _coerce_optional_int(norm_candidate)
+    code = resolve_student_school_code(student, policy)
+    norm_value = code.value
     status = _resolve_school_status(student, norm_value)
     raw = _string_or_none(student.get("school_code_raw"))
 
-    if status:
+    if code.wildcard or code.missing:
+        filtered = frame
+    elif status:
         if norm_value is not None:
             filtered = frame.loc[frame[column] == norm_value]
         else:
@@ -215,7 +218,9 @@ def build_allocation_trace(
         expected_threshold: object | None = None
         extras: Mapping[str, Any] | None = None
         if plan.stage == "school":
-            filtered, extras, norm_value = _school_stage_filter(current, plan.column, student)
+            filtered, extras, norm_value = _school_stage_filter(
+                current, plan.column, student, policy
+            )
             expected_value = norm_value
             expected_op = ">"
             expected_threshold = 0
