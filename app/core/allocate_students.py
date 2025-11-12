@@ -11,6 +11,7 @@ import pandas as pd
 from .common.column_normalizer import normalize_input_columns
 from .common.columns import (
     CANON_EN_TO_FA,
+    CANON_FA_TO_EN,
     canonicalize_headers,
     coerce_semantics,
     enrich_school_columns_en,
@@ -19,7 +20,7 @@ from .common.columns import (
 )
 from .common.filters import apply_join_filters
 from .common.ids import build_mentor_id_map, inject_mentor_id, natural_key
-from .common.normalization import to_numlike_str
+from .common.normalization import normalize_fa, to_numlike_str
 from .common.ranking import apply_ranking_policy, build_mentor_state, consume_capacity
 from .common.trace import TraceStagePlan, build_allocation_trace, build_trace_plan
 from .common.types import AllocationLogRecord, JoinKeyValues, TraceStageRecord
@@ -93,6 +94,28 @@ def _student_value(student: Mapping[str, object], column: str) -> object:
     if normalized in student:
         return student[normalized]
     raise KeyError(f"Student row missing value for '{column}'")
+
+
+def _append_bilingual_alias_columns(
+    frame: pd.DataFrame, policy: PolicyConfig
+) -> pd.DataFrame:
+    """افزودن ستون‌های دوزبانه برای کلیدهای Join و ستون‌های حیاتی."""
+
+    alias_targets = list(dict.fromkeys(policy.join_keys))
+    result = frame.copy()
+    for fa_name in alias_targets:
+        if fa_name not in result.columns:
+            continue
+        normalized_key = normalize_fa(fa_name)
+        en_name = CANON_FA_TO_EN.get(normalized_key)
+        if not en_name or en_name == fa_name:
+            continue
+        bilingual = f"{fa_name} | {en_name}"
+        if bilingual in result.columns:
+            continue
+        insert_at = result.columns.get_loc(fa_name) + 1
+        result.insert(insert_at, bilingual, result[fa_name].copy())
+    return result
 
 
 def _collect_join_key_map(
@@ -236,7 +259,7 @@ def _normalize_pool(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
                 .fillna(0)
                 .astype("Int64")
             )
-    return normalized
+    return _append_bilingual_alias_columns(normalized, policy)
 
 
 def allocate_student(
@@ -449,6 +472,9 @@ def allocate_batch(
 
     students_norm = _normalize_students(students, policy)
     pool_norm = _normalize_pool(candidate_pool, policy)
+    extra_columns = [
+        column for column in pool_norm.columns if column not in candidate_pool.columns
+    ]
     pool_with_ids = inject_mentor_id(pool_norm, build_mentor_id_map(pool_norm))
     if "allocations_new" not in pool_with_ids.columns:
         pool_with_ids["allocations_new"] = 0
@@ -456,6 +482,7 @@ def allocate_batch(
         pool_with_ids["occupancy_ratio"] = 0.0
 
     pool_internal = canonicalize_headers(pool_with_ids, header_mode="en")
+    pool_internal = pool_internal.loc[:, ~pool_internal.columns.duplicated(keep="first")]
     if capacity_internal not in pool_internal.columns:
         pool_internal[capacity_internal] = 0
     if "allocations_new" not in pool_internal.columns:
@@ -547,10 +574,13 @@ def allocate_batch(
 
     pool_output = pool_with_ids.copy()
     original_columns = list(candidate_pool.columns)
-    for column in original_columns:
+    desired_columns = original_columns + [
+        column for column in extra_columns if column not in original_columns
+    ]
+    for column in desired_columns:
         if column not in pool_output.columns:
             pool_output[column] = pd.NA
-    pool_output = pool_output.loc[:, original_columns]
+    pool_output = pool_output.loc[:, desired_columns]
 
     for column in original_columns:
         if column in candidate_pool.columns:
