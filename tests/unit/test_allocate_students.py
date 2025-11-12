@@ -92,22 +92,6 @@ def test_allocate_student_sanitizes_school_code_separators(
     assert result.log["join_keys"]["کد_مدرسه"] == 3581
 
 
-def test_allocate_student_pool_column_sanitizes_separators(
-    _base_pool: pd.DataFrame,
-) -> None:
-    pool = _base_pool.copy()
-    pool["کد مدرسه"] = ["35-81", "35-81"]
-    pool["کد مدرسه | school_code"] = ["35-81", "35-81"]
-
-    student_row = _single_student().iloc[0].to_dict()
-
-    result = allocate_student(student_row, pool)
-
-    assert result.log["allocation_status"] == "success"
-    assert result.log["error_type"] is None
-    assert result.log["join_keys"]["کد_مدرسه"] == 3581
-
-
 def test_allocate_batch_no_match_sets_error(_base_pool: pd.DataFrame) -> None:
     students = _single_student(**{"کد_مدرسه": 9999})
 

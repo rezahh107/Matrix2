@@ -43,6 +43,24 @@ import pandas as pd
 from ..policy_loader import PolicyConfig, load_policy
 from .normalization import strip_school_code_separators, to_numlike_str
 
+_SCHOOL_CODE_TRANSLATION = str.maketrans(
+    {
+        "-": " ",
+        "−": " ",  # minus sign
+        "‑": " ",  # non-breaking hyphen
+        "–": " ",  # en dash
+        "—": " ",  # em dash
+        "―": " ",  # horizontal bar
+        "﹘": " ",  # small em dash
+        "﹣": " ",  # small hyphen-minus
+        "／": " ",  # full-width slash
+        "/": " ",
+        "\\": " ",
+        "⁄": " ",
+        "ـ": "",  # kashida
+    }
+)
+
 
 @dataclass(frozen=True)
 class StudentSchoolCode:
@@ -72,7 +90,7 @@ def _coerce_school_candidate(candidate: object) -> tuple[int | None, bool]:
         except Exception:
             return None, True
     if isinstance(candidate, str):
-        candidate = strip_school_code_separators(candidate)
+        candidate = candidate.translate(_SCHOOL_CODE_TRANSLATION)
     text = to_numlike_str(candidate).strip()
     if not text:
         return None, True
