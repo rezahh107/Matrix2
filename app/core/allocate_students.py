@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from numbers import Number
-from typing import Callable, Dict, List, Mapping, Sequence
+from typing import Callable, Dict, List, Mapping, Sequence, Tuple
 
 import pandas as pd
 
@@ -50,6 +50,17 @@ class AllocationResult:
     log: AllocationLogRecord
 
 
+class JoinKeyDataMissingError(ValueError):
+    """خطای اختصاصی برای کمبود دادهٔ کلیدهای Join در ورودی دانش‌آموز."""
+
+    def __init__(
+        self, missing_columns: Sequence[str], join_map: Mapping[str, int]
+    ) -> None:
+        super().__init__("DATA_MISSING")
+        self.missing_columns: Tuple[str, ...] = tuple(missing_columns)
+        self.join_map: Dict[str, int] = dict(join_map)
+
+
 def _resolve_capacity_column(policy: PolicyConfig, override: str | None) -> str:
     if override:
         return override
@@ -84,11 +95,24 @@ def _student_value(student: Mapping[str, object], column: str) -> object:
     raise KeyError(f"Student row missing value for '{column}'")
 
 
-def _build_log_base(student: Mapping[str, object], policy: PolicyConfig) -> AllocationLogRecord:
-    join_map = {
-        column.replace(" ", "_"): _coerce_int(_student_value(student, column))
-        for column in policy.join_keys
-    }
+def _collect_join_key_map(
+    student: Mapping[str, object], policy: PolicyConfig
+) -> tuple[Dict[str, int], Tuple[str, ...]]:
+    join_map: Dict[str, int] = {}
+    missing_columns: list[str] = []
+    for column in policy.join_keys:
+        normalized = column.replace(" ", "_")
+        try:
+            join_map[normalized] = _coerce_int(_student_value(student, column))
+        except (KeyError, ValueError):
+            join_map[normalized] = -1
+            missing_columns.append(column)
+    return join_map, tuple(missing_columns)
+
+
+def _build_log_from_join_map(
+    student: Mapping[str, object], join_map: Mapping[str, int]
+) -> AllocationLogRecord:
     log: AllocationLogRecord = {
         "row_index": -1,
         "student_id": str(student.get("student_id", "")),
@@ -107,6 +131,13 @@ def _build_log_base(student: Mapping[str, object], policy: PolicyConfig) -> Allo
         "capacity_after": None,
     }
     return log
+
+
+def _build_log_base(student: Mapping[str, object], policy: PolicyConfig) -> AllocationLogRecord:
+    join_map, missing = _collect_join_key_map(student, policy)
+    if missing:
+        raise JoinKeyDataMissingError(missing, join_map)
+    return _build_log_from_join_map(student, join_map)
 
 
 def _normalize_students(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
@@ -211,7 +242,24 @@ def allocate_student(
         capacity_column=resolved_capacity_column,
     )
 
-    log = _build_log_base(student, policy)
+    try:
+        log = _build_log_base(student, policy)
+    except JoinKeyDataMissingError as exc:
+        log = _build_log_from_join_map(student, exc.join_map)
+        log["candidate_count"] = int(eligible.shape[0])
+        missing_text = ", ".join(exc.missing_columns)
+        log.update(
+            {
+                "error_type": "DATA_MISSING",
+                "detailed_reason": f"Missing student join key data: {missing_text}",
+                "suggested_actions": [
+                    "تکمیل دادهٔ دانش‌آموز",
+                    "بازبینی StudentReport",
+                ],
+            }
+        )
+        return AllocationResult(None, trace, log)
+
     log["candidate_count"] = int(eligible.shape[0])
 
     if eligible.empty:

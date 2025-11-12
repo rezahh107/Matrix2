@@ -127,6 +127,22 @@ def test_allocate_batch_join_keys_are_typed(_base_pool: pd.DataFrame) -> None:
     ]
 
 
+def test_allocate_batch_missing_join_key_sets_error(_base_pool: pd.DataFrame) -> None:
+    students = _single_student(**{"کد_مدرسه": None})
+
+    allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool)
+
+    assert allocations.empty
+    assert updated_pool.equals(_base_pool)
+    record = logs.iloc[0]
+    assert record["error_type"] == "DATA_MISSING"
+    assert "کد مدرسه" in str(record["detailed_reason"])
+    assert record["suggested_actions"]
+    join_values = record["join_keys"]
+    assert isinstance(join_values, JoinKeyValues)
+    assert join_values["کد_مدرسه"] == -1
+
+
 def test_allocate_batch_logs_capacity_transition(_base_pool: pd.DataFrame) -> None:
     students = _single_student()
 
@@ -159,11 +175,16 @@ def test_allocate_batch_handles_missing_state(monkeypatch: pytest.MonkeyPatch, _
     assert "missing" in str(record["detailed_reason"]).lower()
 
 
-def test_allocate_batch_invalid_join_value_raises(_base_pool: pd.DataFrame) -> None:
+def test_allocate_batch_invalid_join_value_sets_error(_base_pool: pd.DataFrame) -> None:
     students = _single_student(**{"کدرشته": ""})
 
-    with pytest.raises(ValueError):
-        allocate_batch(students, _base_pool)
+    allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool)
+
+    assert allocations.empty
+    assert updated_pool.equals(_base_pool)
+    record = logs.iloc[0]
+    assert record["error_type"] == "DATA_MISSING"
+    assert "کدرشته" in str(record["detailed_reason"])
 
 
 def test_policy_required_fields_enforced_from_config(
