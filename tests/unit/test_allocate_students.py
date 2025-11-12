@@ -127,7 +127,7 @@ def test_allocate_batch_join_keys_are_typed(_base_pool: pd.DataFrame) -> None:
     ]
 
 
-def test_allocate_batch_missing_school_code_allocates_when_allowed(
+def test_allocate_batch_missing_school_code_defaults_to_zero(
     _base_pool: pd.DataFrame,
 ) -> None:
     students = _single_student(**{"کد_مدرسه": None})
@@ -140,6 +140,27 @@ def test_allocate_batch_missing_school_code_allocates_when_allowed(
     record = logs.iloc[0]
     assert record["allocation_status"] == "success"
     assert record["error_type"] is None
+    join_values = record["join_keys"]
+    assert isinstance(join_values, JoinKeyValues)
+    assert join_values["کد_مدرسه"] == 0
+
+
+def test_allocate_batch_missing_school_code_requires_data_when_disabled(
+    _base_pool: pd.DataFrame,
+) -> None:
+    payload = json.loads(Path("config/policy.json").read_text(encoding="utf-8"))
+    payload["school_code_empty_as_zero"] = False
+    policy = parse_policy_dict(payload)
+
+    students = _single_student(**{"کد_مدرسه": None})
+
+    allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool, policy=policy)
+
+    assert allocations.empty
+    assert updated_pool.equals(_base_pool)
+    record = logs.iloc[0]
+    assert record["error_type"] == "ELIGIBILITY_NO_MATCH"
+    assert record["detailed_reason"] == "No candidates matched join keys"
     join_values = record["join_keys"]
     assert isinstance(join_values, JoinKeyValues)
     assert join_values["کد_مدرسه"] == 0
