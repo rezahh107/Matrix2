@@ -537,87 +537,166 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
     return 0
 
 
-def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn) -> int:
-    """اجرای فرمان تخصیص دانش‌آموزان با خروجی Excel."""
+def _load_matrix_candidate_pool(matrix_path: Path, policy: PolicyConfig) -> pd.DataFrame:
+    """خواندن شیت ماتریس و آماده‌سازی آن به‌عنوان استخر منتورها.
 
-    students_path = Path(args.students)
-    pool_path = Path(args.pool)
-    output = Path(args.output)
-    capacity_column = args.capacity_column or policy.columns.remaining_capacity
+    مثال::
 
-    reader_students = _detect_reader(students_path)
-    reader_pool = _detect_reader(pool_path)
+        >>> from pathlib import Path
+        >>> import pandas as pd
+        >>> sample = Path("matrix.xlsx")
+        >>> _ = pd.DataFrame({
+        ...     "mentor_name": ["مجازی", "علی"],
+        ...     "alias": [7501, 102],
+        ...     "remaining_capacity": [0, 3],
+        ... }).to_excel(sample, sheet_name="matrix", index=False)  # doctest: +SKIP
+        >>> policy = load_policy()  # doctest: +SKIP
+        >>> sanitized = _load_matrix_candidate_pool(sample, policy)  # doctest: +SKIP
+        >>> int(sanitized.loc[0, "remaining_capacity"])  # doctest: +SKIP
+        3
 
-    progress(0, "loading inputs")
-    students_df = reader_students(students_path)
-    pool_df = reader_pool(pool_path)
-    pool_df = _sanitize_pool_for_allocation(pool_df, policy=policy)
+    Args:
+        matrix_path: مسیر فایل ماتریس ساخته‌شده توسط build-matrix.
+        policy: سیاست فعال برای نرمال‌سازی و اعمال فیلترهای مجازی.
 
-    # --- تکمیل داده‌های دانش‌آموزان بر اساس فایل ورودی واقعی (Report (1).xlsx) ---
-    # بر اساس محتوای واقعی فایل، ستون‌های لازم را ایجاد می‌کنیم
-    
-    # 1. کدرشته: از group_code
-    if 'group_code' in students_df.columns:
-        students_df['کدرشته'] = students_df['group_code']
-    else:
-        students_df['کدرشته'] = 0
-    
-    # 2. گروه آزمایشی: در فایل وجود ندارد، مقدار پیش‌فرض
-    students_df['گروه آزمایشی'] = "نامشخص"
-    
-    # 3. جنسیت: از فایل (به شرط وجود)
-    if 'جنسیت' not in students_df.columns and 'جنسیت' in students_df.columns:
-        students_df['جنسیت'] = students_df['جنسیت']
-    elif 'جنسیت' not in students_df.columns:
-        students_df['جنسیت'] = 1  # 1 برای پسر، 2 برای دختر (مقدار پیش‌فرض)
-    
-    # 4. دانش آموز فارغ: از وضعیت تحصیلی
-    if 'وضعیت تحصیلی' in students_df.columns:
-        students_df['دانش آموز فارغ'] = students_df['وضعیت تحصیلی']
-    else:
-        students_df['دانش آموز فارغ'] = 0  # 0 برای مشغول به تحصیل، 1 برای فارغ‌التحصیل
-    
-    # 5. مرکز گلستان صدرا: در فایل وجود ندارد، مقدار پیش‌فرض
-    students_df['مرکز گلستان صدرا'] = 0
-    
-    # 6. مالی حکمت بنیاد: در فایل وجود ندارد، مقدار پیش‌فرض
-    students_df['مالی حکمت بنیاد'] = 0
-    
-    # 7. کد مدرسه: در فایل وجود ندارد، مقدار پیش‌فرض
-    students_df['کد مدرسه'] = 0
-    
-    # --- اعمال نرمال‌سازی‌های استاندارد ---
-    students_df = resolve_aliases(students_df, "report")
-    students_df = coerce_semantics(students_df, "report")
-    students_df, _ = normalize_input_columns(
-        students_df, kind="StudentReport", include_alias=True, report=False
+    Returns:
+        DataFrame سازگار با allocate_batch که منتورهای مجازی را حذف کرده است.
+    """
+
+    if not matrix_path.exists():
+        raise FileNotFoundError(f"Matrix file not found: {matrix_path}")
+
+    try:
+        with pd.ExcelFile(matrix_path) as workbook:
+            if "matrix" not in workbook.sheet_names:
+                raise ValueError(
+                    "شیت 'matrix' در فایل ماتریس یافت نشد؛ build-matrix باید اجرا شده باشد."
+                )
+            frame = workbook.parse("matrix")
+    except FileNotFoundError:
+        raise
+    except Exception as exc:  # pragma: no cover - خطای خواندن پیش‌بینی‌نشده
+        raise ValueError(f"خطا در خواندن ماتریس {matrix_path}: {exc}") from exc
+
+    sanitized = _sanitize_pool_for_allocation(frame, policy=policy)
+    sanitized = resolve_aliases(sanitized, "inspactor")
+    sanitized = coerce_semantics(sanitized, "inspactor")
+    sanitized, _ = normalize_input_columns(
+        sanitized, kind="MentorMatrix", include_alias=True, report=False
+    )
+    return canonicalize_headers(
+        sanitized, header_mode=policy.excel.header_mode_internal
     )
 
-    pool_df = resolve_aliases(pool_df, "inspactor")
-    pool_df = coerce_semantics(pool_df, "inspactor")
-    pool_df, _ = normalize_input_columns(
-        pool_df, kind="MentorPool", include_alias=True, report=False
+
+def _prepare_allocation_frames(
+    students_df: pd.DataFrame,
+    pool_df: pd.DataFrame,
+    *,
+    policy: PolicyConfig,
+    sanitize_pool: bool = True,
+    pool_source: str = "inspactor",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """نرمال‌سازی ستون‌های ورودی برای اجرای تخصیص.
+
+    مثال::
+
+        >>> import pandas as pd
+        >>> students = pd.DataFrame({"student_id": [1]})
+        >>> pool = pd.DataFrame({"mentor_id": [10]})
+        >>> policy = load_policy()  # doctest: +SKIP
+        >>> prepared_students, prepared_pool = _prepare_allocation_frames(  # doctest: +SKIP
+        ...     students,
+        ...     pool,
+        ...     policy=policy,
+        ... )
+        >>> "student_id" in prepared_students.columns  # doctest: +SKIP
+        True
+
+    Args:
+        students_df: دیتافریم خام دانش‌آموزان.
+        pool_df: دیتافریم خام یا نیمه‌نرمال منتورها.
+        policy: سیاست فعال برای اعمال استانداردها.
+        sanitize_pool: در صورت True، منتورهای مجازی حذف می‌شوند.
+        pool_source: نوع ورودی برای نگاشت ستون‌ها (report/inspactor).
+
+    Returns:
+        دو دیتافریم آماده برای ارسال به allocate_batch.
+    """
+
+    students = students_df.copy(deep=True)
+    pool = pool_df.copy(deep=True)
+
+    if sanitize_pool:
+        pool = _sanitize_pool_for_allocation(pool, policy=policy)
+
+    if "کدرشته" not in students.columns:
+        if "group_code" in students.columns:
+            students["کدرشته"] = students["group_code"]
+        else:
+            students["کدرشته"] = 0
+    if "گروه آزمایشی" not in students.columns:
+        students["گروه آزمایشی"] = "نامشخص"
+    if "جنسیت" not in students.columns:
+        if "gender" in students.columns:
+            students["جنسیت"] = students["gender"]
+        else:
+            students["جنسیت"] = 1
+    if "دانش آموز فارغ" not in students.columns:
+        if "وضعیت تحصیلی" in students.columns:
+            students["دانش آموز فارغ"] = students["وضعیت تحصیلی"]
+        else:
+            students["دانش آموز فارغ"] = 0
+    if "مرکز گلستان صدرا" not in students.columns:
+        students["مرکز گلستان صدرا"] = 0
+    if "مالی حکمت بنیاد" not in students.columns:
+        students["مالی حکمت بنیاد"] = 0
+    if "کد مدرسه" not in students.columns:
+        students["کد مدرسه"] = 0
+
+    students = resolve_aliases(students, "report")
+    students = coerce_semantics(students, "report")
+    students, _ = normalize_input_columns(
+        students, kind="StudentReport", include_alias=True, report=False
     )
 
-    # Normalize mentor_id to string
-    if "کد کارمندی پشتیبان" in pool_df.columns:
-        pool_df["کد کارمندی پشتیبان"] = (
-            pool_df["کد کارمندی پشتیبان"].fillna("").astype(str).str.strip()
+    pool = resolve_aliases(pool, pool_source)  # type: ignore[arg-type]
+    pool = coerce_semantics(pool, pool_source)  # type: ignore[arg-type]
+    pool, _ = normalize_input_columns(
+        pool,
+        kind="MentorPool" if pool_source == "inspactor" else "MentorMatrix",
+        include_alias=True,
+        report=False,
+    )
+
+    if "کد کارمندی پشتیبان" in pool.columns:
+        pool["کد کارمندی پشتیبان"] = (
+            pool["کد کارمندی پشتیبان"].fillna("").astype(str).str.strip()
         )
     else:
-        # اگر ستون کد کارمندی نبود، یک ستون با مقادیر پیش‌فرض ایجاد می‌کنیم
-        pool_df["کد کارمندی پشتیبان"] = ["MENTOR_" + str(i) for i in range(len(pool_df))]
+        pool["کد کارمندی پشتیبان"] = [f"MENTOR_{i}" for i in range(len(pool))]
 
-    # اطمینان از وجود ستون‌های ضروری برای حالت‌های پیش‌فرض
-    if "occupancy_ratio" not in pool_df.columns:
-        pool_df["occupancy_ratio"] = 0.0
-    if "allocations_new" not in pool_df.columns:
-        pool_df["allocations_new"] = 0
-    if "remaining_capacity" not in pool_df.columns:
-        pool_df["remaining_capacity"] = 1  # ظرفیت پیش‌فرض 1
+    if "occupancy_ratio" not in pool.columns:
+        pool["occupancy_ratio"] = 0.0
+    if "allocations_new" not in pool.columns:
+        pool["allocations_new"] = 0
+    if "remaining_capacity" not in pool.columns:
+        pool["remaining_capacity"] = 1
 
-    students_base = students_df.copy(deep=True)
-    pool_base = pool_df.copy(deep=True)
+    return students, pool
+
+
+def _allocate_and_write(
+    students_base: pd.DataFrame,
+    pool_base: pd.DataFrame,
+    *,
+    args: argparse.Namespace,
+    policy: PolicyConfig,
+    progress: ProgressFn,
+    output: Path,
+    capacity_column: str,
+) -> int:
+    """اجرای تخصیص، الصاق شناسه‌ها و نوشتن خروجی‌های Excel."""
 
     student_ids, counter_summary = _inject_student_ids(students_base, args, policy)
     setattr(args, "_counter_summary", counter_summary)
@@ -732,8 +811,77 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
     return 0
 
 
+def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn) -> int:
+    """اجرای فرمان تخصیص دانش‌آموزان با خروجی Excel."""
+
+    students_path = Path(args.students)
+    pool_path = Path(args.pool)
+    output = Path(args.output)
+    capacity_column = args.capacity_column or policy.columns.remaining_capacity
+
+    reader_students = _detect_reader(students_path)
+    reader_pool = _detect_reader(pool_path)
+
+    progress(0, "loading inputs")
+    students_df = reader_students(students_path)
+    pool_df = reader_pool(pool_path)
+
+    students_base, pool_base = _prepare_allocation_frames(
+        students_df,
+        pool_df,
+        policy=policy,
+        sanitize_pool=True,
+        pool_source="inspactor",
+    )
+
+    return _allocate_and_write(
+        students_base,
+        pool_base,
+        args=args,
+        policy=policy,
+        progress=progress,
+        output=output,
+        capacity_column=capacity_column,
+    )
+
+
+def _run_rule_engine(
+    args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn
+) -> int:
+    """اجرای موتور قواعد روی ماتریس ساخته‌شده بدون نیاز به استخر جداگانه."""
+
+    students_path = Path(args.students)
+    matrix_path = Path(args.matrix)
+    output = Path(args.output)
+    capacity_column = args.capacity_column or policy.columns.remaining_capacity
+
+    reader_students = _detect_reader(students_path)
+
+    progress(0, "loading inputs")
+    students_df = reader_students(students_path)
+    pool_df = _load_matrix_candidate_pool(matrix_path, policy)
+
+    students_base, pool_base = _prepare_allocation_frames(
+        students_df,
+        pool_df,
+        policy=policy,
+        sanitize_pool=False,
+        pool_source="inspactor",
+    )
+
+    return _allocate_and_write(
+        students_base,
+        pool_base,
+        args=args,
+        policy=policy,
+        progress=progress,
+        output=output,
+        capacity_column=capacity_column,
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    """ایجاد پارسر دستورات با زیرفرمان‌های build و allocate."""
+    """ایجاد پارسر دستورات با زیرفرمان‌های build، allocate و rule-engine."""
     parser = argparse.ArgumentParser(description="Eligibility Matrix CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -793,6 +941,55 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="اجرای دوباره تخصیص برای تضمین دترمینیسم",
     )
+
+    rule_cmd = sub.add_parser(
+        "rule-engine",
+        help="اجرای موتور قواعد روی ماتریس ساخته‌شده بدون استخر مجزا",
+    )
+    rule_cmd.add_argument("--matrix", required=True, help="مسیر فایل ماتریس")
+    rule_cmd.add_argument("--students", required=True, help="مسیر فایل دانش‌آموزان")
+    rule_cmd.add_argument("--output", required=True, help="مسیر خروجی تخصیص")
+    rule_cmd.add_argument(
+        "--capacity-column",
+        default=None,
+        help="نام ستون ظرفیت باقی‌مانده (پیش‌فرض policy)",
+    )
+    rule_cmd.add_argument(
+        "--academic-year",
+        type=int,
+        required=False,
+        help="سال تحصیلی شروع (مثلاً 1404)",
+    )
+    rule_cmd.add_argument(
+        "--prior-roster",
+        default=None,
+        help="مسیر روستر سال قبل برای بازیابی شمارنده",
+    )
+    rule_cmd.add_argument(
+        "--current-roster",
+        default=None,
+        help="مسیر روستر سال جاری برای ادامه شمارنده",
+    )
+    rule_cmd.add_argument(
+        "--policy",
+        default=str(_DEFAULT_POLICY_PATH),
+        help="مسیر فایل policy.json",
+    )
+    rule_cmd.add_argument(
+        "--audit",
+        action="store_true",
+        help="پس از تولید خروجی، ممیزی خودکار را اجرا کن",
+    )
+    rule_cmd.add_argument(
+        "--metrics",
+        action="store_true",
+        help="پس از اجرا، خلاصهٔ JSON ممیزی را چاپ کن",
+    )
+    rule_cmd.add_argument(
+        "--determinism-check",
+        action="store_true",
+        help="اجرای دوباره تخصیص برای تضمین دترمینیسم",
+    )
     return parser
 
 
@@ -802,6 +999,8 @@ def main(
     progress_factory: Callable[[], ProgressFn] | None = None,
     build_runner: Callable[[argparse.Namespace, PolicyConfig, ProgressFn], int] | None = None,
     allocate_runner: Callable[[argparse.Namespace, PolicyConfig, ProgressFn], int] | None = None,
+    rule_engine_runner: Callable[[argparse.Namespace, PolicyConfig, ProgressFn], int]
+    | None = None,
     ui_overrides: dict[str, object] | None = None,
 ) -> int:
     """نقطهٔ ورود CLI؛ خروجی ۰ به معنای موفقیت است."""
@@ -821,6 +1020,10 @@ def main(
 
     if args.command == "allocate":
         runner = allocate_runner or _run_allocate
+        return runner(args, policy, progress)
+
+    if args.command == "rule-engine":
+        runner = rule_engine_runner or _run_rule_engine
         return runner(args, policy, progress)
 
     raise RuntimeError(f"Unsupported command: {args.command}")

@@ -10,6 +10,7 @@ import pytest
 
 from app.infra import cli
 from app.infra.io_utils import ALT_CODE_COLUMN
+from app.core.policy_loader import load_policy
 
 
 _HAS_OPENPYXL = importlib.util.find_spec("openpyxl") is not None
@@ -149,6 +150,45 @@ def test_allocate_command_passes_through(policy_file: Path) -> None:
     }
 
 
+def test_rule_engine_command_passes_through(policy_file: Path) -> None:
+    observed: dict[str, object] = {}
+
+    def fake_runner(args, policy, progress):  # type: ignore[no-untyped-def]
+        observed["matrix"] = args.matrix
+        observed["students"] = args.students
+        observed["capacity"] = args.capacity_column
+        observed["academic_year"] = args.academic_year
+        progress(5, "rule")
+        return 0
+
+    exit_code = cli.main(
+        [
+            "rule-engine",
+            "--matrix",
+            "matrix.xlsx",
+            "--students",
+            "students.xlsx",
+            "--output",
+            "rule.xlsx",
+            "--capacity-column",
+            "remaining_capacity",
+            "--academic-year",
+            "1403",
+            "--policy",
+            str(policy_file),
+        ],
+        rule_engine_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    assert observed == {
+        "matrix": "matrix.xlsx",
+        "students": "students.xlsx",
+        "capacity": "remaining_capacity",
+        "academic_year": 1403,
+    }
+
+
 @pytest.mark.parametrize(
     ("file_format", "writer"),
     [
@@ -172,3 +212,34 @@ def test_detect_reader_coerces_alt_code(
 
     assert loaded[ALT_CODE_COLUMN].dtype == object
     assert loaded.loc[0, ALT_CODE_COLUMN] == "987654"
+
+
+def test_load_matrix_candidate_pool_filters_virtual(
+    tmp_path: Path, policy_file: Path
+) -> None:
+    engine = None
+    for candidate in ("openpyxl", "xlsxwriter"):
+        if importlib.util.find_spec(candidate) is not None:
+            engine = candidate
+            break
+    if engine is None:
+        pytest.skip("اکسل‌نویس در دسترس نیست")
+
+    matrix_path = tmp_path / "matrix.xlsx"
+    df = pd.DataFrame(
+        {
+            "mentor_name": ["مجازی", "علی"],
+            "alias": [7505, 102],
+            "remaining_capacity": [0, 5],
+            "allocations_new": [0, 0],
+            "mentor_id": [1, 2],
+        }
+    )
+    with pd.ExcelWriter(matrix_path, engine=engine) as writer:
+        df.to_excel(writer, sheet_name="matrix", index=False)
+
+    policy = load_policy(policy_file)
+    pool = cli._load_matrix_candidate_pool(matrix_path, policy)
+
+    assert list(pool["mentor_id"].astype(int)) == [2]
+    assert "allocations_new" in pool.columns

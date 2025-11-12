@@ -70,6 +70,7 @@ class MainWindow(QMainWindow):
         self._tabs.setTabPosition(QTabWidget.North)
         self._tabs.addTab(self._build_build_page(), "ساخت ماتریس")
         self._tabs.addTab(self._build_allocate_page(), "تخصیص")
+        self._tabs.addTab(self._build_rule_engine_page(), "موتور قواعد")
         self._tabs.addTab(self._build_validate_page(), "اعتبارسنجی")
         self._tabs.addTab(self._build_explain_page(), "توضیحات")
         main_layout.addWidget(self._tabs)
@@ -140,6 +141,10 @@ class MainWindow(QMainWindow):
         btn_allocate = QPushButton("شروع تخصیص")
         btn_allocate.clicked.connect(self._start_allocate)
         shortcuts.addWidget(btn_allocate)
+
+        btn_rule = QPushButton("اجرای موتور قواعد")
+        btn_rule.clicked.connect(self._start_rule_engine)
+        shortcuts.addWidget(btn_rule)
 
         shortcuts.addStretch(1)
         layout.addLayout(shortcuts, 0)
@@ -271,6 +276,89 @@ class MainWindow(QMainWindow):
 
         return page
 
+    def _build_rule_engine_page(self) -> QWidget:
+        """فرم اجرای موتور قواعد بر پایه ماتریس موجود."""
+
+        page = QWidget(self)
+        form = QFormLayout(page)
+        form.setLabelAlignment(Qt.AlignRight)
+        form.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        self._picker_rule_matrix = FilePicker(
+            page, placeholder="ماتریس اهلیت (*.xlsx)"
+        )
+        self._picker_rule_matrix.setObjectName("editRuleMatrix")
+        form.addRow("فایل ماتریس", self._picker_rule_matrix)
+
+        self._picker_rule_students = FilePicker(
+            page, placeholder="دانش‌آموزان (*.xlsx یا *.csv)"
+        )
+        self._picker_rule_students.setObjectName("editRuleStudents")
+        form.addRow("فایل دانش‌آموزان", self._picker_rule_students)
+
+        self._picker_policy_rule = FilePicker(
+            page, placeholder="پیش‌فرض: config/policy.json"
+        )
+        self._picker_policy_rule.setObjectName("editRulePolicy")
+        if self._default_policy_path:
+            self._picker_policy_rule.setText(self._default_policy_path)
+        form.addRow("سیاست", self._picker_policy_rule)
+
+        self._picker_rule_output = FilePicker(
+            page, save=True, placeholder="خروجی تخصیص (*.xlsx)"
+        )
+        self._picker_rule_output.setObjectName("editRuleOutput")
+        form.addRow("خروجی", self._picker_rule_output)
+
+        self._edit_rule_capacity = QLineEdit(page)
+        self._edit_rule_capacity.setPlaceholderText("remaining_capacity")
+        self._edit_rule_capacity.setText("remaining_capacity")
+        self._edit_rule_capacity.setObjectName("editRuleCapacity")
+        form.addRow("ستون ظرفیت", self._edit_rule_capacity)
+
+        register_box = QGroupBox("شناسهٔ ثبت‌نام", page)
+        register_box.setObjectName("ruleRegistrationGroup")
+        register_layout = QFormLayout(register_box)
+        register_layout.setLabelAlignment(Qt.AlignRight)
+        register_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        self._combo_rule_academic_year = QComboBox(register_box)
+        self._combo_rule_academic_year.setEditable(True)
+        self._combo_rule_academic_year.setInsertPolicy(QComboBox.NoInsert)
+        self._combo_rule_academic_year.setObjectName("ruleAcademicYearInput")
+        self._combo_rule_academic_year.lineEdit().setPlaceholderText("مثلاً 1404")
+        for year in range(1395, 1411):
+            self._combo_rule_academic_year.addItem(str(year))
+        register_layout.addRow("سال تحصیلی", self._combo_rule_academic_year)
+
+        self._picker_rule_prior_roster = FilePicker(
+            register_box,
+            placeholder="روستر سال قبل (اختیاری)",
+        )
+        self._picker_rule_prior_roster.setObjectName("rulePriorRosterPicker")
+        register_layout.addRow("روستر سال قبل", self._picker_rule_prior_roster)
+
+        self._picker_rule_current_roster = FilePicker(
+            register_box,
+            placeholder="روستر سال جاری / شمارنده‌ها",
+        )
+        self._picker_rule_current_roster.setObjectName("ruleCurrentRosterPicker")
+        register_layout.addRow("روستر سال جاری", self._picker_rule_current_roster)
+
+        self._btn_rule_autodetect = QPushButton("پیشنهاد خودکار", register_box)
+        self._btn_rule_autodetect.setObjectName("ruleAutodetectBtn")
+        self._btn_rule_autodetect.clicked.connect(self._autodetect_rule_engine_counters)
+        register_layout.addRow("", self._btn_rule_autodetect)
+
+        form.addRow(register_box)
+
+        self._btn_rule_engine = QPushButton("اجرای موتور قواعد")
+        self._btn_rule_engine.setObjectName("btnRuleEngine")
+        self._btn_rule_engine.clicked.connect(self._start_rule_engine)
+        form.addRow("", self._btn_rule_engine)
+
+        return page
+
     def _build_validate_page(self) -> QWidget:
         """صفحهٔ سبک اعتبارسنجی بدون اتصال به زیرساخت."""
 
@@ -319,6 +407,7 @@ class MainWindow(QMainWindow):
         self._interactive = [
             self._btn_build,
             self._btn_allocate,
+            self._btn_rule_engine,
             self._btn_demo,
             self._picker_inspactor,
             self._picker_schools,
@@ -334,6 +423,15 @@ class MainWindow(QMainWindow):
             self._picker_prior_roster,
             self._picker_current_roster,
             self._btn_autodetect,
+            self._picker_rule_matrix,
+            self._picker_rule_students,
+            self._picker_policy_rule,
+            self._picker_rule_output,
+            self._edit_rule_capacity,
+            self._combo_rule_academic_year,
+            self._picker_rule_prior_roster,
+            self._picker_rule_current_roster,
+            self._btn_rule_autodetect,
         ]
 
     # ------------------------------------------------------------------ Actions
@@ -432,6 +530,69 @@ class MainWindow(QMainWindow):
 
         self._launch_cli(argv, "تخصیص", overrides=overrides)
 
+    def _start_rule_engine(self) -> None:
+        """اجرای موتور قواعد با استفاده از ماتریس موجود."""
+
+        if self._worker is not None and self._worker.isRunning():
+            QMessageBox.warning(self, "تسک در حال اجرا", "لطفاً تا پایان عملیات جاری صبر کنید.")
+            return
+
+        required = [
+            (self._picker_rule_matrix, "فایل ماتریس"),
+            (self._picker_rule_students, "فایل دانش‌آموزان"),
+            (self._picker_rule_output, "خروجی"),
+        ]
+        if not self._ensure_filled(required):
+            return
+
+        capacity = self._edit_rule_capacity.text().strip() or "remaining_capacity"
+        self._edit_rule_capacity.setText(capacity)
+        policy_path = (
+            self._picker_policy_rule.text()
+            or self._default_policy_path
+            or "config/policy.json"
+        )
+
+        overrides = self._build_rule_engine_overrides()
+        academic_year = overrides.get("academic_year")
+        if academic_year is None:
+            QMessageBox.warning(
+                self,
+                "سال تحصیلی نامشخص",
+                "لطفاً سال تحصیلی را برای موتور قواعد مشخص کنید.",
+            )
+            return
+
+        prior_path = str(overrides.get("prior_roster") or "").strip()
+        current_path = str(overrides.get("current_roster") or "").strip()
+        for path, label in ((prior_path, "روستر سال قبل"), (current_path, "روستر سال جاری")):
+            if path and not Path(path).exists():
+                QMessageBox.warning(self, "فایل یافت نشد", f"{label} قابل دسترسی نیست: {path}")
+                return
+
+        argv = [
+            "rule-engine",
+            "--matrix",
+            self._picker_rule_matrix.text(),
+            "--students",
+            self._picker_rule_students.text(),
+            "--output",
+            self._picker_rule_output.text(),
+            "--capacity-column",
+            capacity,
+            "--policy",
+            policy_path,
+            "--academic-year",
+            str(academic_year),
+        ]
+
+        if prior_path:
+            argv.extend(["--prior-roster", prior_path])
+        if current_path:
+            argv.extend(["--current-roster", current_path])
+
+        self._launch_cli(argv, "موتور قواعد", overrides=overrides)
+
     def _build_allocate_overrides(self) -> dict[str, object]:
         """ساخت دیکشنری پارامترهای شمارنده بر اساس ورودی UI."""
 
@@ -445,6 +606,24 @@ class MainWindow(QMainWindow):
             overrides["prior_roster"] = prior
 
         current = self._picker_current_roster.text().strip()
+        if current:
+            overrides["current_roster"] = current
+
+        return overrides
+
+    def _build_rule_engine_overrides(self) -> dict[str, object]:
+        """تنظیم ورودی‌های شمارنده برای تب موتور قواعد."""
+
+        overrides: dict[str, object] = {}
+        year = self._get_rule_engine_year()
+        if year is not None:
+            overrides["academic_year"] = year
+
+        prior = self._picker_rule_prior_roster.text().strip()
+        if prior:
+            overrides["prior_roster"] = prior
+
+        current = self._picker_rule_current_roster.text().strip()
         if current:
             overrides["current_roster"] = current
 
@@ -466,7 +645,23 @@ class MainWindow(QMainWindow):
     def _autodetect_counters(self) -> None:
         """خواندن روستر سال جاری و پیشنهاد سال و آخرین شمارنده‌ها."""
 
-        path_text = self._picker_current_roster.text().strip()
+        self._autodetect_counters_for(
+            self._picker_current_roster, self._combo_academic_year
+        )
+
+    def _autodetect_rule_engine_counters(self) -> None:
+        """پیشنهاد شمارنده‌ها برای تب موتور قواعد."""
+
+        self._autodetect_counters_for(
+            self._picker_rule_current_roster, self._combo_rule_academic_year
+        )
+
+    def _autodetect_counters_for(
+        self, picker: FilePicker, combo: QComboBox
+    ) -> None:
+        """منطق مشترک پیشنهاد شمارنده بر اساس روستر ورودی."""
+
+        path_text = picker.text().strip()
         if not path_text:
             QMessageBox.information(
                 self,
@@ -492,7 +687,7 @@ class MainWindow(QMainWindow):
         fallback_year = detect_academic_year_from_counters(canonical)
         messages: list[str] = []
         if strict_year is not None:
-            self._set_academic_year(strict_year)
+            self._set_year_for_combo(combo, strict_year)
             messages.append(f"سال پیشنهادی: {strict_year}")
         elif fallback_year is not None:
             messages.append(f"سال احتمالی (غیر یکتا): {fallback_year}")
@@ -506,7 +701,7 @@ class MainWindow(QMainWindow):
             self._status.setText("بارگذاری policy ناموفق")
             return
 
-        year = strict_year or self._get_academic_year()
+        year = strict_year or self._get_year_value(combo)
         if year is not None:
             try:
                 yy = year_to_yy(year)
@@ -579,10 +774,10 @@ class MainWindow(QMainWindow):
         for widget in self._interactive:
             widget.setEnabled(not disabled)
 
-    def _get_academic_year(self) -> int | None:
-        """دریافت سال تحصیلی معتبر از ورودی UI."""
+    def _get_year_value(self, combo: QComboBox) -> int | None:
+        """دریافت سال تحصیلی از یک ComboBox مشخص."""
 
-        text = self._combo_academic_year.currentText().strip()
+        text = combo.currentText().strip()
         if not text:
             return None
         try:
@@ -593,10 +788,25 @@ class MainWindow(QMainWindow):
             return None
         return year
 
+    def _get_academic_year(self) -> int | None:
+        """دریافت سال تحصیلی معتبر از ورودی تب تخصیص."""
+
+        return self._get_year_value(self._combo_academic_year)
+
+    def _get_rule_engine_year(self) -> int | None:
+        """دریافت سال تحصیلی از تب موتور قواعد."""
+
+        return self._get_year_value(self._combo_rule_academic_year)
+
     def _set_academic_year(self, year: int) -> None:
         """قرار دادن مقدار سال تحصیلی در کنترل مربوطه."""
 
-        self._combo_academic_year.setEditText(str(year))
+        self._set_year_for_combo(self._combo_academic_year, year)
+
+    def _set_year_for_combo(self, combo: QComboBox, year: int) -> None:
+        """کمک‌کننده برای تنظیم مقدار سال در ComboBox."""
+
+        combo.setEditText(str(year))
 
     def _load_counter_dataframe(self, path: Path) -> pd.DataFrame:
         """بارگذاری دیتافریم شمارنده با تشخیص شیت مناسب."""
