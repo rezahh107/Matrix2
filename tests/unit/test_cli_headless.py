@@ -35,6 +35,10 @@ def policy_file(tmp_path: Path) -> Path:
             "مالی حکمت بنیاد",
             "کد مدرسه",
         ],
+        "gender_codes": {
+            "male": {"value": 1, "counter_code": "357"},
+            "female": {"value": 0, "counter_code": "373"},
+        },
         "columns": {
             "postal_code": "کدپستی",
             "school_count": "تعداد مدارس تحت پوشش",
@@ -107,12 +111,13 @@ def test_build_matrix_command_uses_progress(policy_file: Path, capsys: pytest.Ca
 
 
 def test_allocate_command_passes_through(policy_file: Path) -> None:
-    observed: dict[str, str] = {}
+    observed: dict[str, object] = {}
 
     def fake_runner(args, policy, progress):  # type: ignore[no-untyped-def]
         observed["students"] = args.students
         observed["pool"] = args.pool
         observed["capacity"] = args.capacity_column
+        observed["academic_year"] = args.academic_year
         progress(10, "alloc")
         return 0
 
@@ -127,6 +132,8 @@ def test_allocate_command_passes_through(policy_file: Path) -> None:
             "alloc.xlsx",
             "--capacity-column",
             "remaining_capacity",
+            "--academic-year",
+            "1404",
             "--policy",
             str(policy_file),
         ],
@@ -138,6 +145,7 @@ def test_allocate_command_passes_through(policy_file: Path) -> None:
         "students": "students.csv",
         "pool": "pool.csv",
         "capacity": "remaining_capacity",
+        "academic_year": 1404,
     }
 
 

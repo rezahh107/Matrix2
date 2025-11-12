@@ -37,12 +37,20 @@ from app.infra.io_utils import (
 from app.infra.audit_allocations import audit_allocations, summarize_report
 # --- واردات اصلاح شده از app.core ---
 from app.core.common.columns import (
+    HeaderMode,
     canonicalize_headers,
     resolve_aliases,
     coerce_semantics,
 )
 from app.core.common.column_normalizer import normalize_input_columns
 from app.core.common.normalization import safe_int_value
+from app.core.counter import (
+    assert_unique_student_ids,
+    assign_counters,
+    detect_academic_year_from_counters,
+    infer_year_strict,
+    pick_counter_sheet_name,
+)
 # --- پایان واردات اصلاح شده ---
 
 ProgressFn = Callable[[int, str], None]
@@ -306,7 +314,7 @@ def _make_excel_safe(df: pd.DataFrame) -> pd.DataFrame:
 def _ensure_valid_dataframe(df: pd.DataFrame, name: str = "") -> pd.DataFrame:
     """
     اطمینان از معتبر بودن یک دیتافریم برای نوشتن در Excel
-    
+
     این تابع چک می‌کند که:
     1. ستون‌های تکراری وجود نداشته باشند
     2. هیچ سلولی حاوی شیء پیچیده نباشد
@@ -336,6 +344,103 @@ def _ensure_valid_dataframe(df: pd.DataFrame, name: str = "") -> pd.DataFrame:
     
     return df
 # --- پایان توابع کمکی ---
+
+
+def _read_optional_first_sheet(path: str | None) -> pd.DataFrame | None:
+    """خواندن روستر شمارنده با تشخیص شیت مناسب و هدر EN."""
+
+    if not path:
+        return None
+
+    file_path = Path(path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"Roster file not found: {file_path}")
+
+    suffix = file_path.suffix.lower()
+    if suffix in {".xlsx", ".xls", ".xlsm"}:
+        with pd.ExcelFile(file_path) as workbook:
+            sheet_name = pick_counter_sheet_name(workbook.sheet_names)
+            if sheet_name is None:
+                raise ValueError(
+                    "هیچ شیت سازگار با شمارنده در فایل یافت نشد؛ نام‌های قابل قبول شامل 'شمارنده' و 'Counters' است."
+                )
+            frame = workbook.parse(sheet_name)
+    else:
+        frame = pd.read_csv(file_path)
+
+    return canonicalize_headers(frame, header_mode="en")
+
+
+def _inject_student_ids(
+    students_df: pd.DataFrame,
+    args: argparse.Namespace,
+    policy: PolicyConfig,
+) -> tuple[pd.Series, Dict[str, int]]:
+    """ساخت ستون student_id با رعایت Policy و ورودی‌های UI/CLI."""
+
+    overrides = getattr(args, "_ui_overrides", {}) or {}
+
+    def _resolve_path(name: str) -> str | None:
+        value = overrides.get(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        cli_value = getattr(args, name, None)
+        if isinstance(cli_value, str) and cli_value.strip():
+            return cli_value.strip()
+        return None
+
+    prior_path = _resolve_path("prior_roster")
+    current_path = _resolve_path("current_roster")
+
+    prior_df = _read_optional_first_sheet(prior_path)
+    current_df = _read_optional_first_sheet(current_path)
+
+    students_en = canonicalize_headers(students_df, header_mode="en")
+    required = {"national_id", "gender"}
+    missing = sorted(required - set(students_en.columns))
+    if missing:
+        raise ValueError(
+            "ستون‌های لازم برای شمارنده یافت نشدند؛ ستون‌های مورد انتظار: 'national_id' و 'gender'."
+        )
+
+    academic_year = overrides.get("academic_year") or getattr(args, "academic_year", None)
+    if academic_year in ("", None):
+        academic_year = infer_year_strict(current_df)
+    if academic_year in ("", None):
+        raise ValueError(
+            "سال تحصیلی مشخص نشده یا در روستر جاری یکتا نیست؛ مقدار --academic-year الزامی است."
+        )
+
+    try:
+        year_value = int(academic_year)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - نگهبان مهاجرت
+        raise ValueError(f"سال تحصیلی نامعتبر است: {academic_year}") from exc
+
+    counters = assign_counters(
+        students_en,
+        prior_roster_df=prior_df,
+        current_roster_df=current_df,
+        academic_year=year_value,
+    )
+
+    assert_unique_student_ids(counters)
+
+    summary = {
+        "reused_count": 0,
+        "new_male_count": 0,
+        "new_female_count": 0,
+        "next_male_start": 1,
+        "next_female_start": 1,
+    }
+    summary.update(counters.attrs.get("counter_summary", {}))
+
+    print(
+        "[Counter] reused={reused_count} new_male={new_male_count} "
+        "new_female={new_female_count} next_male_start={next_male_start} "
+        "next_female_start={next_female_start}".format(**summary)
+    )
+
+    return counters, summary
 
 
 def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn) -> int:
@@ -497,6 +602,9 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
     students_base = students_df.copy(deep=True)
     pool_base = pool_df.copy(deep=True)
 
+    student_ids, counter_summary = _inject_student_ids(students_base, args, policy)
+    setattr(args, "_counter_summary", counter_summary)
+
     allocations_df, updated_pool_df, logs_df, trace_df = allocate_batch(
         students_base.copy(deep=True),
         pool_base.copy(deep=True),
@@ -504,6 +612,23 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
         progress=progress,
         capacity_column=capacity_column,
     )
+
+    header_internal: HeaderMode = policy.excel.header_mode_internal  # type: ignore[assignment]
+
+    def _attach_student_id(frame: pd.DataFrame, ensure_existing: bool = False) -> pd.DataFrame:
+        en_frame = canonicalize_headers(frame, header_mode="en")
+        aligned = student_ids.reindex(en_frame.index)
+        aligned_string = aligned.astype("string")
+        if ensure_existing and "student_id" in en_frame.columns:
+            existing = en_frame["student_id"].astype("string")
+            en_frame["student_id"] = existing.fillna(aligned_string)
+        else:
+            en_frame["student_id"] = aligned_string
+        return canonicalize_headers(en_frame, header_mode=header_internal)
+
+    allocations_df = _attach_student_id(allocations_df)
+    logs_df = _attach_student_id(logs_df, ensure_existing=True)
+    trace_df = _attach_student_id(trace_df, ensure_existing=True)
 
     # --- پاک‌سازی جامع خروجی قبل از نوشتن ---
     # اطمینان از معتبر بودن همه دیتافریم‌ها
@@ -600,6 +725,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="نام ستون ظرفیت باقی‌مانده در استخر (پیش‌فرض از policy)",
     )
     alloc_cmd.add_argument(
+        "--academic-year",
+        type=int,
+        required=False,
+        help="سال تحصیلی شروع (مثلاً 1404)",
+    )
+    alloc_cmd.add_argument(
+        "--prior-roster",
+        default=None,
+        help="مسیر روستر سال قبل برای بازیابی شمارنده",
+    )
+    alloc_cmd.add_argument(
+        "--current-roster",
+        default=None,
+        help="مسیر روستر سال جاری برای ادامه شمارنده",
+    )
+    alloc_cmd.add_argument(
         "--policy",
         default=str(_DEFAULT_POLICY_PATH),
         help="مسیر فایل policy.json",
@@ -628,10 +769,13 @@ def main(
     progress_factory: Callable[[], ProgressFn] | None = None,
     build_runner: Callable[[argparse.Namespace, PolicyConfig, ProgressFn], int] | None = None,
     allocate_runner: Callable[[argparse.Namespace, PolicyConfig, ProgressFn], int] | None = None,
+    ui_overrides: dict[str, object] | None = None,
 ) -> int:
     """نقطهٔ ورود CLI؛ خروجی ۰ به معنای موفقیت است."""
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    args._ui_overrides = ui_overrides or {}
 
     policy_path = Path(args.policy)
     policy = load_policy(policy_path)

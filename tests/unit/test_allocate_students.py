@@ -230,6 +230,7 @@ def test_cli_capacity_column_default_from_policy(tmp_path: Path) -> None:
         [
             {
                 "student_id": "S1",
+                "national_id": "0012345678",
                 "کدرشته": 1201,
                 "گروه_آزمایشی": "تجربی",
                 "جنسیت": 1,
@@ -269,6 +270,8 @@ def test_cli_capacity_column_default_from_policy(tmp_path: Path) -> None:
             str(pool_path),
             "--output",
             str(output_path),
+            "--academic-year",
+            "1404",
             "--policy",
             str(policy_path),
         ]

@@ -35,6 +35,10 @@ def _base_policy_payload() -> dict[str, object]:
             "مالی حکمت بنیاد",
             "کد مدرسه",
         ],
+        "gender_codes": {
+            "male": {"value": 1, "counter_code": "357"},
+            "female": {"value": 0, "counter_code": "373"},
+        },
         "columns": {
             "postal_code": "کدپستی",
             "school_count": "تعداد مدارس تحت پوشش",

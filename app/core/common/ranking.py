@@ -45,12 +45,18 @@ def natural_key(value: Any) -> tuple[Any, ...]:
         if not token:
             continue
         if token.isdigit():
-            if not parts:
-                parts.append("")
-            parts.append(int(token))
-        else:
-            parts.append(token.lower())
-            has_text = True
+            try:
+                number = int(token)
+            except ValueError:
+                parts.append(token.lower())
+                has_text = True
+            else:
+                if not parts:
+                    parts.append("")
+                parts.append(number)
+            continue
+        parts.append(token.lower())
+        has_text = True
     if not parts:
         return ("",)
     if not has_text and not isinstance(parts[0], str):

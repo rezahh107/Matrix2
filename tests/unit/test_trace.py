@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.common.trace import build_allocation_trace, build_trace_plan
 from app.core.policy_loader import (
     ExcelOptions,
+    GenderCode,
+    GenderCodes,
     PolicyAliasRule,
     PolicyColumns,
     PolicyConfig,
@@ -39,6 +41,10 @@ def _policy_payload() -> dict[str, object]:
             "مالی حکمت بنیاد",
             "کد مدرسه",
         ],
+        "gender_codes": {
+            "male": {"value": 1, "counter_code": "357"},
+            "female": {"value": 0, "counter_code": "373"},
+        },
         "columns": {
             "postal_code": "کدپستی",
             "school_count": "تعداد مدارس تحت پوشش",
@@ -199,6 +205,10 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
             TraceStageDefinition(stage="school", column="کد مدرسه"),
             TraceStageDefinition(stage="capacity_gate", column="remaining_capacity"),
         ],
+        gender_codes=GenderCodes(
+            male=GenderCode(value=1, counter_code="357"),
+            female=GenderCode(value=0, counter_code="373"),
+        ),
         column_aliases={},
         excel=ExcelOptions(
             rtl=True,
