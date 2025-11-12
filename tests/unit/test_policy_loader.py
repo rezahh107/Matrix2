@@ -69,7 +69,14 @@ def _valid_payload() -> dict[str, object]:
             "capacity_special": "تعداد تحت پوشش خاص",
             "remaining_capacity": "remaining_capacity",
         },
-            "excel": {"rtl": True, "font_name": "Vazirmatn", "header_mode": "fa_en"},
+        "virtual_alias_ranges": [[7000, 7999]],
+        "virtual_name_patterns": ["در\\s+انتظار\\s+تخصیص"],
+        "excel": {
+            "rtl": True,
+            "font_name": "Vazirmatn",
+            "header_mode_internal": "en",
+            "header_mode_write": "fa_en",
+        },
     }
 
 
@@ -205,16 +212,24 @@ def test_ranking_legacy_strings_supported() -> None:
 def test_excel_options_parsing() -> None:
     payload = _valid_payload()
     policy = parse_policy_dict(payload)
-    assert policy.excel.header_mode == "fa_en"
+    assert policy.excel.header_mode_internal == "en"
+    assert policy.excel.header_mode_write == "fa_en"
+    assert policy.excel.header_mode == policy.excel.header_mode_write
     assert policy.excel.rtl is True
     assert policy.excel.font_name == "Vazirmatn"
 
     payload_override = _valid_payload()
-    payload_override["excel"] = {"rtl": False, "font_name": "Tahoma", "header_mode": "fa_en"}
+    payload_override["excel"] = {
+        "rtl": False,
+        "font_name": "Tahoma",
+        "header_mode_internal": "fa",
+        "header_mode_write": "fa",
+    }
     policy_override = parse_policy_dict(payload_override)
     assert policy_override.excel.rtl is False
     assert policy_override.excel.font_name == "Tahoma"
-    assert policy_override.excel.header_mode == "fa_en"
+    assert policy_override.excel.header_mode_internal == "fa"
+    assert policy_override.excel.header_mode_write == "fa"
 
 
 def test_policy_column_aliases_supported() -> None:

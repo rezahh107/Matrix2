@@ -12,14 +12,26 @@ import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from typing import Literal
 
-VersionMismatchMode = Literal["raise", "warn", "ignore"]
+VersionMismatchMode = Literal["raise", "warn", "migrate"]
 
 DEFAULT_POLICY_VERSION = "1.0.3"
 _EXPECTED_JOIN_KEYS_COUNT = 6
 _EXPECTED_RANKING_ITEMS_COUNT = 3
+
+_DEFAULT_VIRTUAL_ALIAS_RANGES: tuple[tuple[int, int], ...] = ((7000, 7999),)
+_DEFAULT_VIRTUAL_NAME_PATTERNS: tuple[str, ...] = (
+    r"در\s+انتظار\s+تخصیص",
+    "فراگیر",
+)
+_DEFAULT_EXCEL_OPTIONS: Mapping[str, object] = {
+    "rtl": True,
+    "font_name": "Vazirmatn",
+    "header_mode_internal": "en",
+    "header_mode_write": "fa_en",
+}
 
 _TRACE_STAGE_ORDER: tuple[str, ...] = (
     "type",
@@ -76,7 +88,14 @@ class ExcelOptions:
 
     rtl: bool
     font_name: str
-    header_mode: str
+    header_mode_internal: str
+    header_mode_write: str
+
+    @property
+    def header_mode(self) -> str:
+        """سازگاری رو به عقب: حالت هدر خروجی."""
+
+        return self.header_mode_write
 
 
 @dataclass(frozen=True)
@@ -99,6 +118,8 @@ class PolicyConfig:
     columns: PolicyColumns
     column_aliases: Mapping[str, Dict[str, str]]
     excel: ExcelOptions
+    virtual_alias_ranges: Tuple[Tuple[int, int], ...]
+    virtual_name_patterns: Tuple[str, ...]
 
     @property
     def ranking(self) -> List[str]:
@@ -151,6 +172,7 @@ class TraceStageDefinition:
 
 
 def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object]:
+    data = _apply_schema_defaults(dict(data))
     required = [
         "version",
         "normal_statuses",
@@ -163,6 +185,8 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "prefer_major_code",
         "alias_rule",
         "columns",
+        "virtual_alias_ranges",
+        "virtual_name_patterns",
     ]
     missing = [key for key in required if key not in data]
     if "ranking_rules" not in data and "ranking" not in data:
@@ -188,6 +212,8 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     columns = _normalize_columns(data["columns"])
     column_aliases = _normalize_column_aliases(data.get("column_aliases", {}))
     excel = _normalize_excel_options(data.get("excel"))
+    virtual_alias_ranges = _normalize_virtual_alias_ranges(data["virtual_alias_ranges"])
+    virtual_name_patterns = _normalize_virtual_name_patterns(data["virtual_name_patterns"])
 
     return {
         "version": version,
@@ -206,6 +232,8 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "columns": columns,
         "column_aliases": column_aliases,
         "excel": excel,
+        "virtual_alias_ranges": virtual_alias_ranges,
+        "virtual_name_patterns": virtual_name_patterns,
     }
 
 
@@ -326,17 +354,73 @@ def _normalize_column_aliases(value: object) -> Mapping[str, Dict[str, str]]:
 
 
 def _normalize_excel_options(value: object | None) -> ExcelOptions:
+    allowed_modes = {"fa", "en", "fa_en"}
     if value is None:
-        return ExcelOptions(rtl=True, font_name="Vazirmatn", header_mode="fa")
+        return ExcelOptions(
+            rtl=True,
+            font_name="Vazirmatn",
+            header_mode_internal="en",
+            header_mode_write="fa_en",
+        )
     if not isinstance(value, Mapping):
         raise TypeError("excel must be a mapping")
     rtl = _ensure_bool("excel.rtl", value.get("rtl", True))
     font_raw = value.get("font_name", "Vazirmatn")
     font_name = str(font_raw or "Vazirmatn")
-    header_mode = str(value.get("header_mode", "fa"))
-    if header_mode not in {"fa", "en", "fa_en"}:
-        raise ValueError("excel.header_mode must be one of {'fa','en','fa_en'}")
-    return ExcelOptions(rtl=rtl, font_name=font_name, header_mode=header_mode)
+    header_internal = str(value.get("header_mode_internal", "en"))
+    header_write = value.get("header_mode_write")
+    if header_write is None:
+        header_write = value.get("header_mode", "fa_en")
+    header_write = str(header_write or "fa_en")
+    if header_internal not in allowed_modes:
+        raise ValueError("excel.header_mode_internal must be one of {'fa','en','fa_en'}")
+    if header_write not in allowed_modes:
+        raise ValueError("excel.header_mode_write must be one of {'fa','en','fa_en'}")
+    return ExcelOptions(
+        rtl=rtl,
+        font_name=font_name,
+        header_mode_internal=header_internal,
+        header_mode_write=header_write,
+    )
+
+
+def _normalize_virtual_alias_ranges(raw: object) -> Tuple[Tuple[int, int], ...]:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise TypeError("virtual_alias_ranges must be a sequence of [start, end]")
+    ranges: list[Tuple[int, int]] = []
+    for item in raw:
+        if not isinstance(item, Sequence) or isinstance(item, (str, bytes)) or len(item) != 2:
+            raise ValueError("Each virtual_alias_range must be a pair [start, end]")
+        start_raw, end_raw = item
+        try:
+            start = int(start_raw)
+            end = int(end_raw)
+        except Exception as exc:
+            raise ValueError("virtual_alias_ranges values must be integers") from exc
+        if start > end:
+            start, end = end, start
+        ranges.append((start, end))
+    if not ranges:
+        raise ValueError("virtual_alias_ranges must define at least one range")
+    return tuple(ranges)
+
+
+def _normalize_virtual_name_patterns(raw: object) -> Tuple[str, ...]:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise TypeError("virtual_name_patterns must be a sequence of strings")
+    patterns: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, (str, bytes)):
+            raise TypeError("virtual_name_patterns items must be strings")
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        patterns.append(text)
+    if not patterns:
+        raise ValueError("virtual_name_patterns must define at least one regex pattern")
+    return tuple(patterns)
 
 
 def _normalize_join_keys(raw: object) -> List[str]:
@@ -542,7 +626,11 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         ),
         column_aliases={str(source): {str(k): str(v) for k, v in aliases.items()}
                         for source, aliases in data["column_aliases"].items()},
-        excel=data["excel"],
+        excel=ExcelOptions(**_normalize_excel_options(data["excel"])),
+        virtual_alias_ranges=tuple(
+            (int(start), int(end)) for start, end in data["virtual_alias_ranges"]
+        ),
+        virtual_name_patterns=tuple(str(item) for item in data["virtual_name_patterns"]),
     )
 
 
@@ -565,10 +653,109 @@ def parse_policy_dict(
 ) -> PolicyConfig:
     """مسیر خالص برای تبدیل dict به :class:`PolicyConfig`."""
 
-    normalized = _normalize_policy_payload(data)
+    prepared = _prepare_policy_payload(data, expected_version, on_version_mismatch)
+    normalized = _normalize_policy_payload(prepared)
     config = _to_config(normalized)
     _version_gate(config.version, expected_version, on_version_mismatch)
     return config
+
+
+def _apply_schema_defaults(data: Dict[str, object]) -> Dict[str, object]:
+    """تزریق کلیدهای ضروری در صورت فقدان برای مهاجرت نسخه."""
+
+    data.setdefault("virtual_alias_ranges", list(_DEFAULT_VIRTUAL_ALIAS_RANGES))
+    data.setdefault("virtual_name_patterns", list(_DEFAULT_VIRTUAL_NAME_PATTERNS))
+
+    excel_options = data.get("excel") or {}
+    if not isinstance(excel_options, Mapping):
+        excel_options = dict(_DEFAULT_EXCEL_OPTIONS)
+    else:
+        excel_options = dict(_DEFAULT_EXCEL_OPTIONS) | {str(k): v for k, v in excel_options.items()}
+    data["excel"] = excel_options
+
+    if "column_aliases" not in data or not isinstance(data["column_aliases"], Mapping):
+        data["column_aliases"] = {}
+
+    return data
+
+
+def _normalize_excel_options(payload: Mapping[str, object]) -> Dict[str, object]:
+    """اعتبارسنجی و نرمال‌سازی گزینه‌های Excel."""
+
+    rtl = bool(payload.get("rtl", _DEFAULT_EXCEL_OPTIONS["rtl"]))
+    font_name = str(payload.get("font_name", _DEFAULT_EXCEL_OPTIONS["font_name"]))
+    internal = str(payload.get("header_mode_internal", _DEFAULT_EXCEL_OPTIONS["header_mode_internal"]))
+    write = str(payload.get("header_mode_write", _DEFAULT_EXCEL_OPTIONS["header_mode_write"]))
+    return {
+        "rtl": rtl,
+        "font_name": font_name,
+        "header_mode_internal": internal,
+        "header_mode_write": write,
+    }
+
+
+def _prepare_policy_payload(
+    data: Mapping[str, object],
+    expected_version: Optional[str],
+    mode: VersionMismatchMode,
+) -> Mapping[str, object]:
+    """آماده‌سازی اولیهٔ دادهٔ Policy با لحاظ مهاجرت و هشدار نسخه."""
+
+    payload = _apply_schema_defaults(dict(data))
+    if expected_version is None:
+        return payload
+
+    version = str(payload.get("version", ""))
+    if not version:
+        raise ValueError("Policy payload missing 'version'")
+
+    if version == expected_version:
+        return payload
+
+    loaded_semver = _parse_semver(version)
+    expected_semver = _parse_semver(expected_version)
+    message = (
+        f"Policy version mismatch: loaded='{version}' expected='{expected_version}'"
+    )
+
+    if loaded_semver[0] != expected_semver[0]:
+        raise ValueError(message + " (major incompatible)")
+
+    if mode == "raise":
+        raise ValueError(message)
+
+    if mode == "warn":
+        warnings.warn(message, RuntimeWarning, stacklevel=3)
+        return payload
+
+    if mode != "migrate":
+        raise ValueError(f"Unsupported version mismatch mode: {mode}")
+
+    warnings.warn(
+        "Policy schema migrated in-memory to match expected version. Persist the updated policy.json to avoid runtime migrations.",
+        RuntimeWarning,
+        stacklevel=3,
+    )
+
+    migrated = dict(payload)
+    migrated["version"] = expected_version
+
+    if "trace_stages" not in migrated or not migrated["trace_stages"]:
+        migrated["trace_stages"] = [
+            {"stage": stage, "column": column} for stage, column in _LEGACY_TRACE_DEFAULTS.items()
+        ]
+
+    if "ranking_rules" not in migrated:
+        ranking_names = migrated.get("ranking") or [rule for rule in _RANKING_RULE_LIBRARY]
+        ranking_rules = []
+        for name in ranking_names:
+            if name not in _RANKING_RULE_LIBRARY:
+                raise ValueError(f"Unknown ranking rule '{name}' in legacy policy")
+            column, ascending = _RANKING_RULE_LIBRARY[name]
+            ranking_rules.append({"name": name, "column": column, "ascending": ascending})
+        migrated["ranking_rules"] = ranking_rules
+
+    return migrated
 
 
 @lru_cache(maxsize=8)
@@ -583,7 +770,8 @@ def _load_policy_cached(
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in policy file: {resolved_path}") from exc
-    normalized = _normalize_policy_payload(data)
+    prepared = _prepare_policy_payload(data, expected_version, on_version_mismatch)
+    normalized = _normalize_policy_payload(prepared)
     config = _to_config(normalized)
     _version_gate(config.version, expected_version, on_version_mismatch)
     return config

@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import platform
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Any, Callable, Dict, Sequence
 
 import pandas as pd
+from pandas import testing as pd_testing
 from pandas.api import types as pd_types
 
 from app.core.allocate_students import allocate_batch
@@ -32,8 +34,10 @@ from app.infra.io_utils import (
     read_excel_first_sheet,
     write_xlsx_atomic,
 )
+from app.infra.audit_allocations import audit_allocations, summarize_report
 # --- واردات اصلاح شده از app.core ---
 from app.core.common.columns import (
+    canonicalize_headers,
     resolve_aliases,
     coerce_semantics,
 )
@@ -46,9 +50,121 @@ ProgressFn = Callable[[int, str], None]
 _DEFAULT_POLICY_PATH = Path("config/policy.json")
 
 
+def _make_unique_columns(columns: Sequence[str]) -> list[str]:
+    """ساخت نام ستون یکتا با حفظ ترتیب اولیه."""
+
+    seen: dict[str, int] = {}
+    result: list[str] = []
+    for column in columns:
+        base = str(column).strip() or "column"
+        count = seen.get(base, 0)
+        name = base if count == 0 else f"{base} ({count + 1})"
+        while name in seen:
+            count += 1
+            name = f"{base} ({count + 1})"
+        seen[base] = count + 1
+        seen[name] = 1
+        result.append(name)
+    return result
+
+
+def _sanitize_pool_for_allocation(
+    df: pd.DataFrame,
+    *,
+    policy: PolicyConfig | None = None,
+) -> pd.DataFrame:
+    """پاک‌سازی استخر پشتیبان‌ها برای تخصیص مطابق Policy.
+
+    مثال::
+
+        >>> import pandas as pd
+        >>> raw = pd.DataFrame({
+        ...     "mentor_name": ["مجازی", "علی"],
+        ...     "alias": [7501, 102],
+        ...     "remaining_capacity": [100, 2],
+        ... })
+        >>> cleaned = _sanitize_pool_for_allocation(raw)
+        >>> cleaned["remaining_capacity"].tolist()
+        [2]
+    """
+
+    active_policy = policy or load_policy()
+    frame = canonicalize_headers(
+        df, header_mode=active_policy.excel.header_mode_internal
+    ).copy()
+    if isinstance(frame.columns, pd.MultiIndex):
+        frame.columns = ["__".join(map(str, tpl)).strip() for tpl in frame.columns.to_flat_index()]
+    if frame.columns.duplicated().any():
+        frame.columns = _make_unique_columns(frame.columns)
+
+    mask_virtual = pd.Series(False, index=frame.index)
+    patterns = active_policy.virtual_name_patterns
+    regex: re.Pattern[str] | None = None
+    if patterns:
+        joined = "|".join(f"(?:{pattern})" for pattern in patterns)
+        regex = re.compile(joined, re.IGNORECASE)
+    if regex and "mentor_name" in frame.columns:
+        mask_virtual |= frame["mentor_name"].astype(str).map(lambda text: bool(regex.search(text)))
+
+    alias_ranges = active_policy.virtual_alias_ranges
+    for column_name in ("alias", "mentor_id"):
+        if column_name not in frame.columns:
+            continue
+        alias_numeric = pd.to_numeric(frame[column_name], errors="coerce")
+        for start, end in alias_ranges:
+            mask_virtual |= alias_numeric.between(start, end, inclusive="both")
+
+    sanitized = frame.loc[~mask_virtual].copy()
+
+    rename_candidates = {
+        "remaining_capacity | remaining_capacity": "remaining_capacity",
+    }
+    for old, new in rename_candidates.items():
+        if old in sanitized.columns and new not in sanitized.columns:
+            sanitized = sanitized.rename(columns={old: new})
+
+    defaults = {
+        "remaining_capacity": ("Int64", 0),
+        "allocations_new": ("Int64", 0),
+        "mentor_id": ("Int64", pd.NA),
+    }
+    for column, (dtype, default) in defaults.items():
+        if column not in sanitized.columns:
+            sanitized[column] = pd.Series([default] * len(sanitized), dtype=dtype)
+        else:
+            series = pd.Series(sanitized[column])
+            if dtype == "Int64":
+                series = pd.to_numeric(series, errors="coerce").astype("Int64")
+            else:
+                series = series.astype(dtype)
+            sanitized[column] = series
+
+    return canonicalize_headers(sanitized, header_mode=active_policy.excel.header_mode_internal)
+
+
 def _default_progress(pct: int, message: str) -> None:
     """چاپ سادهٔ وضعیت پیشرفت در حالت headless."""
     print(f"{pct:3d}% | {message}")
+
+
+def _print_audit_summary(report: Dict[str, Dict[str, Any]]) -> None:
+    """چاپ خلاصهٔ گزارش ممیزی تخصیص."""
+
+    print("=== Allocation Audit ===")
+    for key, payload in report.items():
+        count = int(payload.get("count", 0))
+        print(f"{key}: {count}")
+        samples = payload.get("samples") or []
+        if samples:
+            preview = json.dumps(samples[:3], ensure_ascii=False)
+            print(f"  samples: {preview}")
+
+
+def _print_metrics(report: Dict[str, Dict[str, Any]]) -> None:
+    """چاپ JSON ساخت‌یافته برای سامانه‌های Observability."""
+
+    summary = summarize_report(report)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 def _detect_reader(path: Path) -> Callable[[Path], pd.DataFrame]:
@@ -57,9 +173,9 @@ def _detect_reader(path: Path) -> Callable[[Path], pd.DataFrame]:
     dtype_map = {ALT_CODE_COLUMN: str}
     if suffix in {".xlsx", ".xls", ".xlsm"}:
         def _read_xlsx(p: Path) -> pd.DataFrame:
-            xls = pd.ExcelFile(p)
-            sheet = "matrix" if "matrix" in xls.sheet_names else xls.sheet_names[0]
-            return xls.parse(sheet, dtype=dtype_map)
+            with pd.ExcelFile(p) as xls:
+                sheet = "matrix" if "matrix" in xls.sheet_names else xls.sheet_names[0]
+                return xls.parse(sheet, dtype=dtype_map)
         return _read_xlsx
     return lambda p: pd.read_csv(p, dtype=dtype_map)
 
@@ -78,7 +194,12 @@ def _safe_isna(x) -> bool:
     try:
         if _is_empty_arraylike(x):
             return True
-        return pd.isna(x)
+        result = pd.isna(x)
+        if hasattr(result, "all"):
+            return bool(result.all())
+        if isinstance(result, (list, tuple)):
+            return all(bool(item) for item in result)
+        return bool(result)
     except ValueError:
         return True
     except Exception:
@@ -278,13 +399,17 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         "invalid_mentors": invalid_mentors,
         "meta": pd.json_normalize([meta]),
     }
-    header_mode = policy.excel.header_mode
+    header_internal = policy.excel.header_mode_internal
+    prepared_sheets = {
+        name: canonicalize_headers(df, header_mode=header_internal)
+        for name, df in sheets.items()
+    }
     write_xlsx_atomic(
-        sheets,
+        prepared_sheets,
         output,
         rtl=policy.excel.rtl,
         font_name=policy.excel.font_name,
-        header_mode=header_mode,
+        header_mode=policy.excel.header_mode_write,
     )
     progress(100, "done")
     return 0
@@ -304,6 +429,7 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
     progress(0, "loading inputs")
     students_df = reader_students(students_path)
     pool_df = reader_pool(pool_path)
+    pool_df = _sanitize_pool_for_allocation(pool_df, policy=policy)
 
     # --- تکمیل داده‌های دانش‌آموزان بر اساس فایل ورودی واقعی (Report (1).xlsx) ---
     # بر اساس محتوای واقعی فایل، ستون‌های لازم را ایجاد می‌کنیم
@@ -368,9 +494,12 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
     if "remaining_capacity" not in pool_df.columns:
         pool_df["remaining_capacity"] = 1  # ظرفیت پیش‌فرض 1
 
+    students_base = students_df.copy(deep=True)
+    pool_base = pool_df.copy(deep=True)
+
     allocations_df, updated_pool_df, logs_df, trace_df = allocate_batch(
-        students_df,
-        pool_df,
+        students_base.copy(deep=True),
+        pool_base.copy(deep=True),
         policy=policy,
         progress=progress,
         capacity_column=capacity_column,
@@ -397,14 +526,50 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
         "logs": logs_df,
         "trace": trace_df,
     }
-    header_mode = policy.excel.header_mode
+    header_internal = policy.excel.header_mode_internal
+    prepared_sheets = {
+        name: canonicalize_headers(df, header_mode=header_internal)
+        for name, df in sheets.items()
+    }
     write_xlsx_atomic(
-        sheets,
+        prepared_sheets,
         output,
         rtl=policy.excel.rtl,
         font_name=policy.excel.font_name,
-        header_mode=header_mode,
+        header_mode=policy.excel.header_mode_write,
     )
+
+    if getattr(args, "determinism_check", False):
+        progress(92, "determinism check")
+        allocations_check, pool_check, logs_check, trace_check = allocate_batch(
+            students_base.copy(deep=True),
+            pool_base.copy(deep=True),
+            policy=policy,
+            progress=lambda *_: None,
+            capacity_column=capacity_column,
+        )
+
+        header_internal = policy.excel.header_mode_internal
+
+        def _canon(df: pd.DataFrame) -> pd.DataFrame:
+            return canonicalize_headers(df, header_mode=header_internal).reset_index(drop=True)
+
+        try:
+            pd_testing.assert_frame_equal(_canon(allocations_df), _canon(allocations_check))
+            pd_testing.assert_frame_equal(_canon(updated_pool_df), _canon(pool_check))
+            pd_testing.assert_frame_equal(_canon(logs_df), _canon(logs_check))
+            pd_testing.assert_frame_equal(_canon(trace_df), _canon(trace_check))
+        except AssertionError as exc:  # pragma: no cover - determinism failure path
+            raise RuntimeError("Determinism check failed: outputs differ between runs") from exc
+
+    if getattr(args, "audit", False) or getattr(args, "metrics", False):
+        progress(95, "auditing allocations")
+        report = audit_allocations(output)
+        if getattr(args, "audit", False):
+            _print_audit_summary(report)
+        if getattr(args, "metrics", False):
+            _print_metrics(report)
+
     progress(100, "done")
     return 0
 
@@ -438,6 +603,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--policy",
         default=str(_DEFAULT_POLICY_PATH),
         help="مسیر فایل policy.json",
+    )
+    alloc_cmd.add_argument(
+        "--audit",
+        action="store_true",
+        help="پس از تولید خروجی، ممیزی خودکار را اجرا کن",
+    )
+    alloc_cmd.add_argument(
+        "--metrics",
+        action="store_true",
+        help="پس از اجرا، خلاصهٔ JSON ممیزی را چاپ کن",
+    )
+    alloc_cmd.add_argument(
+        "--determinism-check",
+        action="store_true",
+        help="اجرای دوباره تخصیص برای تضمین دترمینیسم",
     )
     return parser
 
