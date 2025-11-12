@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict
+from typing import Dict, Iterable, Tuple
 
 import pandas as pd
 
@@ -15,11 +15,12 @@ from .tables import (
     dedupe_headers,
 )
 
-__all__ = ["apply_workbook_formatting"]
+__all__ = ["apply_workbook_formatting", "write_selection_reasons_sheet"]
 
 
 _LOGGER = logging.getLogger(__name__)
 _FONT_WARNING_EMITTED = False
+_SCHEMA_DEFINED_NAME = "__SELECTION_REASON_SCHEMA_HASH__"
 
 
 def _warn_fonts_not_embedded() -> None:
@@ -135,3 +136,112 @@ def apply_workbook_formatting(
         _format_xlsxwriter(writer, sheet_frames, rtl=rtl, font_name=font_name)
     elif engine == "openpyxl":
         _format_openpyxl(writer, sheet_frames, rtl=rtl, font_name=font_name)
+
+
+def _sanitize_selection_reasons_frame(
+    df_reasons: pd.DataFrame | None,
+    columns: Iterable[str],
+) -> pd.DataFrame:
+    """پاک‌سازی DataFrame دلایل انتخاب متناسب با ستون‌های Policy.
+
+    مثال::
+
+        >>> import pandas as pd
+        >>> raw = pd.DataFrame({"نام": ["الف"]})
+        >>> _sanitize_selection_reasons_frame(raw, ("شمارنده", "نام"))
+           شمارنده   نام
+        0         1  الف
+    """
+
+    ordered_columns: Tuple[str, ...] = tuple(columns)
+    if df_reasons is None or df_reasons.empty:
+        sanitized = pd.DataFrame(columns=ordered_columns)
+    else:
+        sanitized = df_reasons.copy()
+
+    for column in ordered_columns:
+        if column not in sanitized.columns:
+            sanitized[column] = pd.NA
+
+    sanitized = sanitized.loc[:, ordered_columns].copy()
+    counter = pd.Series(
+        range(1, len(sanitized) + 1),
+        index=sanitized.index,
+        dtype="Int64",
+    )
+    sanitized.loc[:, "شمارنده"] = counter
+
+    str_columns = [column for column in ordered_columns if column != "شمارنده"]
+    if str_columns:
+        sanitized = sanitized.astype({column: "string" for column in str_columns})
+
+    return sanitized
+
+
+def _set_schema_hash_defined_name(writer: pd.ExcelWriter | None, schema_hash: str) -> None:
+    """ثبت Schema Hash به‌صورت Defined Name در فایل Excel.
+
+    مثال::
+
+        >>> import pandas as pd
+        >>> with pd.ExcelWriter("/tmp/sample.xlsx", engine="xlsxwriter") as writer:
+        ...     _set_schema_hash_defined_name(writer, "abc123")
+        ...     writer.book.defined_names_dict["__SELECTION_REASON_SCHEMA_HASH__"]
+        ('__SELECTION_REASON_SCHEMA_HASH__', '="abc123"')
+    """
+
+    if writer is None or not schema_hash:
+        return
+
+    workbook = getattr(writer, "book", None)
+    engine = str(getattr(writer, "engine", "") or "").lower()
+    if workbook is None:
+        return
+
+    if engine == "openpyxl":
+        from openpyxl.workbook.defined_name import DefinedName
+
+        defined_names = workbook.defined_names
+        if _SCHEMA_DEFINED_NAME in defined_names:
+            del defined_names[_SCHEMA_DEFINED_NAME]
+        defined_names.add(
+            DefinedName(name=_SCHEMA_DEFINED_NAME, attr_text=f'"{schema_hash}"')
+        )
+    elif engine == "xlsxwriter":
+        workbook.define_name(_SCHEMA_DEFINED_NAME, f'="{schema_hash}"')
+
+
+def write_selection_reasons_sheet(
+    df_reasons: pd.DataFrame | None,
+    writer: pd.ExcelWriter | None,
+    policy: "PolicyConfig",
+) -> tuple[str, pd.DataFrame]:
+    """تهیه و نوشتن شیت «دلایل انتخاب پشتیبان» مطابق Policy.
+
+    مثال:
+        >>> from app.core.policy_loader import load_policy
+        >>> policy = load_policy()
+        >>> df = pd.DataFrame({"کدملی": ["001"], "دلیل انتخاب پشتیبان": ["آزمایشی"]})
+        >>> sheet, sanitized = write_selection_reasons_sheet(df, writer=None, policy=policy)
+        >>> sheet
+        'دلایل انتخاب پشتیبان'
+        >>> sanitized.loc[0, "شمارنده"]
+        1
+    """
+
+    from app.core.policy_loader import PolicyConfig  # محلی برای جلوگیری از حلقهٔ import
+
+    if not isinstance(policy, PolicyConfig):  # pragma: no cover - نگهبان برای تزریق نادرست
+        raise TypeError("policy must be an instance of PolicyConfig")
+
+    options = policy.emission.selection_reasons
+    sheet_name = options.sheet_name
+    columns = options.columns
+    sanitized = _sanitize_selection_reasons_frame(df_reasons, columns)
+    sanitized.attrs["schema_hash"] = options.schema_hash
+
+    if writer is not None:
+        sanitized.to_excel(writer, sheet_name=sheet_name, index=False)
+        _set_schema_hash_defined_name(writer, options.schema_hash)
+
+    return sheet_name, sanitized
