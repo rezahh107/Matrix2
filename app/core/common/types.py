@@ -169,3 +169,6 @@ class TraceStageRecord(TypedDict):
     total_before: int
     total_after: int
     matched: bool
+    expected_op: str | None
+    expected_threshold: Any | None
+    extras: Mapping[str, Any] | None

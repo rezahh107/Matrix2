@@ -9,7 +9,13 @@ from typing import Callable, Dict, List, Mapping, Sequence
 import pandas as pd
 
 from .common.column_normalizer import normalize_input_columns
-from .common.columns import CANON_EN_TO_FA, canonicalize_headers, coerce_semantics, resolve_aliases
+from .common.columns import (
+    CANON_EN_TO_FA,
+    canonicalize_headers,
+    coerce_semantics,
+    enrich_school_columns_en,
+    resolve_aliases,
+)
 from .common.filters import apply_join_filters
 from .common.ids import build_mentor_id_map, inject_mentor_id, natural_key
 from .common.normalization import to_numlike_str
@@ -104,10 +110,35 @@ def _build_log_base(student: Mapping[str, object], policy: PolicyConfig) -> Allo
 
 def _normalize_students(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
     normalized = resolve_aliases(df, "report")
+    school_fa = CANON_EN_TO_FA["school_code"]
+    if school_fa in normalized.columns:
+        pre_normal_raw = normalized[school_fa].astype("string").str.strip()
+    else:
+        pre_normal_raw = pd.Series([pd.NA] * len(normalized), dtype="string", index=normalized.index)
     normalized = coerce_semantics(normalized, "report")
     normalized, _ = normalize_input_columns(
         normalized, kind="StudentReport", include_alias=True, report=False
     )
+    normalized_en = canonicalize_headers(normalized, header_mode="en")
+    if "school_code_raw" not in normalized_en.columns:
+        normalized_en["school_code_raw"] = pre_normal_raw.reindex(normalized_en.index)
+    normalized_en = enrich_school_columns_en(normalized_en)
+    normalized = canonicalize_headers(normalized_en, header_mode="fa")
+    default_index = normalized_en.index
+    normalized["school_code_raw"] = normalized_en.get(
+        "school_code_raw", pd.Series([pd.NA] * len(default_index), dtype="string", index=default_index)
+    )
+    normalized["school_code_norm"] = normalized_en.get(
+        "school_code_norm",
+        pd.Series([pd.NA] * len(default_index), dtype="Int64", index=default_index),
+    )
+    normalized["school_status_resolved"] = normalized_en.get(
+        "school_status_resolved",
+        pd.Series([0] * len(default_index), dtype="Int64", index=default_index),
+    )
+    school_fa = CANON_EN_TO_FA["school_code"]
+    if school_fa in normalized.columns:
+        normalized[school_fa] = normalized["school_code_norm"].astype("Int64")
     missing = [column for column in policy.join_keys if column not in normalized.columns]
     if missing:
         raise KeyError(f"Student data missing columns: {missing}")

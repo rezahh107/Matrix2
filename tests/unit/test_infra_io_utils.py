@@ -115,8 +115,14 @@ def test_write_xlsx_atomic_aligns_with_xlsxwriter(tmp_path: Path, monkeypatch: p
     for idx in range(1, 5):
         cell = ws.cell(row=idx, column=1)
         assert cell.font.name == "Vazirmatn"
+        assert cell.font.size == 8
         assert cell.alignment.horizontal == "center"
         assert cell.alignment.vertical == "center"
+
+    tables = list(ws.tables.values())
+    assert len(tables) == 1
+    table = tables[0]
+    assert table.ref == "A1:A5"
 
 
 @pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای بررسی RTL/فونت")
@@ -134,10 +140,11 @@ def test_write_xlsx_atomic_applies_rtl_and_font(tmp_path: Path, monkeypatch: pyt
 
     assert ws.sheet_view.rightToLeft is True
     assert ws.cell(row=1, column=1).font.name == "Tahoma"
+    assert ws.cell(row=1, column=1).font.size != 8
 
 
-@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای بررسی فونت/تراز")
-def test_write_xlsx_atomic_applies_font_and_alignment_to_all_rows(
+@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای بررسی فونت")
+def test_write_xlsx_atomic_applies_font_to_all_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("EXCEL_ENGINE", "openpyxl")
@@ -153,8 +160,14 @@ def test_write_xlsx_atomic_applies_font_and_alignment_to_all_rows(
 
     target_cell = ws.cell(row=60, column=1)
     assert target_cell.font.name == "Vazirmatn"
-    assert target_cell.alignment.horizontal == "center"
-    assert target_cell.alignment.vertical == "center"
+    assert target_cell.font.size == 8
+    assert target_cell.alignment.horizontal is None
+    assert target_cell.alignment.vertical is None
+
+    tables = list(ws.tables.values())
+    assert len(tables) == 1
+    table = tables[0]
+    assert table.ref == "A1:A105"
 
 
 @pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای خواندن .xlsx")

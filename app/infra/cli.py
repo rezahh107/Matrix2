@@ -38,10 +38,12 @@ from app.infra.io_utils import (
 from app.infra.audit_allocations import audit_allocations, summarize_report
 # --- واردات اصلاح شده از app.core ---
 from app.core.common.columns import (
+    CANON_EN_TO_FA,
     HeaderMode,
     canonicalize_headers,
-    resolve_aliases,
     coerce_semantics,
+    enrich_school_columns_en,
+    resolve_aliases,
 )
 from app.core.common.column_normalizer import normalize_input_columns
 from app.core.common.normalization import safe_int_value
@@ -398,6 +400,17 @@ def _inject_student_ids(
     current_df = _read_optional_first_sheet(current_path)
 
     students_en = canonicalize_headers(students_df, header_mode="en")
+    students_en = enrich_school_columns_en(students_en)
+    students_fa = canonicalize_headers(students_en, header_mode="fa")
+    school_fa = CANON_EN_TO_FA.get("school_code", "کد مدرسه")
+    if school_fa in students_fa.columns:
+        school_series = students_fa[school_fa]
+        if isinstance(school_series, pd.DataFrame):
+            school_series = school_series.iloc[:, 0]
+        students_df[school_fa] = school_series
+    for column_name in ("school_code_raw", "school_code_norm", "school_status_resolved"):
+        if column_name in students_en.columns:
+            students_df[column_name] = students_en[column_name]
     required = {"national_id", "gender"}
     missing = sorted(required - set(students_en.columns))
     if missing:

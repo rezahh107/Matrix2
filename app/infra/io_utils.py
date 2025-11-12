@@ -20,6 +20,7 @@ import pandas as pd
 
 from app.core.common.columns import CANON_EN_TO_FA, HeaderMode, canonicalize_headers
 from app.core.policy_loader import get_policy
+from app.infra.excel import apply_workbook_formatting
 
 __all__ = [
     "ALT_CODE_COLUMN",
@@ -170,58 +171,15 @@ def _apply_excel_formatting(
     font_name: str | None,
     sheet_frames: Dict[str, pd.DataFrame],
 ) -> None:
-    """اعمال تنظیمات RTL و فونت پیش‌فرض برای خروجی Excel."""
+    """اعمال تنظیمات خروجی با کمک زیرسیستم Excel."""
 
-    if not rtl and not font_name:
-        return
-
-    if engine == "xlsxwriter":
-        workbook = writer.book  # type: ignore[attr-defined]
-        fmt_options: dict[str, object] = {
-            "align": "center",
-            "valign": "vcenter",
-        }
-        if font_name:
-            fmt_options["font_name"] = font_name
-        fmt = workbook.add_format(fmt_options)
-        for worksheet in writer.sheets.values():
-            if rtl:
-                worksheet.right_to_left()
-            worksheet.set_column(0, 16384, None, fmt)
-        return
-
-    if engine != "openpyxl":
-        return
-
-    try:
-        from openpyxl.styles import Alignment, Font
-    except Exception:  # pragma: no cover - وابستگی اختیاری
-        Font = None  # type: ignore[assignment]
-        Alignment = None  # type: ignore[assignment]
-
-    workbook = writer.book  # type: ignore[attr-defined]
-    for sheet_name, df in sheet_frames.items():
-        worksheet = workbook[sheet_name]
-        if rtl:
-            worksheet.sheet_view.rightToLeft = True
-        if not font_name and Alignment is None:
-            continue
-
-        header_font = Font(name=font_name) if font_name and Font is not None else None
-        cell_alignment = (
-            Alignment(horizontal="center", vertical="center")
-            if Alignment is not None
-            else None
-        )
-
-        max_row = max(worksheet.max_row, len(df) + 1)
-        max_col = worksheet.max_column
-        for row in worksheet.iter_rows(min_row=1, max_row=max_row, min_col=1, max_col=max_col):
-            for cell in row:
-                if header_font is not None:
-                    cell.font = header_font
-                if cell_alignment is not None:
-                    cell.alignment = cell_alignment
+    apply_workbook_formatting(
+        writer,
+        engine=engine,
+        sheet_frames=sheet_frames,
+        rtl=rtl,
+        font_name=font_name,
+    )
 
 
 @contextlib.contextmanager
