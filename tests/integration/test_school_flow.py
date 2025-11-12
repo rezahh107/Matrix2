@@ -1,0 +1,82 @@
+"""آزمون یکپارچهٔ جریان مدرسه برای Trace."""
+
+from __future__ import annotations
+
+import pandas as pd
+
+from app.core.allocate_students import _normalize_students
+from app.core.common.trace import build_allocation_trace
+from app.core.policy_loader import load_policy
+
+
+def _student_df(code: str | None) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "مدرسه نهایی": [code],
+            "کدرشته": [101],
+            "گروه آزمایشی": ["تجربی"],
+            "جنسیت": [1],
+            "دانش آموز فارغ": [0],
+            "مرکز گلستان صدرا": [0],
+            "مالی حکمت بنیاد": [0],
+        }
+    )
+
+
+def _pool_df(school_code: int) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "کدرشته": [101],
+            "گروه آزمایشی": ["تجربی"],
+            "جنسیت": [1],
+            "دانش آموز فارغ": [0],
+            "مرکز گلستان صدرا": [0],
+            "مالی حکمت بنیاد": [0],
+            "کد مدرسه": [school_code],
+            "remaining_capacity": [1],
+        }
+    )
+
+
+def _school_stage(trace: list[dict[str, object]]) -> dict[str, object]:
+    return next(stage for stage in trace if stage["stage"] == "school")
+
+
+def test_trace_records_raw_and_normalized_school_code() -> None:
+    policy = load_policy()
+    students = _normalize_students(_student_df("۶۶۳"), policy)
+    student = students.iloc[0].to_dict()
+    pool = _pool_df(663)
+
+    trace = build_allocation_trace(student, pool, policy=policy)
+    stage = _school_stage(trace)
+
+    assert stage["expected_op"] == ">"
+    assert stage["expected_threshold"] == 0
+    assert stage["expected_value"] == 663
+    extras = stage["extras"]
+    assert extras == {
+        "school_code_raw": "۶۶۳",
+        "school_code_norm": 663,
+        "school_status_resolved": True,
+    }
+
+
+def test_trace_for_normal_student_marks_false() -> None:
+    policy = load_policy()
+    students = _normalize_students(_student_df("0"), policy)
+    student = students.iloc[0].to_dict()
+    pool = _pool_df(0)
+
+    trace = build_allocation_trace(student, pool, policy=policy)
+    stage = _school_stage(trace)
+
+    assert stage["expected_op"] == ">"
+    assert stage["expected_threshold"] == 0
+    assert stage["expected_value"] == 0
+    extras = stage["extras"]
+    assert extras == {
+        "school_code_raw": "0",
+        "school_code_norm": 0,
+        "school_status_resolved": False,
+    }
