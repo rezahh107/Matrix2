@@ -100,11 +100,30 @@ def _collect_join_key_map(
 ) -> tuple[Dict[str, int], Tuple[str, ...]]:
     join_map: Dict[str, int] = {}
     missing_columns: list[str] = []
+    school_column = policy.columns.school_code
     for column in policy.join_keys:
         normalized = column.replace(" ", "_")
+        allow_zero = policy.school_code_empty_as_zero and column == school_column
         try:
-            join_map[normalized] = _coerce_int(_student_value(student, column))
-        except (KeyError, ValueError):
+            value = _student_value(student, column)
+        except KeyError:
+            if allow_zero:
+                join_map[normalized] = 0
+                continue
+            join_map[normalized] = -1
+            missing_columns.append(column)
+            continue
+
+        if allow_zero and pd.isna(value):  # type: ignore[arg-type]
+            join_map[normalized] = 0
+            continue
+
+        try:
+            join_map[normalized] = _coerce_int(value)
+        except ValueError:
+            if allow_zero:
+                join_map[normalized] = 0
+                continue
             join_map[normalized] = -1
             missing_columns.append(column)
     return join_map, tuple(missing_columns)
@@ -157,20 +176,26 @@ def _normalize_students(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
     normalized_en = enrich_school_columns_en(normalized_en)
     normalized = canonicalize_headers(normalized_en, header_mode="fa")
     default_index = normalized_en.index
-    normalized["school_code_raw"] = normalized_en.get(
+    school_code_raw = normalized_en.get(
         "school_code_raw", pd.Series([pd.NA] * len(default_index), dtype="string", index=default_index)
     )
-    normalized["school_code_norm"] = normalized_en.get(
+    normalized["school_code_raw"] = school_code_raw
+
+    school_code_norm = normalized_en.get(
         "school_code_norm",
         pd.Series([pd.NA] * len(default_index), dtype="Int64", index=default_index),
     )
+    if policy.school_code_empty_as_zero:
+        school_code_norm = school_code_norm.fillna(0)
+    school_code_norm = school_code_norm.astype("Int64")
+    normalized["school_code_norm"] = school_code_norm
     normalized["school_status_resolved"] = normalized_en.get(
         "school_status_resolved",
         pd.Series([0] * len(default_index), dtype="Int64", index=default_index),
     )
     school_fa = CANON_EN_TO_FA["school_code"]
     if school_fa in normalized.columns:
-        normalized[school_fa] = normalized["school_code_norm"].astype("Int64")
+        normalized[school_fa] = school_code_norm
     missing = [column for column in policy.join_keys if column not in normalized.columns]
     if missing:
         raise KeyError(f"Student data missing columns: {missing}")
