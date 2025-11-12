@@ -121,7 +121,7 @@ def apply_ranking_policy(
         raw = entry.get(key, 0)
         try:
             return int(raw)  # type: ignore[arg-type]
-        except Exception:  # pragma: no cover - نگهبان ورودی پیش‌بینی‌نشده
+        except (ValueError, TypeError):  # pragma: no cover - نگهبان ورودی پیش‌بینی‌نشده
             return 0
 
     initial = mentor_ids.map(lambda mentor: _state_value(mentor, "initial"))
