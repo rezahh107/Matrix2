@@ -15,6 +15,11 @@
     "normal": "postal_or_fallback_mentor_id",
     "school": "mentor_id"
   },
+  "virtual_alias_ranges": [[7000, 7999]],
+  "virtual_name_patterns": [
+    "در\\s+انتظار\\s+تخصیص",
+    "فراگیر"
+  ],
   "join_keys": [
     "کدرشته",
     "جنسیت",
@@ -93,6 +98,7 @@
   "excel": {
     "rtl": true,
     "font_name": "Vazirmatn",
-    "header_mode": "fa_en"
+    "header_mode_internal": "en",
+    "header_mode_write": "fa_en"
   }
 }
