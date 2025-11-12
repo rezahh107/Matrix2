@@ -8,7 +8,12 @@ from typing import Sequence
 import pandas as pd
 
 from app.core.common.columns import canonicalize_headers, ensure_series
-from app.core.common.normalization import fa_digitize, sanitize_bidi, safe_truncate
+from app.core.common.normalization import (
+    fa_digitize,
+    sanitize_bidi,
+    safe_truncate,
+    to_numlike_str,
+)
 from app.core.common.policy import (
     SelectionReasonLabels,
     SelectionReasonPolicy,
@@ -142,15 +147,22 @@ def build_selection_reason_rows(
     if not config.enabled or allocations is None or allocations.empty:
         return _empty_frame()
 
-    students_fa = canonicalize_headers(students, header_mode="fa")
+    students_fa = canonicalize_headers(students, header_mode="fa").copy()
     missing_keys = [key for key in policy.join_keys if key not in students_fa.columns]
     if missing_keys:
         raise KeyError(f"students missing join keys: {missing_keys}")
     for key in policy.join_keys:
         series = ensure_series(students_fa[key])
-        coerced = pd.to_numeric(series, errors="coerce")
+        normalized = series.map(to_numlike_str)
+        if key == policy.columns.school_code and policy.school_code_empty_as_zero:
+            normalized = normalized.replace("", "0")
+        coerced = pd.to_numeric(normalized, errors="coerce")
         if coerced.isna().any():
             raise ValueError(f"students join key '{key}' contains non-integer values")
+        if not coerced.empty:
+            coerced_float = coerced.astype("float64")
+            if not coerced_float.map(float.is_integer).all():
+                raise ValueError(f"students join key '{key}' contains non-integer values")
 
     allocations_en = canonicalize_headers(allocations, header_mode="en")
     students_en = canonicalize_headers(students, header_mode="en")
