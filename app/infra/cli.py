@@ -25,9 +25,10 @@ import pandas as pd
 from pandas import testing as pd_testing
 from pandas.api import types as pd_types
 
-from app.core.allocate_students import allocate_batch
+from app.core.allocate_students import allocate_batch, build_selection_reason_rows
 from app.core.build_matrix import build_matrix
 from app.core.policy_loader import PolicyConfig, load_policy
+from app.infra.excel_writer import write_selection_reasons_sheet
 from app.infra.io_utils import (
     ALT_CODE_COLUMN,
     read_crosswalk_workbook,
@@ -44,6 +45,7 @@ from app.core.common.columns import (
 )
 from app.core.common.column_normalizer import normalize_input_columns
 from app.core.common.normalization import safe_int_value
+from app.core.common.utils import normalize_fa
 from app.core.counter import (
     assert_unique_student_ids,
     assign_counters,
@@ -443,6 +445,7 @@ def _inject_student_ids(
     return counters, summary
 
 
+
 def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn) -> int:
     """اجرای فرمان ساخت ماتریس با چاپ پیشرفت و خروجی Excel."""
 
@@ -636,12 +639,27 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
     updated_pool_df = _ensure_valid_dataframe(updated_pool_df, "updated_pool")
     logs_df = _ensure_valid_dataframe(logs_df, "logs")
     trace_df = _ensure_valid_dataframe(trace_df, "trace")
-    
+    selection_reasons_df = build_selection_reason_rows(
+        allocations_df,
+        students_base,
+        pool_base,
+        policy=policy,
+        logs=logs_df,
+        trace=trace_df,
+    )
+    selection_reasons_df = _ensure_valid_dataframe(selection_reasons_df, "selection_reasons")
+    sheet_name, selection_reasons_df = write_selection_reasons_sheet(
+        selection_reasons_df,
+        writer=None,
+        policy=policy,
+    )
+
     # تبدیل نهایی به فرمت‌های قابل نوشتن در Excel
     allocations_df = _make_excel_safe(allocations_df)
     updated_pool_df = _make_excel_safe(updated_pool_df)
     logs_df = _make_excel_safe(logs_df)
     trace_df = _make_excel_safe(trace_df)
+    selection_reasons_df = _make_excel_safe(selection_reasons_df)
     # --- پایان پاک‌سازی ---
 
     progress(90, "writing outputs")
@@ -650,6 +668,7 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
         "updated_pool": updated_pool_df,
         "logs": logs_df,
         "trace": trace_df,
+        sheet_name: selection_reasons_df,
     }
     header_internal = policy.excel.header_mode_internal
     prepared_sheets = {

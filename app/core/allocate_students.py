@@ -11,16 +11,23 @@ import pandas as pd
 from .common.column_normalizer import normalize_input_columns
 from .common.columns import CANON_EN_TO_FA, canonicalize_headers, coerce_semantics, resolve_aliases
 from .common.filters import apply_join_filters
-from .common.ids import build_mentor_id_map, inject_mentor_id
+from .common.ids import build_mentor_id_map, inject_mentor_id, natural_key
 from .common.normalization import to_numlike_str
 from .common.ranking import apply_ranking_policy, build_mentor_state, consume_capacity
 from .common.trace import TraceStagePlan, build_allocation_trace, build_trace_plan
 from .common.types import AllocationLogRecord, JoinKeyValues, TraceStageRecord
 from .policy_loader import PolicyConfig, load_policy
+from .reason.selection_reason import build_selection_reason_rows as _build_selection_reason_rows
 
 ProgressFn = Callable[[int, str], None]
 
-__all__ = ["ProgressFn", "AllocationResult", "allocate_student", "allocate_batch"]
+__all__ = [
+    "ProgressFn",
+    "AllocationResult",
+    "allocate_student",
+    "allocate_batch",
+    "build_selection_reason_rows",
+]
 
 
 def _noop_progress(_: int, __: str) -> None:
@@ -455,3 +462,27 @@ def allocate_batch(
         raise ValueError("Pool capacity column contains negative values after allocation")
 
     return allocations_df, pool_output, logs_df, trace_df
+
+
+def build_selection_reason_rows(
+    allocations: pd.DataFrame,
+    students: pd.DataFrame,
+    mentors: pd.DataFrame,
+    *,
+    policy: PolicyConfig,
+    logs: pd.DataFrame | None = None,
+    trace: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """واسطهٔ سازگار برای ساخت شیت دلایل انتخاب پشتیبان."""
+
+    return _build_selection_reason_rows(
+        allocations,
+        students,
+        mentors,
+        policy=policy,
+        logs=logs,
+        trace=trace,
+    )
+
+
+

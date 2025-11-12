@@ -9,11 +9,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.core.allocate_students import allocate_batch
+from app.core.allocate_students import allocate_batch, build_selection_reason_rows
 from app.core.policy_loader import load_policy
 from app.core.common.columns import canonicalize_headers
 from app.infra.audit_allocations import audit_allocations
 from app.infra.cli import _sanitize_pool_for_allocation
+from app.infra.excel_writer import write_selection_reasons_sheet
 from app.infra.io_utils import write_xlsx_atomic
 
 
@@ -121,11 +122,26 @@ def test_allocator_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
 
     header_internal = policy.excel.header_mode_internal
+    reasons = build_selection_reason_rows(
+        allocations,
+        students,
+        sanitized_pool,
+        policy=policy,
+        logs=logs,
+        trace=trace,
+    )
+    sheet_name, reasons = write_selection_reasons_sheet(
+        reasons,
+        writer=None,
+        policy=policy,
+    )
+
     sheets = {
         "allocations": canonicalize_headers(allocations, header_mode=header_internal),
         "updated_pool": canonicalize_headers(updated_pool, header_mode=header_internal),
         "logs": canonicalize_headers(logs, header_mode=header_internal),
         "trace": canonicalize_headers(trace, header_mode=header_internal),
+        sheet_name: canonicalize_headers(reasons, header_mode=header_internal),
     }
 
     output = tmp_path / "alloc-end-to-end.xlsx"

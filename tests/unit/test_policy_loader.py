@@ -236,6 +236,43 @@ def test_excel_options_parsing() -> None:
     assert policy_override.excel.header_mode_write == "fa"
 
 
+def test_selection_reason_options_parsing() -> None:
+    policy = load_policy()
+    options = policy.emission.selection_reasons
+    assert options.enabled is True
+    assert options.sheet_name == "دلایل انتخاب پشتیبان"
+    assert "{gender_segment}" in options.template
+    assert "{capacity_segment}" in options.template
+    assert options.trace_stage_labels == (
+        "جنسیت",
+        "مدرسه",
+        "گروه/رشته",
+        "سیاست رتبه‌بندی",
+    )
+
+    payload_override = _valid_payload()
+    payload_override["emission"] = {
+        "selection_reasons": {
+            "enabled": False,
+            "sheet_name": "custom_sheet",
+            "template": "mentor {mentor_id}",
+            "trace_stage_labels": ["Gender", "School", "Track", "Ranking"],
+        }
+    }
+    policy_override = parse_policy_dict(payload_override)
+    override_options = policy_override.emission.selection_reasons
+    assert override_options.enabled is False
+    assert override_options.sheet_name == "custom_sheet"
+    assert override_options.template == "mentor {mentor_id}"
+    assert override_options.trace_stage_labels == (
+        "Gender",
+        "School",
+        "Track",
+        "Ranking",
+    )
+    assert override_options.trace_stage_labels[0] == "Gender"
+
+
 def test_policy_column_aliases_supported() -> None:
     payload = _valid_payload()
     payload["column_aliases"] = {
