@@ -8,6 +8,7 @@ from typing import Dict, Optional, Sequence
 
 import pandas as pd
 
+from app.core.common.columns import ensure_series
 from app.core.common.ranking import natural_key
 from app.core.policy_loader import GenderCodes, get_policy
 
@@ -329,7 +330,16 @@ def assign_counters(
     if "national_id" not in students_df.columns or "gender" not in students_df.columns:
         raise ValueError("students_df باید ستون‌های national_id و gender داشته باشد")
 
-    work = students_df[["national_id", "gender"]].copy()
+    nat_values = ensure_series(students_df["national_id"])
+    gender_values = ensure_series(students_df["gender"])
+
+    work = pd.DataFrame(
+        {
+            "national_id": nat_values.astype("string"),
+            "gender": gender_values,
+        },
+        index=students_df.index,
+    )
     work["__nat__"] = work["national_id"].map(_normalize_nat_id)
     work["__gender__"] = pd.to_numeric(work["gender"], errors="coerce")
 

@@ -106,6 +106,22 @@ def test_assign_counters_duplicate_rows_raise_on_assert() -> None:
         assert_unique_student_ids(counters)
 
 
+def test_assign_counters_handles_duplicate_gender_columns() -> None:
+    students = pd.DataFrame(
+        [["0012345678", 1, 1]],
+        columns=["national_id", "gender", "gender"],
+    )
+
+    result = assign_counters(
+        students,
+        prior_roster_df=None,
+        current_roster_df=None,
+        academic_year=1404,
+    )
+
+    assert result.iloc[0] == "543570001"
+
+
 def test_assign_counters_overflow_guard() -> None:
     students = pd.DataFrame({"national_id": ["123"], "gender": [1]})
     current = pd.DataFrame({"student_id": ["543579999"]})
