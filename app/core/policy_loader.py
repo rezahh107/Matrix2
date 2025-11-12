@@ -31,7 +31,7 @@ _DEFAULT_VIRTUAL_NAME_PATTERNS: tuple[str, ...] = (
 )
 _DEFAULT_EXCEL_OPTIONS: Mapping[str, object] = {
     "rtl": True,
-    "font_name": "Vazirmatn",
+    "font_name": "Tahoma",
     "header_mode_internal": "en",
     "header_mode_write": "fa_en",
 }
@@ -440,15 +440,15 @@ def _normalize_excel_options(value: object | None) -> ExcelOptions:
     if value is None:
         return ExcelOptions(
             rtl=True,
-            font_name="Vazirmatn",
+            font_name="Tahoma",
             header_mode_internal="en",
             header_mode_write="fa_en",
         )
     if not isinstance(value, Mapping):
         raise TypeError("excel must be a mapping")
     rtl = _ensure_bool("excel.rtl", value.get("rtl", True))
-    font_raw = value.get("font_name", "Vazirmatn")
-    font_name = str(font_raw or "Vazirmatn")
+    font_raw = value.get("font_name", "Tahoma")
+    font_name = str(font_raw or "Tahoma")
     header_internal = str(value.get("header_mode_internal", "en"))
     header_write = value.get("header_mode_write")
     if header_write is None:

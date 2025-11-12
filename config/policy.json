@@ -204,7 +204,7 @@
   },
   "excel": {
     "rtl": true,
-    "font_name": "Vazirmatn",
+    "font_name": "Tahoma",
     "header_mode_internal": "en",
     "header_mode_write": "fa_en"
   }

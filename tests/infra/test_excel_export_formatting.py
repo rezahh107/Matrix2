@@ -74,7 +74,7 @@ def test_table_and_autofilter_created(tmp_path: Path, monkeypatch: pytest.Monkey
     out = tmp_path / f"{engine}-table.xlsx"
     monkeypatch.setenv("EXCEL_ENGINE", engine)
 
-    write_xlsx_atomic({"Sheet": df}, out, font_name="Vazirmatn")
+    write_xlsx_atomic({"Sheet": df}, out, font_name="Tahoma")
 
     wb = load_workbook(out)
     ws = wb["Sheet"]
@@ -116,7 +116,7 @@ def test_style_caches_remain_minimal(
 
         monkeypatch.setattr(excel_exporter, "ensure_openpyxl_named_style", tracker)
 
-    write_xlsx_atomic({"Sheet": df}, out, font_name="Vazirmatn")
+    write_xlsx_atomic({"Sheet": df}, out, font_name="Tahoma")
 
     if engine == "xlsxwriter":
         assert len(created_formats) <= 3
@@ -133,7 +133,7 @@ def test_table_name_start_letter(
     out = tmp_path / f"{engine}-table-letter.xlsx"
     monkeypatch.setenv("EXCEL_ENGINE", engine)
 
-    write_xlsx_atomic(sheets, out, font_name="Vazirmatn")
+    write_xlsx_atomic(sheets, out, font_name="Tahoma")
 
     wb = load_workbook(out)
     for sheet in wb.sheetnames:
@@ -158,7 +158,7 @@ def test_table_headers_dedup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, en
         "app.infra.io_utils._prepare_dataframe_for_excel", lambda frame: frame.copy()
     )
 
-    write_xlsx_atomic({"Sheet": df}, out, font_name="Vazirmatn")
+    write_xlsx_atomic({"Sheet": df}, out, font_name="Tahoma")
 
     wb = load_workbook(out)
     ws = wb["Sheet"]
@@ -193,7 +193,7 @@ def test_datetime_format_preserved_xlsxwriter(
     out = tmp_path / "datetime.xlsx"
     monkeypatch.setenv("EXCEL_ENGINE", engine)
 
-    write_xlsx_atomic({"Sheet": df}, out, font_name="Vazirmatn")
+    write_xlsx_atomic({"Sheet": df}, out, font_name="Tahoma")
 
     round_trip = pd.read_excel(out, engine="openpyxl")
     assert is_datetime64_any_dtype(round_trip["ts"])
@@ -216,8 +216,8 @@ def test_font_warning_emitted_once(
     monkeypatch.setenv("EXCEL_ENGINE", engine)
 
     with caplog.at_level(logging.WARNING):
-        write_xlsx_atomic({"Sheet": df}, out_first, font_name="Vazirmatn")
-        write_xlsx_atomic({"Sheet": df}, out_second, font_name="Vazirmatn")
+        write_xlsx_atomic({"Sheet": df}, out_first, font_name="Tahoma")
+        write_xlsx_atomic({"Sheet": df}, out_second, font_name="Tahoma")
 
     messages = [record.getMessage() for record in caplog.records if "جاسازی" in record.getMessage()]
     assert len(messages) == 1

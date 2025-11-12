@@ -1,4 +1,4 @@
-"""مدیریت فونت‌های رابط کاربری و اضافه کردن بستهٔ وزیر/وزیرمتن."""
+"""مدیریت فونت‌های رابط کاربری با پشتیبانی از فونت تاهوما و بستهٔ وزیر."""
 
 from __future__ import annotations
 
@@ -25,10 +25,10 @@ _BUNDLED_FONT_PAYLOADS: dict[str, str] = {
     "vazirmatn": VAZIRMATN_REGULAR_TTF_BASE64,
 }
 _SYSTEM_FALLBACKS: Tuple[str, ...] = (
+    "Tahoma",
+    "Segoe UI",
     "Vazirmatn",
     "Vazir",
-    "Segoe UI",
-    "Tahoma",
     "Arial",
     "Verdana",
     "Microsoft Sans Serif",
@@ -98,21 +98,21 @@ def _policy_font_name() -> str:
     """خواندن نام فونت از Policy با تضمین خطای کنترل‌شده."""
 
     try:
-        name = (get_policy().excel.font_name or "Vazirmatn").strip()
+        name = (get_policy().excel.font_name or "Tahoma").strip()
     except Exception as exc:  # pragma: no cover - خطاهای محیطی Policy
         LOGGER.warning("خواندن فونت از Policy شکست خورد؛ استفاده از پیش‌فرض.", exc_info=exc)
-        return "Vazirmatn"
-    return name or "Vazirmatn"
+        return "Tahoma"
+    return name or "Tahoma"
 
 
 def prepare_default_font(*, point_size: int = 10) -> "QFont":
-    """ساخت شیء فونت پیش‌فرض با نصب بسته وزیر/وزیرمتن.
+    """ساخت شیء فونت پیش‌فرض با نصب فونت‌های لازم (تاهوما یا وزیر).
 
     مثال::
 
         >>> font = prepare_default_font(point_size=11)  # doctest: +SKIP
         >>> font.family()  # doctest: +SKIP
-        'Vazirmatn'
+        'Tahoma'
     """
 
     from PySide6.QtGui import QFont, QFontDatabase
@@ -140,7 +140,7 @@ def prepare_default_font(*, point_size: int = 10) -> "QFont":
 
 
 def apply_default_font(app: "QApplication", *, point_size: int = 10) -> "QFont":
-    """نصب و اعمال فونت وزیر بر روی QApplication.
+    """نصب و اعمال فونت پیش‌فرض (تاهوما یا وزیر) بر روی QApplication.
 
     مثال::
 
