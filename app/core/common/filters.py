@@ -41,7 +41,7 @@ from typing import Callable, Mapping, Sequence
 import pandas as pd
 
 from ..policy_loader import PolicyConfig, load_policy
-from .normalization import to_numlike_str
+from .normalization import strip_school_code_separators, to_numlike_str
 
 _SCHOOL_CODE_TRANSLATION = str.maketrans(
     {
@@ -98,6 +98,27 @@ def _coerce_school_candidate(candidate: object) -> tuple[int | None, bool]:
         return int(float(text)), False
     except ValueError:
         return None, True
+
+
+def _sanitize_school_series(series: pd.Series) -> pd.Series:
+    """بازگرداندن Series از مقادیر نرمال‌شدهٔ کد مدرسه بدون mutate ورودی.
+
+    مثال کوتاه::
+
+        >>> import pandas as pd
+        >>> _sanitize_school_series(pd.Series(["35-81", "۳۵/۸۱"]))
+        0    3581
+        1    3581
+        dtype: Int64
+    """
+
+    cleaned: list[object] = []
+    for value in series.tolist():
+        coerced, missing = _coerce_school_candidate(value)
+        cleaned.append(pd.NA if missing else coerced)
+    result = pd.Series(cleaned, index=series.index)
+    numeric = pd.to_numeric(result, errors="coerce")
+    return numeric.astype("Int64")
 
 
 def resolve_student_school_code(
@@ -264,7 +285,13 @@ def filter_by_school(
         return pool
     if school_code.value is None:
         return pool
-    return _eq_filter(pool, column, int(school_code.value))
+    target = int(school_code.value)
+    column_series = pool[column]
+    if pd.api.types.is_integer_dtype(column_series):
+        return _eq_filter(pool, column, target)
+    sanitized = _sanitize_school_series(column_series)
+    mask = sanitized == target
+    return pool.loc[mask]
 
 
 def apply_join_filters(
