@@ -16,6 +16,7 @@ def _legacy_payload(base_path: Path) -> dict[str, object]:
     excel = payload.get("excel", {})
     excel.pop("header_mode_internal", None)
     excel.pop("header_mode_write", None)
+    excel.pop("font_size", None)
     payload["excel"] = excel
     return payload
 

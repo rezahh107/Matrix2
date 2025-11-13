@@ -55,7 +55,7 @@ def test_vazir_font_size_enforced(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.parametrize("engine", _ENGINES)
-def test_non_vazir_font_preserves_size(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine: str) -> None:
+def test_non_vazir_font_uses_policy_size(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine: str) -> None:
     df = pd.DataFrame({"val": [1, 2]})
     out = tmp_path / f"{engine}-tahoma.xlsx"
     monkeypatch.setenv("EXCEL_ENGINE", engine)
@@ -65,7 +65,7 @@ def test_non_vazir_font_preserves_size(tmp_path: Path, monkeypatch: pytest.Monke
     wb = load_workbook(out)
     ws = wb[wb.sheetnames[0]]
     assert ws.cell(1, 1).font.name == "Tahoma"
-    assert ws.cell(1, 1).font.size != 8
+    assert ws.cell(1, 1).font.size == 8
 
 
 @pytest.mark.parametrize("engine", _ENGINES)

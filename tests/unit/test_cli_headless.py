@@ -68,6 +68,7 @@ def policy_file(tmp_path: Path) -> Path:
         "excel": {
             "rtl": True,
             "font_name": "Tahoma",
+            "font_size": 8,
             "header_mode_internal": "en",
             "header_mode_write": "fa_en",
         },

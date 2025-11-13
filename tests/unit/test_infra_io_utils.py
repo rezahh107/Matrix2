@@ -140,7 +140,7 @@ def test_write_xlsx_atomic_applies_rtl_and_font(tmp_path: Path, monkeypatch: pyt
 
     assert ws.sheet_view.rightToLeft is True
     assert ws.cell(row=1, column=1).font.name == "Tahoma"
-    assert ws.cell(row=1, column=1).font.size != 8
+    assert ws.cell(row=1, column=1).font.size == 8
 
 
 @pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای بررسی فونت")
@@ -160,7 +160,7 @@ def test_write_xlsx_atomic_applies_font_to_all_rows(
 
     target_cell = ws.cell(row=60, column=1)
     assert target_cell.font.name == "Tahoma"
-    assert target_cell.font.size in (None, 10, 11)
+    assert target_cell.font.size == 8
     assert target_cell.alignment.horizontal is None
     assert target_cell.alignment.vertical is None
 
