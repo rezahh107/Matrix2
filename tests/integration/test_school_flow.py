@@ -59,6 +59,7 @@ def test_trace_records_raw_and_normalized_school_code() -> None:
         "school_code_raw": "۶۶۳",
         "school_code_norm": 663,
         "school_status_resolved": True,
+        "school_filter_applied": True,
     }
 
 
@@ -79,4 +80,5 @@ def test_trace_for_normal_student_marks_false() -> None:
         "school_code_raw": "0",
         "school_code_norm": 0,
         "school_status_resolved": False,
+        "school_filter_applied": False,
     }

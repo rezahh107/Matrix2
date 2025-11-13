@@ -98,16 +98,19 @@ def test_allocate_student_with_string_join_values_matches(_base_pool: pd.DataFra
         if key in student_row:
             student_row[key] = str(student_row[key])
     student_row["کد_مدرسه"] = "3581"
+def test_allocate_student_center_zero_skips_filter(_base_pool: pd.DataFrame) -> None:
+    student_row = _single_student(مرکز_گلستان_صدرا=0).iloc[0].to_dict()
 
     result = allocate_student(student_row, _base_pool)
 
     assert result.log["allocation_status"] == "success"
     assert result.log["error_type"] is None
     assert result.log["candidate_count"] == 2
+    assert result.log["candidate_count"] == len(_base_pool)
 
 
 def test_allocate_batch_no_match_sets_error(_base_pool: pd.DataFrame) -> None:
-    students = _single_student(**{"کد_مدرسه": 9999})
+    students = _single_student(**{"کدرشته": 9999})
 
     allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool)
 
