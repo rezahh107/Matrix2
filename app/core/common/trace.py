@@ -30,7 +30,7 @@ from typing import Any, Iterable, List, Mapping, Sequence
 import pandas as pd
 
 from ..policy_loader import PolicyConfig, load_policy
-from .filters import resolve_student_school_code
+from .filters import filter_school_by_value, resolve_student_school_code
 from .columns import normalize_bool_like, to_int64
 from .types import StudentRow, TraceStageLiteral, TraceStageRecord
 
@@ -167,20 +167,28 @@ def _school_stage_filter(
     status = _resolve_school_status(student, norm_value)
     raw = _string_or_none(student.get("school_code_raw"))
 
+    filter_applied = False
     if code.wildcard or code.missing:
         filtered = frame
     elif status:
         if norm_value is not None:
-            filtered = frame.loc[frame[column] == norm_value]
+            filtered, filter_applied = filter_school_by_value(frame, column, int(norm_value))
         else:
-            filtered = frame.loc[frame[column] > 0]
+            numeric = pd.to_numeric(frame[column], errors="coerce").fillna(0)
+            mask = numeric > 0
+            filter_applied = bool(mask.any())
+            filtered = frame.loc[mask] if filter_applied else frame
     else:
-        filtered = frame.loc[frame[column] == 0]
+        numeric = pd.to_numeric(frame[column], errors="coerce").fillna(0)
+        mask = numeric == 0
+        filter_applied = bool(mask.any())
+        filtered = frame.loc[mask] if filter_applied else frame
 
     extras = {
         "school_code_raw": raw,
         "school_code_norm": norm_value,
         "school_status_resolved": bool(status),
+        "school_filter_applied": filter_applied,
     }
     return filtered, extras, norm_value
 

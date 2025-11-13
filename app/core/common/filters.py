@@ -121,6 +121,23 @@ def _sanitize_school_series(series: pd.Series) -> pd.Series:
     return numeric.astype("Int64")
 
 
+def filter_school_by_value(
+    frame: pd.DataFrame, column: str, target: int
+) -> tuple[pd.DataFrame, bool]:
+    """فیلتر کردن ستون مدرسه با رعایت نرمال‌سازی و گزارش تطبیق."""
+
+    column_series = frame[column]
+    if pd.api.types.is_integer_dtype(column_series):
+        mask = column_series == target
+    else:
+        sanitized = _sanitize_school_series(column_series)
+        mask = sanitized == target
+    matched = bool(mask.any())
+    if not matched:
+        return frame, False
+    return frame.loc[mask], True
+
+
 def resolve_student_school_code(
     student: Mapping[str, object],
     policy: PolicyConfig,
@@ -166,6 +183,7 @@ __all__ = [
     "filter_by_center",
     "filter_by_finance",
     "filter_by_school",
+    "filter_school_by_value",
     "resolve_student_school_code",
     "apply_join_filters",
 ]
@@ -180,6 +198,57 @@ def _student_value(student: Mapping[str, object], column: str) -> object:
     if normalized in student:
         return student[normalized]
     raise KeyError(f"Student row missing value for '{column}'")
+
+
+def _coerce_center_candidate(candidate: object) -> int | None:
+    """تبدیل مقدار مرکز به عدد صحیح یا None برای حالت wildcard."""
+
+    if candidate is None or candidate is pd.NA:
+        return None
+    if isinstance(candidate, Number) and not isinstance(candidate, bool):
+        if pd.isna(candidate):  # type: ignore[arg-type]
+            return None
+        return int(candidate)
+    text = to_numlike_str(candidate)
+    if text is None:
+        return None
+    text = text.strip()
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
+def _student_center_value(student: Mapping[str, object], column: str) -> int | None:
+    """استخراج مقدار مرکز دانش‌آموز با مدیریت ستون‌های معادل."""
+
+    try:
+        raw = _student_value(student, column)
+    except KeyError:
+        return None
+    return _coerce_center_candidate(raw)
+
+
+def _center_wildcard(policy: PolicyConfig) -> int | None:
+    """خواندن مقدار wildcard (مانند '*': 0) از policy.center_map."""
+
+    wildcard = policy.center_map.get("*")
+    if wildcard is None:
+        return None
+    return int(wildcard)
+
+
+def _is_center_wildcard(value: int | None, policy: PolicyConfig) -> bool:
+    """بررسی می‌کند که آیا مقدار مرکز باید فیلتر را غیرفعال کند یا خیر."""
+
+    if value is None:
+        return True
+    wildcard = _center_wildcard(policy)
+    if wildcard is None:
+        return False
+    return value == wildcard
 
 
 def _eq_filter(frame: pd.DataFrame, column: str, value: object) -> pd.DataFrame:
@@ -255,7 +324,13 @@ def filter_by_center(
 
     if policy is None:
         policy = load_policy()
-    return _filter_by_stage(pool, student, policy, "center")
+    column = policy.stage_column("center")
+    center_value = _student_center_value(student, column)
+    if _is_center_wildcard(center_value, policy):
+        return pool
+    if center_value is None:
+        return pool
+    return _eq_filter(pool, column, center_value)
 
 
 def filter_by_finance(
@@ -286,12 +361,10 @@ def filter_by_school(
     if school_code.value is None:
         return pool
     target = int(school_code.value)
-    column_series = pool[column]
-    if pd.api.types.is_integer_dtype(column_series):
-        return _eq_filter(pool, column, target)
-    sanitized = _sanitize_school_series(column_series)
-    mask = sanitized == target
-    return pool.loc[mask]
+    filtered, matched = filter_school_by_value(pool, column, target)
+    if not matched:
+        return pool
+    return filtered
 
 
 def apply_join_filters(
