@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -62,6 +63,7 @@ def test_reason_chain_order_locale() -> None:
         allocations_new="1",
         remaining_capacity="3",
         tiebreak_text="۱) نسبت اشغال کمتر → ۲) تخصیص جدید کمتر → ۳) شناسه پشتیبان (مرتب‌سازی طبیعی)",
+        is_after_school=True,
     )
     text = render_reason(context, policy)
     assert text.startswith("جنسیت: دختر"), text
@@ -134,3 +136,31 @@ def test_safe_truncate_unicode_boundary() -> None:
 def test_fa_digitize_display_only() -> None:
     sample = "شناسه 123 و ظرفیت 45"
     assert fa_digitize(sample) == "شناسه ۱۲۳ و ظرفیت ۴۵"
+
+
+def test_render_reason_supports_legacy_template_tokens() -> None:
+    policy = replace(
+        _policy_stub(),
+        template=(
+            "دانش‌آموز {gender_label} — مدرسه {school_name} (پس‌مدرسه‌ای={is_after_school})"
+            " — رشته {track_label} — نتیجه: {result_label}"
+        ),
+    )
+    context = ReasonContext(
+        gender_value="دختر",
+        school_value="دبیرستان نمونه",
+        track_value="ریاضی",
+        capacity_value="occupancy=۱۲٫۵",
+        mentor_id="۱۰۱",
+        mentor_name="منتور الف",
+        after_school_label="پس‌مدرسه‌ای: بله",
+        occupancy_ratio="12.50",
+        allocations_new="1",
+        remaining_capacity="3",
+        tiebreak_text="chain",
+        is_after_school=True,
+    )
+    text = render_reason(context, policy)
+    assert "دانش‌آموز دختر" in text
+    assert "پس‌مدرسه‌ای=true" in text
+    assert "منتور الف (۱۰۱)" in text
