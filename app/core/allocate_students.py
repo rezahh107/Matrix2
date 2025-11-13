@@ -181,8 +181,17 @@ def _build_log_from_join_map(
     return log
 
 
-def _build_log_base(student: Mapping[str, object], policy: PolicyConfig) -> AllocationLogRecord:
-    join_map, missing = _collect_join_key_map(student, policy)
+def _build_log_base(
+    student: Mapping[str, object],
+    policy: PolicyConfig,
+    *,
+    join_map: Mapping[str, int] | None = None,
+    missing: Sequence[str] | None = None,
+) -> AllocationLogRecord:
+    """ساخت لاگ پایه با استفاده از نگاشت ازپیش‌محاسبه‌شدهٔ کلیدهای join."""
+
+    if join_map is None or missing is None:
+        join_map, missing = _collect_join_key_map(student, policy)
     if missing:
         raise JoinKeyDataMissingError(missing, join_map)
     return _build_log_from_join_map(student, join_map)
@@ -288,8 +297,15 @@ def allocate_student(
     if trace_plan is None:
         trace_plan = build_trace_plan(policy, capacity_column=resolved_capacity_column)
 
+    join_map, missing_columns = _collect_join_key_map(student, policy)
+
     progress(5, "prefilter")
-    eligible = apply_join_filters(candidate_pool, student, policy=policy)
+    eligible = apply_join_filters(
+        candidate_pool,
+        student,
+        policy=policy,
+        student_join_map=join_map,
+    )
     trace = build_allocation_trace(
         student,
         candidate_pool,
@@ -299,7 +315,12 @@ def allocate_student(
     )
 
     try:
-        log = _build_log_base(student, policy)
+        log = _build_log_base(
+            student,
+            policy,
+            join_map=join_map,
+            missing=missing_columns,
+        )
     except JoinKeyDataMissingError as exc:
         log = _build_log_from_join_map(student, exc.join_map)
         log["candidate_count"] = int(eligible.shape[0])
