@@ -1,0 +1,121 @@
+{
+  "version": "1.1",
+  "maps": {
+    "registration_status": {
+      "0": "عادی",
+      "1": "بنیاد",
+      "3": "حکمت",
+      "normal": "عادی",
+      "bonyad": "بنیاد",
+      "hekmat": "حکمت"
+    },
+    "gender": {
+      "0": "دختر",
+      "1": "پسر",
+      "female": "دختر",
+      "male": "پسر"
+    }
+  },
+  "sheets": {
+    "Sheet2": {
+      "columns": {
+        "شناسه دانش آموز": {"source": "df", "field": "student_id", "type": "text"},
+        "کد ملی": {
+          "source": "gf",
+          "field": "GF_NationalCode",
+          "normalize": "digits_10",
+          "type": "text"
+        },
+        "نام": {"source": "gf", "field": "GF_FirstName", "type": "text"},
+        "نام خانوادگی": {"source": "gf", "field": "GF_LastName", "type": "text"},
+        "نام پدر": {"source": "empty", "type": "text"},
+        "نام مادر": {"source": "empty", "type": "text"},
+        "تاریخ تولد": {"source": "empty", "type": "text"},
+        "محل تولد": {"source": "empty", "type": "text"},
+        "شماره شناسنامه": {"source": "empty", "type": "text"},
+        "سری شناسنامه": {"source": "empty", "type": "text"},
+        "سریال شناسنامه": {"source": "empty", "type": "text"},
+        "محل صدور": {"source": "empty", "type": "text"},
+        "جنسیت": {"source": "df", "field": "student_gender", "map": "gender", "type": "text"},
+        "تلفن ثابت": {"source": "empty", "type": "text"},
+        "تلفن همراه": {
+          "source": "gf",
+          "field": "GF_Mobile",
+          "normalize": "mobile_ir",
+          "type": "text"
+        },
+        "تلفن ضروری": {"source": "empty", "type": "text"},
+        "ایمیل": {"source": "empty", "type": "text"},
+        "آدرس": {"source": "empty", "type": "text"},
+        "کد پستی": {
+          "source": "df",
+          "field": "mentor_postal_code",
+          "normalize": "digits_10",
+          "type": "text"
+        },
+        "کد پستی نمایندگی": {
+          "source": "df",
+          "field": "mentor_alias_postal_code",
+          "normalize": "digits_10",
+          "type": "text"
+        },
+        "کد رهگیری حکمت": {
+          "source": "df",
+          "field": "hekmat_tracking",
+          "normalize": "digits_16",
+          "type": "text"
+        },
+        "نوع بسته حکمت": {"source": "df", "field": "hekmat_package", "type": "text"},
+        "کد رهگیری بنیاد": {"source": "empty", "type": "text"},
+        "نوع بسته بنیاد": {"source": "empty", "type": "text"},
+        "وضعیت ثبت نام": {
+          "source": "df",
+          "field": "registration_status",
+          "map": "registration_status",
+          "type": "text"
+        },
+        "تاریخ ثبت": {
+          "source": "system",
+          "field": "today",
+          "format": "%Y/%m/%d",
+          "type": "text"
+        },
+        "کدرشته": {"source": "df", "field": "student_group_code", "type": "text"},
+        "نام رشته": {"source": "df", "field": "student_exam_group", "type": "text"},
+        "گروه آزمایشی": {"source": "df", "field": "student_exam_group", "type": "text"},
+        "دانش آموز فارغ": {"source": "df", "field": "student_graduation_status", "type": "text"},
+        "مرکز گلستان صدرا": {"source": "df", "field": "student_center", "type": "text"},
+        "مالی حکمت بنیاد": {"source": "df", "field": "student_finance", "type": "text"},
+        "کد مدرسه": {"source": "df", "field": "student_school_code", "type": "text"},
+        "نام مدرسه": {"source": "df", "field": "student_school_name", "type": "text"},
+        "کد مدرسه 1": {"source": "df", "field": "student_school_code_1", "type": "text"},
+        "نام مدرسه 1": {"source": "df", "field": "student_school_name_1", "type": "text"},
+        "کد مدرسه 2": {"source": "df", "field": "student_school_code_2", "type": "text"},
+        "نام مدرسه 2": {"source": "df", "field": "student_school_name_2", "type": "text"},
+        "کد مدرسه 3": {"source": "df", "field": "student_school_code_3", "type": "text"},
+        "نام مدرسه 3": {"source": "df", "field": "student_school_name_3", "type": "text"},
+        "کد مدرسه 4": {"source": "df", "field": "student_school_code_4", "type": "text"},
+        "نام مدرسه 4": {"source": "df", "field": "student_school_name_4", "type": "text"},
+        "نام پشتیبان": {"source": "df", "field": "mentor_mentor_name", "type": "text"},
+        "کد کارمندی پشتیبان": {"source": "df", "field": "mentor_mentor_id", "type": "text"},
+        "نام مدیر": {"source": "df", "field": "mentor_manager_name", "type": "text"},
+        "توضیحات": {"source": "df", "field": "allocation_status", "type": "text"}
+      },
+      "hekmat_rule": {
+        "status_column": "وضعیت ثبت نام",
+        "expected_value": "حکمت",
+        "columns": ["کد رهگیری حکمت", "نوع بسته حکمت"]
+      }
+    },
+    "Summary": {"columns": ["شاخص", "مقدار"]},
+    "Errors": {"columns": ["student_id", "error_type", "detail"]},
+    "Sheet5": {"columns": ["ستون ۱", "ستون ۲"]},
+    "9394": {"columns": ["ستون الف", "ستون ب"]}
+  },
+  "alias_rule": {
+    "sheet_postal_column": "کد پستی",
+    "sheet_alias_column": "کد پستی نمایندگی",
+    "df_postal_column": "mentor_postal_code",
+    "df_alias_column": "mentor_alias_postal_code"
+  }
+}
