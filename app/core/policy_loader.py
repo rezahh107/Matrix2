@@ -447,7 +447,7 @@ def _normalize_virtual_alias_ranges(raw: object) -> Tuple[Tuple[int, int], ...]:
         try:
             start = int(start_raw)
             end = int(end_raw)
-        except Exception as exc:
+        except (ValueError, TypeError) as exc:
             raise ValueError("virtual_alias_ranges values must be integers") from exc
         if start > end:
             start, end = end, start
@@ -618,7 +618,7 @@ def _parse_semver(value: str) -> tuple[int, int, int]:
     try:
         major, minor, patch = value.split(".")
         return int(major), int(minor), int(patch)
-    except Exception as exc:  # pragma: no cover - defensive guard
+    except (ValueError, TypeError) as exc:  # pragma: no cover - defensive guard
         raise ValueError(f"Invalid semantic version: '{value}'") from exc
 
 
@@ -789,7 +789,7 @@ def _normalize_excel_options(payload: Mapping[str, object]) -> Dict[str, object]
     font_size_raw = payload.get("font_size", _DEFAULT_EXCEL_OPTIONS["font_size"])
     try:
         font_size = int(font_size_raw)
-    except Exception as exc:  # pragma: no cover - defensive branch
+    except (ValueError, TypeError) as exc:  # pragma: no cover - defensive branch
         raise TypeError("excel.font_size must be an integer") from exc
     if font_size <= 0:
         raise ValueError("excel.font_size must be a positive integer")

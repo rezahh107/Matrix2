@@ -645,7 +645,7 @@ def safe_int_value(value: Any, default: int = 0) -> int:
     if text and text.lstrip("-").isdigit():
         try:
             return int(text)
-        except Exception:
+        except (ValueError, TypeError, OverflowError):
             pass
     return int(default)
 
@@ -762,7 +762,7 @@ try:
     from tqdm import tqdm  # type: ignore
 
     HAS_TQDM = True
-except Exception:
+except ImportError:
     HAS_TQDM = False
 
 
@@ -1558,7 +1558,7 @@ def validate_with_students(
             if postal_min <= iv <= postal_max:
                 return "normal_by_alias"
             return "school_by_mentorid"
-        except Exception:
+        except (ValueError, TypeError, OverflowError):
             return "school_by_mentorid"
 
     def _sub_by_type(row: pd.Series) -> tuple[pd.DataFrame, str | None]:
