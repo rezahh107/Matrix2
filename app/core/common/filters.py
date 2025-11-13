@@ -121,6 +121,23 @@ def _sanitize_school_series(series: pd.Series) -> pd.Series:
     return numeric.astype("Int64")
 
 
+def filter_school_by_value(
+    frame: pd.DataFrame, column: str, target: int
+) -> tuple[pd.DataFrame, bool]:
+    """فیلتر کردن ستون مدرسه با رعایت نرمال‌سازی و گزارش تطبیق."""
+
+    column_series = frame[column]
+    if pd.api.types.is_integer_dtype(column_series):
+        mask = column_series == target
+    else:
+        sanitized = _sanitize_school_series(column_series)
+        mask = sanitized == target
+    matched = bool(mask.any())
+    if not matched:
+        return frame, False
+    return frame.loc[mask], True
+
+
 def resolve_student_school_code(
     student: Mapping[str, object],
     policy: PolicyConfig,
@@ -166,6 +183,7 @@ __all__ = [
     "filter_by_center",
     "filter_by_finance",
     "filter_by_school",
+    "filter_school_by_value",
     "resolve_student_school_code",
     "apply_join_filters",
 ]
@@ -343,12 +361,10 @@ def filter_by_school(
     if school_code.value is None:
         return pool
     target = int(school_code.value)
-    column_series = pool[column]
-    if pd.api.types.is_integer_dtype(column_series):
-        return _eq_filter(pool, column, target)
-    sanitized = _sanitize_school_series(column_series)
-    mask = sanitized == target
-    return pool.loc[mask]
+    filtered, matched = filter_school_by_value(pool, column, target)
+    if not matched:
+        return pool
+    return filtered
 
 
 def apply_join_filters(

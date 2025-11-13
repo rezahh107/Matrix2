@@ -103,7 +103,7 @@ def test_allocate_student_center_zero_skips_filter(_base_pool: pd.DataFrame) -> 
 
 
 def test_allocate_batch_no_match_sets_error(_base_pool: pd.DataFrame) -> None:
-    students = _single_student(**{"کد_مدرسه": 9999})
+    students = _single_student(**{"کدرشته": 9999})
 
     allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool)
 
