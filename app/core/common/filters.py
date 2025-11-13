@@ -155,7 +155,15 @@ def resolve_student_school_code(
 
     return StudentSchoolCode(value=None, missing=True, wildcard=False)
 
-FilterFunc = Callable[[pd.DataFrame, Mapping[str, object], PolicyConfig], pd.DataFrame]
+FilterFunc = Callable[
+    [
+        pd.DataFrame,
+        Mapping[str, object],
+        PolicyConfig,
+        Mapping[str, int] | None,
+    ],
+    pd.DataFrame,
+]
 
 __all__ = [
     "StudentSchoolCode",
@@ -193,87 +201,144 @@ def _filter_by_stage(
     student: Mapping[str, object],
     policy: PolicyConfig,
     stage: str,
+    *,
+    student_join_map: Mapping[str, int] | None = None,
 ) -> pd.DataFrame:
     column = policy.stage_column(stage)
-    return _eq_filter(pool, column, _student_value(student, column))
+    normalized = column.replace(" ", "_")
+    if student_join_map and normalized in student_join_map:
+        value = student_join_map[normalized]
+    else:
+        value = _student_value(student, column)
+    return _eq_filter(pool, column, value)
 
 
 def filter_by_type(
     pool: pd.DataFrame,
     student: Mapping[str, object],
     policy: PolicyConfig | None = None,
+    *,
+    student_join_map: Mapping[str, int] | None = None,
 ) -> pd.DataFrame:
     """فیلتر مرحلهٔ type بر اساس ستون اعلام‌شده در Policy."""
 
     if policy is None:
         policy = load_policy()
-    return _filter_by_stage(pool, student, policy, "type")
+    return _filter_by_stage(
+        pool,
+        student,
+        policy,
+        "type",
+        student_join_map=student_join_map,
+    )
 
 
 def filter_by_group(
     pool: pd.DataFrame,
     student: Mapping[str, object],
     policy: PolicyConfig | None = None,
+    *,
+    student_join_map: Mapping[str, int] | None = None,
 ) -> pd.DataFrame:
     """فیلتر مرحلهٔ group با ستون پویا از Policy."""
 
     if policy is None:
         policy = load_policy()
-    return _filter_by_stage(pool, student, policy, "group")
+    return _filter_by_stage(
+        pool,
+        student,
+        policy,
+        "group",
+        student_join_map=student_join_map,
+    )
 
 
 def filter_by_gender(
     pool: pd.DataFrame,
     student: Mapping[str, object],
     policy: PolicyConfig | None = None,
+    *,
+    student_join_map: Mapping[str, int] | None = None,
 ) -> pd.DataFrame:
     """فیلتر gender با ستون تعریف‌شده در Policy."""
 
     if policy is None:
         policy = load_policy()
-    return _filter_by_stage(pool, student, policy, "gender")
+    return _filter_by_stage(
+        pool,
+        student,
+        policy,
+        "gender",
+        student_join_map=student_join_map,
+    )
 
 
 def filter_by_graduation_status(
     pool: pd.DataFrame,
     student: Mapping[str, object],
     policy: PolicyConfig | None = None,
+    *,
+    student_join_map: Mapping[str, int] | None = None,
 ) -> pd.DataFrame:
     """فیلتر graduation_status با ستون پویا."""
 
     if policy is None:
         policy = load_policy()
-    return _filter_by_stage(pool, student, policy, "graduation_status")
+    return _filter_by_stage(
+        pool,
+        student,
+        policy,
+        "graduation_status",
+        student_join_map=student_join_map,
+    )
 
 
 def filter_by_center(
     pool: pd.DataFrame,
     student: Mapping[str, object],
     policy: PolicyConfig | None = None,
+    *,
+    student_join_map: Mapping[str, int] | None = None,
 ) -> pd.DataFrame:
     """فیلتر center با ستون پویا."""
 
     if policy is None:
         policy = load_policy()
-    return _filter_by_stage(pool, student, policy, "center")
+    return _filter_by_stage(
+        pool,
+        student,
+        policy,
+        "center",
+        student_join_map=student_join_map,
+    )
 
 
 def filter_by_finance(
     pool: pd.DataFrame,
     student: Mapping[str, object],
     policy: PolicyConfig | None = None,
+    *,
+    student_join_map: Mapping[str, int] | None = None,
 ) -> pd.DataFrame:
     """فیلتر finance با ستون پویا."""
 
     if policy is None:
         policy = load_policy()
-    return _filter_by_stage(pool, student, policy, "finance")
+    return _filter_by_stage(
+        pool,
+        student,
+        policy,
+        "finance",
+        student_join_map=student_join_map,
+    )
 
 
 def filter_by_school(
     pool: pd.DataFrame,
     student: Mapping[str, object],
     policy: PolicyConfig | None = None,
+    *,
+    student_join_map: Mapping[str, int] | None = None,
 ) -> pd.DataFrame:
     """فیلتر school با ستون پویا."""
 
@@ -299,6 +364,7 @@ def apply_join_filters(
     student: Mapping[str, object],
     *,
     policy: PolicyConfig | None = None,
+    student_join_map: Mapping[str, int] | None = None,
 ) -> pd.DataFrame:
     """اجرای ترتیبی هفت فیلتر join روی استخر کاندید بدون mutate کردن ورودی."""
 
@@ -307,7 +373,12 @@ def apply_join_filters(
 
     current = pool
     for fn in _FILTER_SEQUENCE:
-        current = fn(current, student, policy)
+        current = fn(
+            current,
+            student,
+            policy,
+            student_join_map=student_join_map,
+        )
         if current.empty:
             break
     return current
