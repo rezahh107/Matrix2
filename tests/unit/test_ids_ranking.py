@@ -10,9 +10,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from app.core.common.columns import canonicalize_headers
 from app.core.common.domain import BuildConfig, MentorType, compute_alias
 from app.core.common.ids import build_mentor_id_map, ensure_ranking_columns, inject_mentor_id
-from app.core.common.ranking import apply_ranking_policy, consume_capacity
+from app.core.common.ranking import (
+    apply_ranking_policy,
+    build_mentor_state,
+    consume_capacity,
+)
 from app.core.policy_loader import PolicyConfig, parse_policy_dict
 
 
@@ -216,6 +221,73 @@ def test_consume_capacity_underflow_raises_value_error() -> None:
 
     with pytest.raises(ValueError, match="CAPACITY_UNDERFLOW"):
         consume_capacity(state, "EMP-2")
+
+
+def test_build_mentor_state_handles_persian_headers_and_normalizes_values(
+    _policy: PolicyConfig,
+) -> None:
+    pool = pd.DataFrame(
+        {
+            "کد کارمندی پشتیبان": ["EMP-1", "EMP-2", "EMP-2", "EMP-NEG"],
+            "remaining_capacity": [5, 3.5, None, -4],
+        }
+    )
+
+    state = build_mentor_state(pool, policy=_policy)
+
+    assert state["EMP-1"] == {
+        "initial": 5,
+        "remaining": 5,
+        "alloc_new": 0,
+        "occupancy_ratio": 0.0,
+    }
+    assert state["EMP-2"]["initial"] == 3
+    assert state["EMP-2"]["remaining"] == 3
+    assert state["EMP-NEG"]["initial"] == 0
+    assert state["EMP-NEG"]["remaining"] == 0
+
+
+def test_build_mentor_state_returns_empty_when_capacity_missing(
+    _policy: PolicyConfig,
+) -> None:
+    pool = pd.DataFrame({"کد کارمندی پشتیبان": ["EMP-1", "EMP-2"]})
+
+    state = build_mentor_state(pool, policy=_policy)
+
+    assert state == {}
+
+
+def test_build_mentor_state_prefers_explicit_capacity_column(
+    _policy: PolicyConfig,
+) -> None:
+    custom_capacity_fa = _policy.columns.capacity_current
+    pool = pd.DataFrame(
+        {
+            "کد کارمندی پشتیبان": ["EMP-1", "EMP-2"],
+            custom_capacity_fa: [7, 0],
+            "remaining_capacity": [1, 5],
+        }
+    )
+    canonical_pool = canonicalize_headers(pool, header_mode="en")
+
+    state = build_mentor_state(
+        canonical_pool, capacity_column="capacity_current", policy=_policy
+    )
+
+    assert state["EMP-1"]["initial"] == 7
+    assert state["EMP-1"]["remaining"] == 7
+    assert state["EMP-2"]["initial"] == 0
+    assert state["EMP-2"]["remaining"] == 0
+
+
+def test_build_mentor_state_returns_empty_without_mentor_id(
+    _policy: PolicyConfig,
+) -> None:
+    pool = pd.DataFrame({"remaining_capacity": [3, 4]})
+
+    state = build_mentor_state(pool, policy=_policy)
+
+    assert state == {}
 
 
 def test_compute_alias_respects_policy_rules() -> None:
