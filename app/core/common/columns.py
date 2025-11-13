@@ -25,6 +25,7 @@ __all__ = [
     "sanitize_digits",
     "to_int64",
     "normalize_bool_like",
+    "enforce_join_key_types",
     "enrich_school_columns_en",
 ]
 
@@ -171,6 +172,7 @@ _INT_COLUMNS_BY_SOURCE: Mapping[Source, Sequence[str]] = {
     "report": _INT_COLUMNS_BASE + ("graduation_status", "center", "finance"),
     "inspactor": _INT_COLUMNS_BASE
     + (
+        "graduation_status",
         "center",
         "finance",
         "schools_covered_count",
@@ -197,6 +199,18 @@ _TRUTHY_TOKENS = {
     "school-based",
 }
 _FALSY_TOKENS = {"0", "false", "no", "n", "f", "عادی", "normal"}
+_GENDER_TOKEN_MAP = {
+    "پسر": 1,
+    "مرد": 1,
+    "male": 1,
+    "boy": 1,
+    "آقا": 1,
+    "دختر": 0,
+    "زن": 0,
+    "female": 0,
+    "girl": 0,
+    "خانم": 0,
+}
 
 
 def sanitize_digits(series: pd.Series | None) -> pd.Series:
@@ -226,6 +240,10 @@ def to_int64(series: pd.Series | None) -> pd.Series:
     مقدار خالی یا نامعتبر → «<NA>».
     """
 
+    if series is None:
+        return pd.Series(dtype="Int64")
+    if pd.api.types.is_bool_dtype(series):
+        return series.astype("Int64")
     sanitized = sanitize_digits(series)
     numeric = pd.to_numeric(sanitized.replace("", pd.NA), errors="coerce")
     return numeric.astype("Int64")
@@ -251,6 +269,44 @@ def normalize_bool_like(series: pd.Series | None) -> pd.Series:
         result.loc[numeric == 1] = 1
         result.loc[numeric == 0] = 0
     return result.fillna(0).astype("Int64")
+
+
+def enforce_join_key_types(df: pd.DataFrame, join_keys: Sequence[str]) -> pd.DataFrame:
+    """تضمین تبدیل ستون‌های کلید join به نوع «Int64».
+
+    هرگونه تغییر در سیاست join keys باید از طریق Policy منتقل شود و این تابع
+    با دریافت همان فهرست، نسخهٔ کپی‌شده از DataFrame را بازگردانی می‌کند که در آن
+    مقادیر ستون‌های مذکور به‌صورت قطعی به `Int64` تبدیل شده‌اند. در صورت فقدان
+    هر ستون، تغییری اعمال نمی‌شود تا سناریوهای خطای کنترل‌شده باقی بمانند.
+    """
+
+    if not join_keys:
+        return df
+
+    result = df.copy()
+    gender_normalized = normalize_fa(CANON_EN_TO_FA.get("gender", "جنسیت"))
+    for column in dict.fromkeys(join_keys):
+        if column not in result.columns:
+            continue
+        series = result[column]
+        normalized_name = normalize_fa(column)
+        if normalized_name == gender_normalized:
+            series = _replace_gender_tokens(series)
+        if pd.api.types.is_bool_dtype(series):
+            result[column] = series.astype("Int64")
+            continue
+        if series.dtype == "object":
+            series = series.replace({True: 1, False: 0})
+        result[column] = to_int64(series)
+    return result
+
+
+def _replace_gender_tokens(series: pd.Series) -> pd.Series:
+    text = series.astype("string").str.strip().str.lower()
+    mapped = text.map(_GENDER_TOKEN_MAP)
+    if mapped.notna().any():
+        return series.mask(mapped.notna(), mapped)
+    return series
 
 
 def enrich_school_columns_en(df: pd.DataFrame) -> pd.DataFrame:
@@ -321,6 +377,34 @@ def _normalize_header(value: object) -> str:
         raw = str(value).strip().lower().replace("_", " ")
         text = " ".join(raw.split())
     return text.lower()
+
+
+def _split_bilingual_header(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    text = str(value)
+    if "|" not in text:
+        return ()
+    parts = [part.strip() for part in text.split("|")]
+    return tuple(part for part in parts if part)
+
+
+def _normalized_header_tokens(value: object) -> tuple[str, ...]:
+    base = _normalize_header(value)
+    tokens: list[str] = []
+    if base:
+        tokens.append(base)
+    bilingual = _split_bilingual_header(value)
+    if bilingual:
+        padded = " | ".join(bilingual)
+        padded_normalized = _normalize_header(padded)
+        if padded_normalized and padded_normalized not in tokens:
+            tokens.append(padded_normalized)
+    for part in bilingual:
+        normalized = _normalize_header(part)
+        if normalized and normalized not in tokens:
+            tokens.append(normalized)
+    return tuple(tokens)
 
 
 def _policy_aliases(source: Source) -> Mapping[str, str]:
@@ -496,8 +580,11 @@ def resolve_aliases(df: pd.DataFrame, source: Source) -> pd.DataFrame:
     rename_map: Dict[str, str] = {}
     seen: set[str] = set()
     for column in df.columns:
-        normalized = _normalize_header(column)
-        canonical_en = bundle.normalized_map.get(normalized)
+        canonical_en: str | None = None
+        for normalized in _normalized_header_tokens(column):
+            canonical_en = bundle.normalized_map.get(normalized)
+            if canonical_en is not None:
+                break
         if canonical_en is None:
             continue
         canonical_fa = CANON_EN_TO_FA.get(canonical_en, canonical_en)
@@ -600,13 +687,17 @@ def canonicalize_headers(df: pd.DataFrame, header_mode: HeaderMode) -> pd.DataFr
 
     rename: Dict[str, str] = {}
     for column in df.columns:
-        normalized = _normalize_header(column)
-        en_key = CANON_FA_TO_EN.get(normalized)
-        if en_key is None:
+        en_key: str | None = None
+        for normalized in _normalized_header_tokens(column):
+            en_key = CANON_FA_TO_EN.get(normalized)
+            if en_key is not None:
+                break
             for candidate_en in CANON_EN_TO_FA:
                 if normalized == _normalize_header(candidate_en):
                     en_key = candidate_en
                     break
+            if en_key is not None:
+                break
         if en_key is None:
             continue
         fa_name = CANON_EN_TO_FA[en_key]

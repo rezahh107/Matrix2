@@ -16,6 +16,7 @@ from .common.columns import (
     coerce_semantics,
     enrich_school_columns_en,
     ensure_series,
+    enforce_join_key_types,
     resolve_aliases,
 )
 from .common.filters import (
@@ -235,6 +236,7 @@ def _normalize_students(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
             missing_required.append(field)
     if missing_required:
         raise ValueError(f"Missing columns: {missing_required}")
+    normalized = enforce_join_key_types(normalized, policy.join_keys)
     return normalized
 
 
@@ -264,6 +266,7 @@ def _normalize_pool(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
                 .fillna(0)
                 .astype("Int64")
             )
+    normalized = enforce_join_key_types(normalized, policy.join_keys)
     return _append_bilingual_alias_columns(normalized, policy)
 
 
