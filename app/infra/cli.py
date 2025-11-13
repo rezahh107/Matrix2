@@ -29,6 +29,16 @@ from app.core.allocate_students import allocate_batch, build_selection_reason_ro
 from app.core.build_matrix import build_matrix
 from app.core.policy_loader import PolicyConfig, load_policy
 from app.infra.excel_writer import write_selection_reasons_sheet
+from app.infra.excel.import_to_sabt import (
+    apply_alias_rule,
+    build_errors_frame,
+    build_optional_sheet_frame,
+    build_sheet2_frame,
+    build_summary_frame,
+    load_exporter_config,
+    prepare_allocation_export_frame,
+    write_import_to_sabt_excel,
+)
 from app.infra.io_utils import (
     ALT_CODE_COLUMN,
     read_crosswalk_workbook,
@@ -61,6 +71,8 @@ from app.core.counter import (
 ProgressFn = Callable[[int, str], None]
 
 _DEFAULT_POLICY_PATH = Path("config/policy.json")
+_DEFAULT_EXPORTER_CONFIG_PATH = Path("config/SmartAlloc_Exporter_Config_v1.json")
+_DEFAULT_SABT_TEMPLATE_PATH = Path("templates/ImportToSabt (1404) - Copy.xlsx")
 
 
 def _make_unique_columns(columns: Sequence[str]) -> list[str]:
@@ -374,6 +386,75 @@ def _read_optional_first_sheet(path: str | None) -> pd.DataFrame | None:
         frame = pd.read_csv(file_path)
 
     return canonicalize_headers(frame, header_mode="en")
+
+
+def _resolve_optional_override(
+    args: argparse.Namespace, name: str, default: str | None = None
+) -> str | None:
+    """اولویت‌دهی overrideهای UI نسبت به آرگومان‌های CLI."""
+
+    overrides = getattr(args, "_ui_overrides", {}) or {}
+    value = overrides.get(name)
+    candidates = [value, getattr(args, name, None), default]
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            text = candidate.strip()
+            if text:
+                return text
+    return None
+
+
+def _maybe_export_import_to_sabt(
+    *,
+    args: argparse.Namespace,
+    allocations_df: pd.DataFrame,
+    students_df: pd.DataFrame,
+    mentors_df: pd.DataFrame,
+    logs_df: pd.DataFrame,
+    student_ids: pd.Series,
+) -> None:
+    """تولید فایل ImportToSabt در صورت مشخص شدن مسیر خروجی."""
+
+    sabt_output = _resolve_optional_override(args, "sabt_output")
+    if not sabt_output:
+        return
+    cfg_path = _resolve_optional_override(
+        args, "sabt_config", str(_DEFAULT_EXPORTER_CONFIG_PATH)
+    ) or str(_DEFAULT_EXPORTER_CONFIG_PATH)
+    template_path = _resolve_optional_override(
+        args, "sabt_template", str(_DEFAULT_SABT_TEMPLATE_PATH)
+    ) or str(_DEFAULT_SABT_TEMPLATE_PATH)
+    exporter_cfg = load_exporter_config(cfg_path)
+    export_df = prepare_allocation_export_frame(
+        allocations_df,
+        students_df,
+        mentors_df,
+        student_ids=student_ids,
+    )
+    df_sheet2 = build_sheet2_frame(export_df, exporter_cfg)
+    df_sheet2 = apply_alias_rule(df_sheet2, export_df)
+    status_series = logs_df.get("allocation_status")
+    error_count = 0
+    if isinstance(status_series, pd.Series):
+        error_count = int((status_series.astype("string") != "success").sum())
+    df_summary = build_summary_frame(
+        exporter_cfg,
+        total_students=len(students_df),
+        allocated_count=len(df_sheet2),
+        error_count=error_count,
+    )
+    df_errors = build_errors_frame(logs_df, exporter_cfg)
+    df_sheet5 = build_optional_sheet_frame(exporter_cfg, "Sheet5")
+    df_9394 = build_optional_sheet_frame(exporter_cfg, "9394")
+    write_import_to_sabt_excel(
+        df_sheet2,
+        df_summary,
+        df_errors,
+        df_sheet5,
+        df_9394,
+        template_path,
+        sabt_output,
+    )
 
 
 def _inject_student_ids(
@@ -748,6 +829,15 @@ def _allocate_and_write(
         policy=policy,
     )
 
+    _maybe_export_import_to_sabt(
+        args=args,
+        allocations_df=allocations_df,
+        students_df=students_base,
+        mentors_df=pool_base,
+        logs_df=logs_df,
+        student_ids=student_ids,
+    )
+
     # تبدیل نهایی به فرمت‌های قابل نوشتن در Excel
     allocations_df = _make_excel_safe(allocations_df)
     updated_pool_df = _make_excel_safe(updated_pool_df)
@@ -939,6 +1029,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="پس از اجرا، خلاصهٔ JSON ممیزی را چاپ کن",
     )
     alloc_cmd.add_argument(
+        "--sabt-output",
+        default=None,
+        help="در صورت تعیین، خروجی ImportToSabt را در این مسیر بنویس",
+    )
+    alloc_cmd.add_argument(
+        "--sabt-config",
+        default=str(_DEFAULT_EXPORTER_CONFIG_PATH),
+        help="مسیر فایل SmartAlloc Exporter Config",
+    )
+    alloc_cmd.add_argument(
+        "--sabt-template",
+        default=str(_DEFAULT_SABT_TEMPLATE_PATH),
+        help="مسیر فایل قالب ImportToSabt",
+    )
+    alloc_cmd.add_argument(
         "--determinism-check",
         action="store_true",
         help="اجرای دوباره تخصیص برای تضمین دترمینیسم",
@@ -991,6 +1096,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--determinism-check",
         action="store_true",
         help="اجرای دوباره تخصیص برای تضمین دترمینیسم",
+    )
+    rule_cmd.add_argument(
+        "--sabt-output",
+        default=None,
+        help="در صورت تعیین، خروجی ImportToSabt را در این مسیر بنویس",
+    )
+    rule_cmd.add_argument(
+        "--sabt-config",
+        default=str(_DEFAULT_EXPORTER_CONFIG_PATH),
+        help="مسیر فایل SmartAlloc Exporter Config",
+    )
+    rule_cmd.add_argument(
+        "--sabt-template",
+        default=str(_DEFAULT_SABT_TEMPLATE_PATH),
+        help="مسیر فایل قالب ImportToSabt",
     )
     return parser
 
