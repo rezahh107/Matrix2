@@ -300,12 +300,19 @@ def allocate_student(
     join_map, missing_columns = _collect_join_key_map(student, policy)
 
     progress(5, "prefilter")
+    stage_candidate_counts: Dict[str, int] = {}
+
+    def _record_stage(stage: str, count: int) -> None:
+        stage_candidate_counts[stage] = int(count)
+
     eligible = apply_join_filters(
         candidate_pool,
         student,
         policy=policy,
         student_join_map=join_map,
+        tracker=_record_stage,
     )
+    stage_candidate_counts.setdefault("capacity_gate", 0)
     trace = build_allocation_trace(
         student,
         candidate_pool,
@@ -324,6 +331,7 @@ def allocate_student(
     except JoinKeyDataMissingError as exc:
         log = _build_log_from_join_map(student, exc.join_map)
         log["candidate_count"] = int(eligible.shape[0])
+        log["stage_candidate_counts"] = dict(stage_candidate_counts)
         missing_text = ", ".join(exc.missing_columns)
         log.update(
             {
@@ -338,6 +346,7 @@ def allocate_student(
         return AllocationResult(None, trace, log)
 
     log["candidate_count"] = int(eligible.shape[0])
+    log["stage_candidate_counts"] = dict(stage_candidate_counts)
 
     if eligible.empty:
         log.update(
@@ -377,6 +386,8 @@ def allocate_student(
     capacity_numeric = pd.to_numeric(capacity_series, errors="coerce").fillna(0).astype(int)
     capacity_mask = capacity_numeric > 0
     capacity_filtered = eligible.loc[capacity_mask.values]
+    stage_candidate_counts["capacity_gate"] = int(capacity_mask.sum())
+    log["stage_candidate_counts"] = dict(stage_candidate_counts)
 
     if capacity_filtered.empty:
         log.update(
@@ -476,6 +487,7 @@ def allocate_student(
             "tie_breakers": tie_breakers,
             "capacity_before": int(capacity_before),
             "capacity_after": int(capacity_after),
+            "stage_candidate_counts": dict(stage_candidate_counts),
         }
     )
     return AllocationResult(capacity_filtered.loc[chosen_index], trace, log)

@@ -181,9 +181,11 @@ FilterFunc = Callable[
     ],
     pd.DataFrame,
 ]
+FilterTracker = Callable[[str, int], None]
 
 __all__ = [
     "StudentSchoolCode",
+    "FilterTracker",
     "filter_by_type",
     "filter_by_group",
     "filter_by_gender",
@@ -432,6 +434,7 @@ def apply_join_filters(
     *,
     policy: PolicyConfig | None = None,
     student_join_map: Mapping[str, int] | None = None,
+    tracker: FilterTracker | None = None,
 ) -> pd.DataFrame:
     """اجرای ترتیبی هفت فیلتر join روی استخر کاندید بدون mutate کردن ورودی."""
 
@@ -439,13 +442,21 @@ def apply_join_filters(
         policy = load_policy()
 
     current = pool
-    for fn in _FILTER_SEQUENCE:
+    for index, (stage_name, fn) in enumerate(
+        zip(_FILTER_STAGE_NAMES, _FILTER_SEQUENCE)
+    ):
         current = fn(
             current,
             student,
             policy,
             student_join_map=student_join_map,
         )
+        if tracker is not None:
+            tracker(stage_name, int(current.shape[0]))
+        if current.empty and tracker is not None:
+            for remaining in _FILTER_STAGE_NAMES[index + 1 :]:
+                tracker(remaining, 0)
+            break
         if current.empty:
             break
     return current
@@ -459,4 +470,14 @@ _FILTER_SEQUENCE: Sequence[FilterFunc] = (
     filter_by_center,
     filter_by_finance,
     filter_by_school,
+)
+
+_FILTER_STAGE_NAMES: Sequence[str] = (
+    "type",
+    "group",
+    "gender",
+    "graduation_status",
+    "center",
+    "finance",
+    "school",
 )
