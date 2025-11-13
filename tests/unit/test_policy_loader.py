@@ -78,6 +78,7 @@ def _valid_payload() -> dict[str, object]:
         "excel": {
             "rtl": True,
             "font_name": "Tahoma",
+            "font_size": 8,
             "header_mode_internal": "en",
             "header_mode_write": "fa_en",
         },
@@ -221,17 +222,20 @@ def test_excel_options_parsing() -> None:
     assert policy.excel.header_mode == policy.excel.header_mode_write
     assert policy.excel.rtl is True
     assert policy.excel.font_name == "Tahoma"
+    assert policy.excel.font_size == 8
 
     payload_override = _valid_payload()
     payload_override["excel"] = {
         "rtl": False,
         "font_name": "Tahoma",
+        "font_size": 9,
         "header_mode_internal": "fa",
         "header_mode_write": "fa",
     }
     policy_override = parse_policy_dict(payload_override)
     assert policy_override.excel.rtl is False
     assert policy_override.excel.font_name == "Tahoma"
+    assert policy_override.excel.font_size == 9
     assert policy_override.excel.header_mode_internal == "fa"
     assert policy_override.excel.header_mode_write == "fa"
 

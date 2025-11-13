@@ -32,6 +32,7 @@ _DEFAULT_VIRTUAL_NAME_PATTERNS: tuple[str, ...] = (
 _DEFAULT_EXCEL_OPTIONS: Mapping[str, object] = {
     "rtl": True,
     "font_name": "Tahoma",
+    "font_size": 8,
     "header_mode_internal": "en",
     "header_mode_write": "fa_en",
 }
@@ -141,6 +142,7 @@ class ExcelOptions:
 
     rtl: bool
     font_name: str
+    font_size: int
     header_mode_internal: str
     header_mode_write: str
 
@@ -433,38 +435,6 @@ def _normalize_column_aliases(value: object) -> Mapping[str, Dict[str, str]]:
             if isinstance(k, (str, bytes)) and isinstance(v, (str, bytes)) and str(v).strip()
         }
     return normalized
-
-
-def _normalize_excel_options(value: object | None) -> ExcelOptions:
-    allowed_modes = {"fa", "en", "fa_en"}
-    if value is None:
-        return ExcelOptions(
-            rtl=True,
-            font_name="Tahoma",
-            header_mode_internal="en",
-            header_mode_write="fa_en",
-        )
-    if not isinstance(value, Mapping):
-        raise TypeError("excel must be a mapping")
-    rtl = _ensure_bool("excel.rtl", value.get("rtl", True))
-    font_raw = value.get("font_name", "Tahoma")
-    font_name = str(font_raw or "Tahoma")
-    header_internal = str(value.get("header_mode_internal", "en"))
-    header_write = value.get("header_mode_write")
-    if header_write is None:
-        header_write = value.get("header_mode", "fa_en")
-    header_write = str(header_write or "fa_en")
-    if header_internal not in allowed_modes:
-        raise ValueError("excel.header_mode_internal must be one of {'fa','en','fa_en'}")
-    if header_write not in allowed_modes:
-        raise ValueError("excel.header_mode_write must be one of {'fa','en','fa_en'}")
-    return ExcelOptions(
-        rtl=rtl,
-        font_name=font_name,
-        header_mode_internal=header_internal,
-        header_mode_write=header_write,
-    )
-
 
 def _normalize_virtual_alias_ranges(raw: object) -> Tuple[Tuple[int, int], ...]:
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
@@ -816,11 +786,19 @@ def _normalize_excel_options(payload: Mapping[str, object]) -> Dict[str, object]
 
     rtl = bool(payload.get("rtl", _DEFAULT_EXCEL_OPTIONS["rtl"]))
     font_name = str(payload.get("font_name", _DEFAULT_EXCEL_OPTIONS["font_name"]))
+    font_size_raw = payload.get("font_size", _DEFAULT_EXCEL_OPTIONS["font_size"])
+    try:
+        font_size = int(font_size_raw)
+    except Exception as exc:  # pragma: no cover - defensive branch
+        raise TypeError("excel.font_size must be an integer") from exc
+    if font_size <= 0:
+        raise ValueError("excel.font_size must be a positive integer")
     internal = str(payload.get("header_mode_internal", _DEFAULT_EXCEL_OPTIONS["header_mode_internal"]))
     write = str(payload.get("header_mode_write", _DEFAULT_EXCEL_OPTIONS["header_mode_write"]))
     return {
         "rtl": rtl,
         "font_name": font_name,
+        "font_size": font_size,
         "header_mode_internal": internal,
         "header_mode_write": write,
     }

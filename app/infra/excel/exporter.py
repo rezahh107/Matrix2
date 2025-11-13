@@ -38,10 +38,11 @@ def _format_xlsxwriter(
     *,
     rtl: bool,
     font_name: str | None,
+    font_size: int | None,
 ) -> None:
     workbook = writer.book  # type: ignore[attr-defined]
     worksheet_map = writer.sheets  # type: ignore[attr-defined]
-    font = build_font_config(font_name)
+    font = build_font_config(font_name, font_size=font_size)
     body_fmt = ensure_xlsxwriter_format(workbook, font)
     header_fmt = ensure_xlsxwriter_format(workbook, font, header=True)
     table_names = TableNameRegistry()
@@ -77,11 +78,12 @@ def _format_openpyxl(
     *,
     rtl: bool,
     font_name: str | None,
+    font_size: int | None,
 ) -> None:
     from openpyxl.utils import get_column_letter
 
     workbook = writer.book  # type: ignore[attr-defined]
-    font = build_font_config(font_name)
+    font = build_font_config(font_name, font_size=font_size)
     style_name = ensure_openpyxl_named_style(workbook, font)
     table_names = TableNameRegistry()
 
@@ -113,6 +115,7 @@ def apply_workbook_formatting(
     sheet_frames: Dict[str, pd.DataFrame],
     rtl: bool,
     font_name: str | None,
+    font_size: int | None,
 ) -> None:
     """اعمال تنظیمات خروجی Excel پس از نوشتن DataFrameها.
 
@@ -133,9 +136,21 @@ def apply_workbook_formatting(
     _warn_fonts_not_embedded()
 
     if engine == "xlsxwriter":
-        _format_xlsxwriter(writer, sheet_frames, rtl=rtl, font_name=font_name)
+        _format_xlsxwriter(
+            writer,
+            sheet_frames,
+            rtl=rtl,
+            font_name=font_name,
+            font_size=font_size,
+        )
     elif engine == "openpyxl":
-        _format_openpyxl(writer, sheet_frames, rtl=rtl, font_name=font_name)
+        _format_openpyxl(
+            writer,
+            sheet_frames,
+            rtl=rtl,
+            font_name=font_name,
+            font_size=font_size,
+        )
 
 
 def _sanitize_selection_reasons_frame(

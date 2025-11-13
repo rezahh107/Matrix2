@@ -531,6 +531,7 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         output,
         rtl=policy.excel.rtl,
         font_name=policy.excel.font_name,
+        font_size=policy.excel.font_size,
         header_mode=policy.excel.header_mode_write,
     )
     progress(100, "done")
@@ -773,6 +774,7 @@ def _allocate_and_write(
         output,
         rtl=policy.excel.rtl,
         font_name=policy.excel.font_name,
+        font_size=policy.excel.font_size,
         header_mode=policy.excel.header_mode_write,
     )
 

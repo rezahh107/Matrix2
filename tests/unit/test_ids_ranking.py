@@ -72,6 +72,7 @@ def _base_policy_payload() -> dict[str, object]:
         "excel": {
             "rtl": True,
             "font_name": "Tahoma",
+            "font_size": 8,
             "header_mode_internal": "en",
             "header_mode_write": "fa_en",
         },

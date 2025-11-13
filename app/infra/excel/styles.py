@@ -38,8 +38,12 @@ def is_vazir_family(font_name: Optional[str]) -> bool:
     return any(keyword in lowered for keyword in _VAZIR_KEYWORDS)
 
 
-def build_font_config(font_name: Optional[str]) -> FontConfig:
-    """تولید پیکربندی فونت با اعمال اندازهٔ ۸ برای Vazir.
+def build_font_config(
+    font_name: Optional[str],
+    *,
+    font_size: Optional[int] = None,
+) -> FontConfig:
+    """تولید پیکربندی فونت با احترام به اندازهٔ تعریف‌شده در Policy.
 
     مثال::
 
@@ -49,7 +53,7 @@ def build_font_config(font_name: Optional[str]) -> FontConfig:
 
     if not font_name:
         return FontConfig(name=None, size=None)
-    size = 8 if is_vazir_family(font_name) else None
+    size = font_size if font_size is not None else (8 if is_vazir_family(font_name) else None)
     return FontConfig(name=font_name, size=size)
 
 

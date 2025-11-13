@@ -75,6 +75,7 @@ def _policy_payload() -> dict[str, object]:
         "excel": {
             "rtl": True,
             "font_name": "Tahoma",
+            "font_size": 8,
             "header_mode_internal": "en",
             "header_mode_write": "fa_en",
         },
@@ -215,6 +216,7 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
         excel=ExcelOptions(
             rtl=True,
             font_name="Tahoma",
+            font_size=8,
             header_mode_internal="en",
             header_mode_write="fa",
         ),

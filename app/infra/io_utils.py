@@ -176,6 +176,7 @@ def _apply_excel_formatting(
     engine: str,
     rtl: bool,
     font_name: str | None,
+    font_size: int | None,
     sheet_frames: Dict[str, pd.DataFrame],
 ) -> None:
     """اعمال تنظیمات خروجی با کمک زیرسیستم Excel."""
@@ -186,6 +187,7 @@ def _apply_excel_formatting(
         sheet_frames=sheet_frames,
         rtl=rtl,
         font_name=font_name,
+        font_size=font_size,
     )
 
 
@@ -224,6 +226,7 @@ def write_xlsx_atomic(
     *,
     rtl: bool | None = None,
     font_name: str | None = None,
+    font_size: int | None = None,
     header_mode: HeaderMode | None = None,
 ) -> None:
     """نوشتن امن و اتمیک Excel با مدیریت نام شیت و انتخاب engine."""
@@ -236,6 +239,8 @@ def write_xlsx_atomic(
         rtl = policy.excel.rtl
     if font_name is None:
         font_name = policy.excel.font_name
+    if font_size is None:
+        font_size = policy.excel.font_size
     if header_mode is None:
         header_mode = policy.excel.header_mode_write
 
@@ -274,6 +279,7 @@ def write_xlsx_atomic(
                 engine=engine,
                 rtl=bool(rtl),
                 font_name=font_name,
+                font_size=font_size,
                 sheet_frames=written_frames,
             )
         os.replace(tmp_path, target_path)
