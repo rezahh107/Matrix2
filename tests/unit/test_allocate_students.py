@@ -92,6 +92,16 @@ def test_allocate_student_sanitizes_school_code_separators(
     assert result.log["join_keys"]["کد_مدرسه"] == 3581
 
 
+def test_allocate_student_center_zero_skips_filter(_base_pool: pd.DataFrame) -> None:
+    student_row = _single_student(مرکز_گلستان_صدرا=0).iloc[0].to_dict()
+
+    result = allocate_student(student_row, _base_pool)
+
+    assert result.log["allocation_status"] == "success"
+    assert result.log["error_type"] is None
+    assert result.log["candidate_count"] == len(_base_pool)
+
+
 def test_allocate_batch_no_match_sets_error(_base_pool: pd.DataFrame) -> None:
     students = _single_student(**{"کد_مدرسه": 9999})
 
