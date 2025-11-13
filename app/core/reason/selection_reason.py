@@ -46,6 +46,7 @@ class ReasonContext:
     remaining_capacity: str
     tiebreak_text: str
     trace_summary: str | None = None
+    is_after_school: bool = False
 
 
 def render_reason(context: ReasonContext, policy: SelectionReasonPolicy) -> str:
@@ -63,6 +64,7 @@ def render_reason(context: ReasonContext, policy: SelectionReasonPolicy) -> str:
     if context.trace_summary:
         parts.append(f"مراحل: {context.trace_summary}")
     template_payload = {
+        # قالب جدید (segment-based)
         "gender_segment": parts[0],
         "school_segment": parts[1],
         "track_segment": parts[2],
@@ -70,8 +72,22 @@ def render_reason(context: ReasonContext, policy: SelectionReasonPolicy) -> str:
         "result_segment": parts[4],
         "tiebreak_segment": parts[5],
         "trace_segment": parts[6] if len(parts) > 6 else "",
+        # کلیدهای قدیمی (label-based)
+        "gender_label": context.gender_value,
+        "school_name": context.school_value,
+        "track_label": context.track_value,
+        "capacity_label": context.capacity_value,
+        "result_label": f"{context.mentor_name} ({context.mentor_id})",
+        "ranking_chain": context.tiebreak_text,
+        "is_after_school": str(context.is_after_school).lower(),
+        "after_school_label": context.after_school_label,
+        # اطلاعات مشترک
         "mentor_id": context.mentor_id,
         "mentor_name": context.mentor_name,
+        "occupancy_ratio": context.occupancy_ratio,
+        "allocations_new": context.allocations_new,
+        "remaining_capacity": context.remaining_capacity,
+        "trace_summary": context.trace_summary or "",
     }
     raw_text = policy.template.format_map(template_payload)
     normalized = sanitize_bidi(raw_text.replace("\n", " ").replace("\t", " "))
@@ -303,6 +319,7 @@ def build_selection_reason_rows(
             track_alias,
         )
         after_school_label = "پس‌مدرسه‌ای: خیر"
+        is_after_school = False
         after_school_flag = _student_value(
             student_id,
             "after_school",
@@ -312,8 +329,9 @@ def build_selection_reason_rows(
         )
         if after_school_flag:
             normalized_flag = after_school_flag.strip().lower()
-            if normalized_flag in {"1", "true", "بله", "yes", "y"}:
+            if normalized_flag in {"1", "true", "بله", "yes", "y", "t"}:
                 after_school_label = "پس‌مدرسه‌ای: بله"
+                is_after_school = True
         counter_value: object | None = None
         student_counter = _student_value(student_id, "counter", "شمارنده")
         if student_counter:
@@ -372,6 +390,7 @@ def build_selection_reason_rows(
                 remaining_capacity=remaining_capacity,
                 tiebreak_text=tiebreak_text,
                 trace_summary=fa_digitize(trace_summary) if trace_summary else None,
+                is_after_school=is_after_school,
             ),
             config,
         )
