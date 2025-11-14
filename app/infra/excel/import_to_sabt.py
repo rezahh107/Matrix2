@@ -46,11 +46,16 @@ __all__ = [
     "build_optional_sheet_frame",
     "ensure_template_workbook",
     "write_import_to_sabt_excel",
+    "ImportToSabtExportError",
 ]
 
 
 class ExporterConfigError(ValueError):
     """خطای اعتبارسنجی تنظیمات Exporter."""
+
+
+class ImportToSabtExportError(ValueError):
+    """خطای اعتبارسنجی داده برای خروجی ImportToSabt."""
 
 
 def load_exporter_config(path: str | Path) -> dict:
@@ -112,10 +117,77 @@ def prepare_allocation_export_frame(
     students_prefixed = _prefix(students, "student_", {"student_id"})
     mentors_prefixed = _prefix(mentors, "mentor_", {"mentor_id"})
 
-    merged = alloc.merge(students_prefixed, how="left", on="student_id", sort=False)
-    merged = merged.merge(mentors_prefixed, how="left", on="mentor_id", sort=False)
+    _ensure_unique_identifier(students_prefixed, "student_id", entity_name="student")
+    _ensure_unique_identifier(mentors_prefixed, "mentor_id", entity_name="mentor")
+
+    merged = _safe_merge(
+        alloc,
+        students_prefixed,
+        how="left",
+        on="student_id",
+        sort=False,
+        validate="many_to_one",
+        context="student",
+    )
+    merged = _safe_merge(
+        merged,
+        mentors_prefixed,
+        how="left",
+        on="mentor_id",
+        sort=False,
+        validate="many_to_one",
+        context="mentor",
+    )
+
+    if len(merged.index) != len(alloc.index):
+        raise ImportToSabtExportError(
+            "ImportToSabt export failed: expected "
+            f"{len(alloc)} allocation rows after joining student/mentor details, but got "
+            f"{len(merged)}. This usually means duplicate student_id or mentor_id records "
+            "exist in the exporter inputs (مثلاً فایل استخر یا دانش‌آموز اشتباه). "
+            "Please fix the input data and retry."
+        )
+
     merged.index = alloc.index
     return merged
+
+
+def _ensure_unique_identifier(frame: pd.DataFrame, column: str, *, entity_name: str) -> None:
+    """اطمینان از یکتایی شناسه در دیتافریم ورودی برای جلوگیری از join چند به چند."""
+
+    if column not in frame.columns:
+        raise ImportToSabtExportError(
+            f"ImportToSabt export failed: '{column}' column not found for {entity_name} data."
+        )
+
+    series = frame[column]
+    non_na = series.dropna()
+    duplicated_ids = non_na[non_na.duplicated(keep=False)]
+    if not duplicated_ids.empty:
+        sample = ", ".join(duplicated_ids.astype(str).unique()[:5])
+        raise ImportToSabtExportError(
+            "ImportToSabt export failed: detected duplicate "
+            f"{entity_name}_id values ({sample}). Each {entity_name}_id must be unique "
+            "in ImportToSabt exporter inputs. لطفاً داده ورودی را اصلاح کنید."
+        )
+
+
+def _safe_merge(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    *,
+    context: str,
+    **kwargs: Any,
+) -> pd.DataFrame:
+    """اجرای merge با پیام خطای مشخص هنگام تخطی از validate."""
+
+    try:
+        return left.merge(right, **kwargs)
+    except ValueError as exc:  # pragma: no cover - مسیر خطا تست دارد
+        raise ImportToSabtExportError(
+            "ImportToSabt export failed while joining "
+            f"{context} details: {exc}"
+        ) from exc
 
 
 def _normalize_digits(value: Any, length: int) -> str:
