@@ -201,6 +201,11 @@ def canonicalize_students_frame(
     """کاننیکال‌سازی کامل دیتافریم دانش‌آموز برای تخصیص (SSoT)."""
 
     students = resolve_aliases(students_df.copy(deep=True), "report")
+    if isinstance(students.columns, pd.MultiIndex):
+        students.columns = [
+            next((str(part).strip() for part in tpl if str(part).strip()), "column")
+            for tpl in students.columns.to_flat_index()
+        ]
     if students.columns.duplicated().any():
         students.columns = _make_unique_columns(list(map(str, students.columns)))
     school_fa = CANON_EN_TO_FA["school_code"]
