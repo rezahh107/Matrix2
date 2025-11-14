@@ -42,6 +42,7 @@ from app.core.counter import (
 )
 from app.core.policy_loader import get_policy
 from app.infra import cli
+from app.utils.path_utils import resource_path
 from app.utils.settings_manager import AppPreferences
 
 from .task_runner import ProgressFn, Worker
@@ -63,8 +64,12 @@ class MainWindow(QMainWindow):
         self._success_hook: Callable[[], None] | None = None
         self._prefs = AppPreferences()
         self._btn_open_output_folder: QPushButton | None = None
-        policy_file = Path("config/policy.json")
+        policy_file = resource_path("config", "policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
+        exporter_config = resource_path("config", "SmartAlloc_Exporter_Config_v1.json")
+        self._default_sabt_config_path = (
+            str(exporter_config) if exporter_config.exists() else ""
+        )
 
         self._splitter = QSplitter(Qt.Vertical, self)
         self._splitter.setChildrenCollapsible(False)
@@ -402,6 +407,9 @@ class MainWindow(QMainWindow):
         self._apply_pref_default(
             self._picker_sabt_config_alloc, self._prefs.last_sabt_config_path
         )
+        self._apply_resource_default(
+            self._picker_sabt_config_alloc, self._default_sabt_config_path
+        )
         sabt_layout.addRow("فایل تنظیمات", self._picker_sabt_config_alloc)
 
         self._picker_sabt_template_alloc = FilePicker(
@@ -571,6 +579,9 @@ class MainWindow(QMainWindow):
         )
         self._apply_pref_default(
             self._picker_sabt_config_rule, self._prefs.last_sabt_config_path
+        )
+        self._apply_resource_default(
+            self._picker_sabt_config_rule, self._default_sabt_config_path
         )
         sabt_layout.addRow("فایل تنظیمات", self._picker_sabt_config_rule)
 
@@ -1183,6 +1194,12 @@ class MainWindow(QMainWindow):
 
     def _apply_pref_default(self, picker: FilePicker, value: str | None) -> None:
         """اگر ورودی خالی بود، مقدار پیش‌فرض را از تنظیمات اعمال می‌کند."""
+
+        if value and not picker.text().strip():
+            picker.setText(value)
+
+    def _apply_resource_default(self, picker: FilePicker, value: str | None) -> None:
+        """اعمال مسیر منابع باندل‌شده در صورت نبود ترجیح کاربر."""
 
         if value and not picker.text().strip():
             picker.setText(value)
