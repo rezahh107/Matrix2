@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
+    QScrollArea,
     QSplitter,
     QTabWidget,
     QTableWidget,
@@ -85,11 +86,11 @@ class MainWindow(QMainWindow):
         self._tabs = QTabWidget(self)
         self._tabs.setDocumentMode(True)
         self._tabs.setTabPosition(QTabWidget.North)
-        self._tabs.addTab(self._build_build_page(), "ساخت ماتریس")
-        self._tabs.addTab(self._build_allocate_page(), "تخصیص")
-        self._tabs.addTab(self._build_rule_engine_page(), "موتور قواعد")
-        self._tabs.addTab(self._build_validate_page(), "اعتبارسنجی")
-        self._tabs.addTab(self._build_explain_page(), "توضیحات")
+        self._tabs.addTab(self._wrap_page(self._build_build_page()), "ساخت ماتریس")
+        self._tabs.addTab(self._wrap_page(self._build_allocate_page()), "تخصیص")
+        self._tabs.addTab(self._wrap_page(self._build_rule_engine_page()), "موتور قواعد")
+        self._tabs.addTab(self._wrap_page(self._build_validate_page()), "اعتبارسنجی")
+        self._tabs.addTab(self._wrap_page(self._build_explain_page()), "توضیحات")
         top_layout.addWidget(self._tabs)
 
         bottom_pane = QWidget(self._splitter)
@@ -160,6 +161,16 @@ class MainWindow(QMainWindow):
         self._register_interactive_controls()
 
     # ------------------------------------------------------------------ UI setup
+    def _wrap_page(self, page: QWidget) -> QScrollArea:
+        """پیچیدن صفحات فرم در اسکرول برای نمایش بهتر در اندازه‌های کوچک."""
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setObjectName(f"scroll_{page.objectName() or id(page)}")
+        scroll.setWidget(page)
+        return scroll
+
     def _build_dashboard(self) -> QWidget:
         """ایجاد کارت داشبورد سبک با وضعیت Policy و میانبرها."""
 
