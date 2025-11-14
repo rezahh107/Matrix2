@@ -375,7 +375,8 @@ def _ensure_students_canonical(
         raise ValueError(f"Canonical student frame missing columns: {missing}")
     student_id = students.get("student_id")
     if student_id is not None:
-        empty_mask = student_id.astype("string").str.strip().eq("")
+        student_id_series = ensure_series(student_id)
+        empty_mask = student_id_series.astype("string").str.strip().eq("")
         if empty_mask.any():
             raise ValueError("Canonical student frame contains empty student_id values")
     for column in policy.join_keys:

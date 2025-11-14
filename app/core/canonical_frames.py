@@ -201,6 +201,8 @@ def canonicalize_students_frame(
     """کاننیکال‌سازی کامل دیتافریم دانش‌آموز برای تخصیص (SSoT)."""
 
     students = resolve_aliases(students_df.copy(deep=True), "report")
+    if students.columns.duplicated().any():
+        students.columns = _make_unique_columns(list(map(str, students.columns)))
     school_fa = CANON_EN_TO_FA["school_code"]
     if school_fa in students.columns:
         # استفاده از ensure_series باعث می‌شود در صورت وجود ستون‌های تکراری، فقط

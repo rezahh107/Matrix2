@@ -91,6 +91,28 @@ def test_canonicalize_students_frame_infers_missing_exam_group() -> None:
     assert normalized[exam_group_col].isna().all()
 
 
+def test_canonicalize_students_frame_handles_duplicate_school_columns() -> None:
+    policy = load_policy()
+    students = pd.DataFrame(
+        {
+            "student_id": ["STD-001"],
+            "کدرشته": [1201],
+            "جنسیت": [1],
+            "دانش آموز فارغ": [0],
+            "مرکز گلستان صدرا": [1],
+            "مالی حکمت بنیاد": [0],
+            "مدرسه نهایی": ["1111"],
+            "school final": ["9999"],
+        }
+    )
+
+    normalized = canonicalize_students_frame(students, policy=policy)
+
+    school_fa = columns.CANON_EN_TO_FA["school_code"]
+    assert normalized.columns.tolist().count(school_fa) == 1
+    assert normalized["school_code_raw"].iloc[0] == "1111"
+
+
 def test_allocate_student_dict_missing_school_field_skips_filter(
     _base_pool: pd.DataFrame,
 ) -> None:
