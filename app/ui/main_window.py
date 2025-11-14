@@ -340,6 +340,55 @@ class MainWindow(QMainWindow):
         output_layout.addRow("خروجی تخصیص", self._picker_alloc_out)
         outer.addWidget(output_group)
 
+        sabt_group = QGroupBox("خروجی Sabt (ImportToSabt)", page)
+        sabt_layout = QFormLayout(sabt_group)
+        sabt_layout.setLabelAlignment(Qt.AlignRight)
+        sabt_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        self._picker_sabt_output_alloc = FilePicker(
+            page,
+            save=True,
+            placeholder="خروجی Sabt (*.xlsx)",
+            dialog_filter="Excel (*.xlsx *.xlsm *.xls)",
+        )
+        self._picker_sabt_output_alloc.setObjectName("editSabtOutputAlloc")
+        self._picker_sabt_output_alloc.setToolTip(
+            "فایل ImportToSabt برای ارسال به سامانه ثبت"
+        )
+        sabt_layout.addRow("فایل خروجی", self._picker_sabt_output_alloc)
+
+        self._picker_sabt_config_alloc = FilePicker(
+            page,
+            placeholder="SmartAlloc_Exporter_Config_v1.json",
+            dialog_filter="JSON (*.json)",
+        )
+        self._picker_sabt_config_alloc.setObjectName("editSabtConfigAlloc")
+        self._picker_sabt_config_alloc.setToolTip(
+            "فایل تنظیمات SmartAlloc Exporter"
+        )
+        sabt_layout.addRow("فایل تنظیمات", self._picker_sabt_config_alloc)
+
+        self._picker_sabt_template_alloc = FilePicker(
+            page,
+            placeholder="قالب اختیاری ImportToSabt",
+            dialog_filter="Excel Template (*.xlsx *.xlsm *.xls)",
+        )
+        self._picker_sabt_template_alloc.setObjectName("editSabtTemplateAlloc")
+        self._picker_sabt_template_alloc.setToolTip(
+            "قالب اختیاری؛ در صورت خالی ساخت خودکار انجام می‌شود"
+        )
+        sabt_layout.addRow("فایل قالب", self._picker_sabt_template_alloc)
+
+        sabt_hint = QLabel(
+            "اگر فایل قالب خالی بماند، ensure_template_workbook براساس"
+            " SmartAlloc_Exporter_Config_v1.json یک Workbook حداقلی می‌سازد و"
+            " نیازی به فایل باینری جدا نیست."
+        )
+        sabt_hint.setWordWrap(True)
+        sabt_layout.addRow("", sabt_hint)
+
+        outer.addWidget(sabt_group)
+
         self._btn_allocate = QPushButton("تخصیص")
         self._btn_allocate.setObjectName("btnAllocate")
         self._btn_allocate.clicked.connect(self._start_allocate)
@@ -452,6 +501,54 @@ class MainWindow(QMainWindow):
         output_layout.addRow("خروجی", self._picker_rule_output)
         outer.addWidget(output_group)
 
+        sabt_group = QGroupBox("خروجی Sabt (ImportToSabt)", page)
+        sabt_layout = QFormLayout(sabt_group)
+        sabt_layout.setLabelAlignment(Qt.AlignRight)
+        sabt_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        self._picker_sabt_output_rule = FilePicker(
+            page,
+            save=True,
+            placeholder="خروجی Sabt (*.xlsx)",
+            dialog_filter="Excel (*.xlsx *.xlsm *.xls)",
+        )
+        self._picker_sabt_output_rule.setObjectName("editSabtOutputRule")
+        self._picker_sabt_output_rule.setToolTip(
+            "فایل ImportToSabt برای خروجی سناریوی موتور قواعد"
+        )
+        sabt_layout.addRow("فایل خروجی", self._picker_sabt_output_rule)
+
+        self._picker_sabt_config_rule = FilePicker(
+            page,
+            placeholder="SmartAlloc_Exporter_Config_v1.json",
+            dialog_filter="JSON (*.json)",
+        )
+        self._picker_sabt_config_rule.setObjectName("editSabtConfigRule")
+        self._picker_sabt_config_rule.setToolTip(
+            "فایل تنظیمات SmartAlloc Exporter برای Rule-Engine"
+        )
+        sabt_layout.addRow("فایل تنظیمات", self._picker_sabt_config_rule)
+
+        self._picker_sabt_template_rule = FilePicker(
+            page,
+            placeholder="قالب اختیاری ImportToSabt",
+            dialog_filter="Excel Template (*.xlsx *.xlsm *.xls)",
+        )
+        self._picker_sabt_template_rule.setObjectName("editSabtTemplateRule")
+        self._picker_sabt_template_rule.setToolTip(
+            "قالب اختیاری؛ در صورت خالی همان ساخت خودکار اعمال می‌شود"
+        )
+        sabt_layout.addRow("فایل قالب", self._picker_sabt_template_rule)
+
+        sabt_hint = QLabel(
+            "خالی‌گذاشتن قالب باعث می‌شود ensure_template_workbook از تنظیمات"
+            " JSON یک فایل پایه بسازد و نیازی به قالب جدا نیست."
+        )
+        sabt_hint.setWordWrap(True)
+        sabt_layout.addRow("", sabt_hint)
+
+        outer.addWidget(sabt_group)
+
         self._btn_rule_engine = QPushButton("اجرای موتور قواعد")
         self._btn_rule_engine.setObjectName("btnRuleEngine")
         self._btn_rule_engine.clicked.connect(self._start_rule_engine)
@@ -522,6 +619,9 @@ class MainWindow(QMainWindow):
             self._picker_pool,
             self._picker_policy_allocate,
             self._picker_alloc_out,
+            self._picker_sabt_output_alloc,
+            self._picker_sabt_config_alloc,
+            self._picker_sabt_template_alloc,
             self._edit_capacity,
             self._combo_academic_year,
             self._picker_prior_roster,
@@ -531,6 +631,9 @@ class MainWindow(QMainWindow):
             self._picker_rule_students,
             self._picker_policy_rule,
             self._picker_rule_output,
+            self._picker_sabt_output_rule,
+            self._picker_sabt_config_rule,
+            self._picker_sabt_template_rule,
             self._edit_rule_capacity,
             self._combo_rule_academic_year,
             self._picker_rule_prior_roster,
@@ -713,6 +816,18 @@ class MainWindow(QMainWindow):
         if current:
             overrides["current_roster"] = current
 
+        sabt_output = self._picker_sabt_output_alloc.text().strip()
+        if sabt_output:
+            overrides["sabt_output"] = sabt_output
+
+        sabt_config = self._picker_sabt_config_alloc.text().strip()
+        if sabt_config:
+            overrides["sabt_config"] = sabt_config
+
+        sabt_template = self._picker_sabt_template_alloc.text().strip()
+        if sabt_template:
+            overrides["sabt_template"] = sabt_template
+
         return overrides
 
     def _build_rule_engine_overrides(self) -> dict[str, object]:
@@ -730,6 +845,18 @@ class MainWindow(QMainWindow):
         current = self._picker_rule_current_roster.text().strip()
         if current:
             overrides["current_roster"] = current
+
+        sabt_output = self._picker_sabt_output_rule.text().strip()
+        if sabt_output:
+            overrides["sabt_output"] = sabt_output
+
+        sabt_config = self._picker_sabt_config_rule.text().strip()
+        if sabt_config:
+            overrides["sabt_config"] = sabt_config
+
+        sabt_template = self._picker_sabt_template_rule.text().strip()
+        if sabt_template:
+            overrides["sabt_template"] = sabt_template
 
         return overrides
 
