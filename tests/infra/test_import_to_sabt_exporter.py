@@ -282,6 +282,37 @@ def test_prepare_allocation_export_frame_handles_duplicate_columns_after_canon()
     assert merged.loc[0, "mentor_mentor_name"] == "پشتیبان الف"
 
 
+def test_prepare_allocation_export_frame_handles_duplicate_numeric_columns() -> None:
+    alloc = pd.DataFrame(
+        [
+            {"student_id": "STD-1", "mentor_id": "EMP-1"},
+        ]
+    )
+    students = pd.DataFrame(
+        [
+            {
+                "student_id": "STD-1",
+                "school_code": 101,
+                "کد مدرسه": "00101",
+            }
+        ]
+    )
+    mentors = pd.DataFrame(
+        [
+            {
+                "mentor_id": "EMP-1",
+                "school_code": 202,
+                "کد مدرسه": "00202",
+            }
+        ]
+    )
+
+    merged = prepare_allocation_export_frame(alloc, students, mentors)
+
+    assert merged.loc[0, "student_school_code"] == 101
+    assert merged.loc[0, "mentor_school_code"] == 202
+
+
 def test_prepare_allocation_export_frame_raises_on_conflicting_duplicate_columns() -> None:
     alloc = pd.DataFrame(
         [
