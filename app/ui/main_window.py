@@ -6,11 +6,13 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Sequence, Tuple
 
 import pandas as pd
-from PySide6.QtCore import QByteArray, QSettings, Qt, Slot
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QByteArray, QSettings, Qt, Slot, QUrl
+from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractItemView,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QGroupBox,
@@ -23,6 +25,8 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QSplitter,
     QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -38,6 +42,7 @@ from app.core.counter import (
 )
 from app.core.policy_loader import get_policy
 from app.infra import cli
+from app.utils.settings_manager import AppPreferences
 
 from .task_runner import ProgressFn, Worker
 from .widgets import FilePicker
@@ -55,6 +60,9 @@ class MainWindow(QMainWindow):
         self.setLayoutDirection(Qt.RightToLeft)
 
         self._worker: Worker | None = None
+        self._success_hook: Callable[[], None] | None = None
+        self._prefs = AppPreferences()
+        self._btn_open_output_folder: QPushButton | None = None
         policy_file = Path("config/policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
 
@@ -99,7 +107,27 @@ class MainWindow(QMainWindow):
         self._log = QTextEdit()
         self._log.setReadOnly(True)
         self._log.setObjectName("textLog")
-        bottom_layout.addWidget(self._log, 1)
+
+        log_container = QHBoxLayout()
+        log_container.setContentsMargins(0, 0, 0, 0)
+        log_container.setSpacing(12)
+        log_container.addWidget(self._log, 1)
+
+        log_buttons = QVBoxLayout()
+        log_buttons.setSpacing(8)
+        self._btn_clear_log = QPushButton("پاک کردن گزارش")
+        self._btn_clear_log.setObjectName("btnClearLog")
+        self._btn_clear_log.clicked.connect(self._log.clear)
+        log_buttons.addWidget(self._btn_clear_log)
+
+        self._btn_save_log = QPushButton("ذخیره گزارش…")
+        self._btn_save_log.setObjectName("btnSaveLog")
+        self._btn_save_log.clicked.connect(self._save_log_to_file)
+        log_buttons.addWidget(self._btn_save_log)
+        log_buttons.addStretch(1)
+
+        log_container.addLayout(log_buttons, 0)
+        bottom_layout.addLayout(log_container, 1)
 
         controls_layout = QHBoxLayout()
         controls_layout.setContentsMargins(0, 0, 0, 0)
@@ -224,6 +252,7 @@ class MainWindow(QMainWindow):
         )
         self._picker_output_matrix.setObjectName("editMatrixOut")
         self._picker_output_matrix.setToolTip("مسیر ذخیرهٔ فایل خروجی ماتریس اهلیت")
+        self._apply_pref_default(self._picker_output_matrix, self._prefs.last_matrix_path)
         output_layout.addRow("خروجی ماتریس", self._picker_output_matrix)
         outer.addWidget(output_group)
 
@@ -283,6 +312,7 @@ class MainWindow(QMainWindow):
         )
         self._picker_alloc_out.setObjectName("editAllocOut")
         self._picker_alloc_out.setToolTip("مسیر ذخیرهٔ نتیجه نهایی تخصیص دانش‌آموز-منتور")
+        self._apply_pref_default(self._picker_alloc_out, self._prefs.last_alloc_output)
 
         self._edit_capacity = QLineEdit(page)
         self._edit_capacity.setPlaceholderText("remaining_capacity")
@@ -355,6 +385,9 @@ class MainWindow(QMainWindow):
         self._picker_sabt_output_alloc.setToolTip(
             "فایل ImportToSabt برای ارسال به سامانه ثبت"
         )
+        self._apply_pref_default(
+            self._picker_sabt_output_alloc, self._prefs.last_sabt_output_allocate
+        )
         sabt_layout.addRow("فایل خروجی", self._picker_sabt_output_alloc)
 
         self._picker_sabt_config_alloc = FilePicker(
@@ -365,6 +398,9 @@ class MainWindow(QMainWindow):
         self._picker_sabt_config_alloc.setObjectName("editSabtConfigAlloc")
         self._picker_sabt_config_alloc.setToolTip(
             "فایل تنظیمات SmartAlloc Exporter"
+        )
+        self._apply_pref_default(
+            self._picker_sabt_config_alloc, self._prefs.last_sabt_config_path
         )
         sabt_layout.addRow("فایل تنظیمات", self._picker_sabt_config_alloc)
 
@@ -418,6 +454,9 @@ class MainWindow(QMainWindow):
         )
         self._picker_rule_matrix.setObjectName("editRuleMatrix")
         self._picker_rule_matrix.setToolTip("فایل ماتریس اهلیت ساخته‌شده را انتخاب کنید")
+        self._apply_pref_default(
+            self._picker_rule_matrix, self._prefs.last_matrix_path
+        )
         inputs_layout.addRow("فایل ماتریس", self._picker_rule_matrix)
 
         self._picker_rule_students = FilePicker(
@@ -516,6 +555,9 @@ class MainWindow(QMainWindow):
         self._picker_sabt_output_rule.setToolTip(
             "فایل ImportToSabt برای خروجی سناریوی موتور قواعد"
         )
+        self._apply_pref_default(
+            self._picker_sabt_output_rule, self._prefs.last_sabt_output_rule
+        )
         sabt_layout.addRow("فایل خروجی", self._picker_sabt_output_rule)
 
         self._picker_sabt_config_rule = FilePicker(
@@ -526,6 +568,9 @@ class MainWindow(QMainWindow):
         self._picker_sabt_config_rule.setObjectName("editSabtConfigRule")
         self._picker_sabt_config_rule.setToolTip(
             "فایل تنظیمات SmartAlloc Exporter برای Rule-Engine"
+        )
+        self._apply_pref_default(
+            self._picker_sabt_config_rule, self._prefs.last_sabt_config_path
         )
         sabt_layout.addRow("فایل تنظیمات", self._picker_sabt_config_rule)
 
@@ -569,11 +614,29 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
 
-        label = QLabel(
-            "برای اجرای کنترل کیفیت، خروجی ماتریس را در ابزار QA جداگانه بررسی کنید."
+        intro = QLabel(
+            "این بخش برای یادآوری مراحل کنترل کیفیت خروجی‌های Sabt و تخصیص است."
         )
-        label.setWordWrap(True)
-        layout.addWidget(label)
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        guide = QLabel(
+            "<ol>"
+            "<li>فایل خروجی Sabt یا تخصیص را باز کنید و شیت‌های summary/error را بررسی کنید.</li>"
+            "<li>در شیت summary مطمئن شوید که تعداد ردیف‌های موفق با گزارش سامانه برابر است.</li>"
+            "<li>در شیت error، ستون توضیح خطا را مطالعه و در صورت نیاز به تیم فنی ارجاع دهید.</li>"
+            "<li>در نهایت پوشه خروجی را بایگانی و با برچسب تاریخ ذخیره کنید.</li>"
+            "</ol>"
+        )
+        guide.setWordWrap(True)
+        guide.setTextFormat(Qt.RichText)
+        layout.addWidget(guide)
+
+        self._btn_open_output_folder = QPushButton("بازکردن پوشه خروجی")
+        self._btn_open_output_folder.setObjectName("btnOpenOutputFolder")
+        self._btn_open_output_folder.clicked.connect(self._open_last_output_folder)
+        layout.addWidget(self._btn_open_output_folder, 0, Qt.AlignRight)
+        self._update_output_folder_button_state()
 
         self._btn_run_validate = QPushButton("اجرای کنترل (غیرفعال)")
         self._btn_run_validate.setObjectName("btnRunValidate")
@@ -593,11 +656,43 @@ class MainWindow(QMainWindow):
         layout.setSpacing(12)
 
         label = QLabel(
-            "گزارش Explain در زمان اجرای سناریوهای Build/Allocate به‌صورت خودکار"
-            " در خروجی‌های تولیدشده ذخیره می‌شود."
+            "خلاصهٔ Explain در شیت جداگانه داخل فایل اکسل ذخیره می‌شود تا روند"
+            " تصمیم‌گیری هر دانش‌آموز قابل پیگیری باشد."
         )
         label.setWordWrap(True)
         layout.addWidget(label)
+
+        hint = QLabel(
+            "هر سطر Explain شامل شناسه دانش‌آموز، پشتیبان انتخاب‌شده،"
+            " قانون فعال و توضیح متناظر است."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        columns = [
+            "student_id",
+            "mentor_id",
+            "rule_tag",
+            "reason",
+            "score",
+            "trace_step",
+        ]
+        table = QTableWidget(2, len(columns), page)
+        table.setHorizontalHeaderLabels(columns)
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.NoSelection)
+        table.setMaximumHeight(160)
+        sample_rows = [
+            ("STU-125", "MENT-009", "R_CAPACITY", "ظرفیت منطقه", "0.82", "capacity_gate"),
+            ("STU-230", "MENT-104", "R_PRIORITY", "اولویت دانش‌آموز فارغ", "0.76", "priority"),
+        ]
+        for row, values in enumerate(sample_rows):
+            for col, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setFlags(Qt.ItemIsEnabled)
+                table.setItem(row, col, item)
+        layout.addWidget(table)
         layout.addStretch(1)
 
         return page
@@ -672,7 +767,12 @@ class MainWindow(QMainWindow):
             "--policy",
             policy_path,
         ]
-        self._launch_cli(argv, "ساخت ماتریس")
+        def _remember_build_output() -> None:
+            output_path = self._picker_output_matrix.text().strip()
+            if output_path:
+                self._prefs.last_matrix_path = output_path
+
+        self._launch_cli(argv, "ساخت ماتریس", on_success=_remember_build_output)
 
     def _start_allocate(self) -> None:
         """اجرای سناریوی تخصیص با فراخوانی CLI."""
@@ -735,7 +835,24 @@ class MainWindow(QMainWindow):
         if current_path:
             argv.extend(["--current-roster", current_path])
 
-        self._launch_cli(argv, "تخصیص", overrides=overrides)
+        def _remember_allocate_outputs() -> None:
+            alloc_out = self._picker_alloc_out.text().strip()
+            if alloc_out:
+                self._prefs.last_alloc_output = alloc_out
+            sabt_output = self._picker_sabt_output_alloc.text().strip()
+            if sabt_output:
+                self._prefs.last_sabt_output_allocate = sabt_output
+            sabt_config = self._picker_sabt_config_alloc.text().strip()
+            if sabt_config:
+                self._prefs.last_sabt_config_path = sabt_config
+            self._update_output_folder_button_state()
+
+        self._launch_cli(
+            argv,
+            "تخصیص",
+            overrides=overrides,
+            on_success=_remember_allocate_outputs,
+        )
 
     def _start_rule_engine(self) -> None:
         """اجرای موتور قواعد با استفاده از ماتریس موجود."""
@@ -798,7 +915,24 @@ class MainWindow(QMainWindow):
         if current_path:
             argv.extend(["--current-roster", current_path])
 
-        self._launch_cli(argv, "موتور قواعد", overrides=overrides)
+        def _remember_rule_engine_outputs() -> None:
+            matrix_path = self._picker_rule_matrix.text().strip()
+            if matrix_path:
+                self._prefs.last_matrix_path = matrix_path
+            sabt_output = self._picker_sabt_output_rule.text().strip()
+            if sabt_output:
+                self._prefs.last_sabt_output_rule = sabt_output
+            sabt_config = self._picker_sabt_config_rule.text().strip()
+            if sabt_config:
+                self._prefs.last_sabt_config_path = sabt_config
+            self._update_output_folder_button_state()
+
+        self._launch_cli(
+            argv,
+            "موتور قواعد",
+            overrides=overrides,
+            on_success=_remember_rule_engine_outputs,
+        )
 
     def _build_allocate_overrides(self) -> dict[str, object]:
         """ساخت دیکشنری پارامترهای شمارنده بر اساس ورودی UI."""
@@ -962,7 +1096,7 @@ class MainWindow(QMainWindow):
 
         status = " | ".join(messages)
         self._status.setText(status or "پیشنهاد خودکار انجام شد")
-        self._log.append(f"ℹ️ پیشنهاد شمارنده: {status}")
+        self._append_log(f"ℹ️ پیشنهاد شمارنده: {status}")
 
     def _launch_cli(
         self,
@@ -970,6 +1104,7 @@ class MainWindow(QMainWindow):
         action: str,
         *,
         overrides: dict[str, object] | None = None,
+        on_success: Callable[[], None] | None = None,
     ) -> None:
         """اجرای فرمان CLI با Worker و رعایت قرارداد progress."""
 
@@ -982,15 +1117,22 @@ class MainWindow(QMainWindow):
             if exit_code != 0:
                 raise RuntimeError(f"کد خروج غیرصفر: {exit_code}")
 
-        self._launch_worker(_task, action)
+        self._launch_worker(_task, action, on_success=on_success)
 
-    def _launch_worker(self, func: Callable[..., None], action: str) -> None:
+    def _launch_worker(
+        self,
+        func: Callable[..., None],
+        action: str,
+        *,
+        on_success: Callable[[], None] | None = None,
+    ) -> None:
         """اجرای تابع در Worker با آماده‌سازی UI."""
 
         self._progress.setValue(0)
         self._status.setText(f"{action} در حال اجرا…")
-        self._log.append(f"<b>▶️ شروع {action}</b>")
+        self._append_log(f"<b>▶️ شروع {action}</b>")
         self._disable_controls(True)
+        self._success_hook = on_success
 
         worker = Worker(func)
         worker.progress.connect(self._on_progress)
@@ -1039,6 +1181,80 @@ class MainWindow(QMainWindow):
 
         combo.setEditText(str(year))
 
+    def _apply_pref_default(self, picker: FilePicker, value: str | None) -> None:
+        """اگر ورودی خالی بود، مقدار پیش‌فرض را از تنظیمات اعمال می‌کند."""
+
+        if value and not picker.text().strip():
+            picker.setText(value)
+
+    def _save_log_to_file(self) -> None:
+        """ذخیرهٔ محتوای لاگ در فایل متنی یا HTML."""
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "ذخیره گزارش",
+            "",
+            "HTML (*.html *.htm);;Text (*.txt *.log);;All Files (*)",
+        )
+        if not filename:
+            return
+        path = Path(filename)
+        suffix = path.suffix.lower()
+        content = (
+            self._log.toPlainText()
+            if suffix in {".txt", ".log", ""}
+            else self._log.toHtml()
+        )
+        try:
+            path.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, "ذخیره گزارش", f"امکان ذخیرهٔ فایل نبود: {exc}")
+            return
+        QMessageBox.information(self, "ذخیره گزارش", "گزارش با موفقیت ذخیره شد.")
+
+    def _append_log(self, text: str) -> None:
+        """افزودن پیام به لاگ با برجسته کردن خطاها."""
+
+        message = str(text or "")
+        lowered = message.lower()
+        if ("error" in lowered or "خطا" in message) and "<span" not in message:
+            html = f'<span style="color:#c62828">{message}</span>'
+        else:
+            html = message
+        self._log.append(html)
+
+    def _determine_last_output_path(self) -> str:
+        """بررسی آخرین خروجی‌های ذخیره شده در تنظیمات."""
+
+        return (
+            self._prefs.last_sabt_output_allocate
+            or self._prefs.last_sabt_output_rule
+            or self._prefs.last_alloc_output
+        )
+
+    def _open_last_output_folder(self) -> None:
+        """باز کردن پوشهٔ خروجی ذخیره شده در سیستم عامل."""
+
+        path_text = self._determine_last_output_path()
+        if not path_text:
+            QMessageBox.information(self, "مسیر موجود نیست", "ابتدا یک خروجی تولید کنید.")
+            return
+        path = Path(path_text)
+        folder = path if path.is_dir() else path.parent
+        if not folder.exists():
+            QMessageBox.warning(
+                self, "پوشه یافت نشد", f"پوشهٔ ذخیره‌شده در دسترس نیست: {folder}"
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder.resolve())))
+
+    def _update_output_folder_button_state(self) -> None:
+        """فعال/غیرفعال کردن دکمهٔ باز کردن پوشه بر اساس Prefs."""
+
+        if self._btn_open_output_folder is None:
+            return
+        self._btn_open_output_folder.setEnabled(bool(self._determine_last_output_path()))
+
     def _load_counter_dataframe(self, path: Path) -> pd.DataFrame:
         """بارگذاری دیتافریم شمارنده با تشخیص شیت مناسب."""
 
@@ -1082,7 +1298,7 @@ class MainWindow(QMainWindow):
         self._progress.setValue(max(0, min(100, int(pct))))
         self._status.setText(message or "در حال پردازش")
         safe_msg = message or "(بدون پیام)"
-        self._log.append(f"{pct}% | {safe_msg}")
+        self._append_log(f"{pct}% | {safe_msg}")
 
     @Slot(bool, object)
     def _on_finished(self, success: bool, error: object | None) -> None:
@@ -1090,6 +1306,7 @@ class MainWindow(QMainWindow):
 
         self._disable_controls(False)
         self._worker = None
+        hook, self._success_hook = self._success_hook, None
 
         if error is not None:
             msg = str(error)
@@ -1106,17 +1323,22 @@ class MainWindow(QMainWindow):
                 color = "#c00"
                 QMessageBox.critical(self, "خطای ناشناخته", msg)
             self._status.setText("خطا")
-            self._log.append(f'<span style="color:{color}">❌ {msg}</span>')
+            self._append_log(f'<span style="color:{color}">❌ {msg}</span>')
             return
 
         if not success:
             self._status.setText("لغو شد")
-            self._log.append("⚠️ عملیات متوقف شد")
+            self._append_log("⚠️ عملیات متوقف شد")
             return
 
         self._progress.setValue(100)
         self._status.setText("کامل")
-        self._log.append('<span style="color:#2e7d32">✅ عملیات با موفقیت پایان یافت</span>')
+        self._append_log('<span style="color:#2e7d32">✅ عملیات با موفقیت پایان یافت</span>')
+        if hook is not None:
+            try:
+                hook()
+            except Exception as exc:  # pragma: no cover - unexpected UI failure
+                self._append_log(f"⚠️ خطا در ذخیره تنظیمات: {exc}")
 
     # -------------------------------------------------------------- Qt events
     def closeEvent(self, event: QCloseEvent) -> None:

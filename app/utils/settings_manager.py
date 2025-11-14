@@ -182,10 +182,46 @@ class AppPreferences:
     def last_matrix_path(self) -> str:
         """آخرین مسیر ماتریس"""
         return self._settings.get('ui/last_matrix_path', '')
-    
+
     @last_matrix_path.setter
     def last_matrix_path(self, value: str):
         self._settings.set('ui/last_matrix_path', value)
+
+    @property
+    def last_alloc_output(self) -> str:
+        """آخرین فایل خروجی تخصیص"""
+        return self._settings.get('ui/last_alloc_output', '')
+
+    @last_alloc_output.setter
+    def last_alloc_output(self, value: str):
+        self._settings.set('ui/last_alloc_output', value)
+
+    @property
+    def last_sabt_output_allocate(self) -> str:
+        """آخرین خروجی Sabt ثبت شده در تب تخصیص"""
+        return self._settings.get('ui/last_sabt_output_allocate', '')
+
+    @last_sabt_output_allocate.setter
+    def last_sabt_output_allocate(self, value: str):
+        self._settings.set('ui/last_sabt_output_allocate', value)
+
+    @property
+    def last_sabt_output_rule(self) -> str:
+        """آخرین خروجی Sabt مربوط به موتور قواعد"""
+        return self._settings.get('ui/last_sabt_output_rule', '')
+
+    @last_sabt_output_rule.setter
+    def last_sabt_output_rule(self, value: str):
+        self._settings.set('ui/last_sabt_output_rule', value)
+
+    @property
+    def last_sabt_config_path(self) -> str:
+        """آخرین فایل تنظیمات Exporter"""
+        return self._settings.get('ui/last_sabt_config', '')
+
+    @last_sabt_config_path.setter
+    def last_sabt_config_path(self, value: str):
+        self._settings.set('ui/last_sabt_config', value)
     
     @property
     def max_occupancy(self) -> float:
