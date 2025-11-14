@@ -9,7 +9,7 @@ from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 
 import pandas as pd
 
-from app.core.common.columns import canonicalize_headers
+from app.core.common.columns import canonicalize_headers, ensure_series
 
 GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
     "GF_NationalCode": (
@@ -190,7 +190,7 @@ def _coalesce_duplicate_identifier_rows(
             f"ImportToSabt export failed: '{column}' column not found for {entity_name} data."
         )
 
-    normalized = frame[column].astype("string").fillna("").str.strip()
+    normalized = ensure_series(frame[column]).astype("string").fillna("").str.strip()
     duplicate_mask = normalized.duplicated(keep=False) & normalized.ne("")
     if not bool(duplicate_mask.any()):
         return frame

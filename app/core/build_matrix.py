@@ -26,7 +26,12 @@ import numpy as np
 import pandas as pd
 
 from app.core.canonical_frames import canonicalize_pool_frame
-from app.core.common.columns import coerce_semantics, ensure_required_columns, resolve_aliases
+from app.core.common.columns import (
+    coerce_semantics,
+    ensure_required_columns,
+    ensure_series,
+    resolve_aliases,
+)
 from app.core.common.column_normalizer import normalize_input_columns
 from app.core.common.domain import (
     BuildConfig as DomainBuildConfig,
@@ -450,9 +455,15 @@ def _validate_finance_invariants(matrix: pd.DataFrame, *, cfg: BuildConfig, fina
 
 
 def _validate_alias_contract(matrix: pd.DataFrame, *, cfg: BuildConfig) -> None:
-    alias_series = matrix["جایگزین"].astype("string").str.strip().fillna("")
-    mentor_ids = matrix["کد کارمندی پشتیبان"].astype("string").str.strip().fillna("")
-    row_types = matrix["عادی مدرسه"].astype("string").str.strip().fillna("")
+    alias_series = (
+        ensure_series(matrix["جایگزین"]).astype("string").str.strip().fillna("")
+    )
+    mentor_ids = (
+        ensure_series(matrix["کد کارمندی پشتیبان"]).astype("string").str.strip().fillna("")
+    )
+    row_types = (
+        ensure_series(matrix["عادی مدرسه"]).astype("string").str.strip().fillna("")
+    )
 
     school_mask = row_types == "مدرسه‌ای"
     mismatch_school = matrix.loc[school_mask & (alias_series != mentor_ids)]
@@ -473,7 +484,9 @@ def _validate_alias_contract(matrix: pd.DataFrame, *, cfg: BuildConfig) -> None:
 
 
 def _validate_school_code_contract(matrix: pd.DataFrame, *, school_code_col: str) -> None:
-    row_types = matrix["عادی مدرسه"].astype("string").str.strip().fillna("")
+    row_types = (
+        ensure_series(matrix["عادی مدرسه"]).astype("string").str.strip().fillna("")
+    )
     codes = matrix[school_code_col].astype("Int64")
     school_mask = row_types == "مدرسه‌ای"
     if ((codes[school_mask] == 0) | codes[school_mask].isna()).any():
@@ -1280,8 +1293,9 @@ def build_matrix(
 
     # generate rows
     progress(30, "preparing vectorized base rows")
-    mentor_id_series = insp[COL_MENTOR_ID].astype(str).str.strip()
-    invalid_mask = mentor_id_series.eq("") | insp[COL_MENTOR_ID].isna()
+    mentor_source = ensure_series(insp[COL_MENTOR_ID])
+    mentor_id_series = mentor_source.astype("string").fillna("").str.strip()
+    invalid_mask = mentor_id_series.eq("")
     invalid_mentors_df = pd.DataFrame(
         {
             "row_index": (insp.index[invalid_mask] + 1),
@@ -1382,27 +1396,67 @@ def build_matrix(
 
     if not matrix.empty:
         matrix = matrix.copy()
-        matrix["ردیف پشتیبان"] = matrix["ردیف پشتیبان"].map(_coerce_int_like)
+        matrix["ردیف پشتیبان"] = ensure_series(matrix["ردیف پشتیبان"]).map(
+            _coerce_int_like
+        )
+        school_series = ensure_series(matrix[school_code_col])
         matrix[school_code_col] = (
-            matrix[school_code_col]
-            .map(lambda v: safe_int_value(v, default=0))
-            .astype("int64")
+            school_series.map(lambda v: safe_int_value(v, default=0)).astype("int64")
         )
         matrix["کد کارمندی پشتیبان"] = (
-            matrix["کد کارمندی پشتیبان"].astype("string").str.strip().fillna("").astype(object)
+            ensure_series(matrix["کد کارمندی پشتیبان"])
+            .astype("string")
+            .str.strip()
+            .fillna("")
+            .astype(object)
         )
-        matrix["پشتیبان"] = matrix["پشتیبان"].astype("string").str.strip().fillna("").astype(object)
-        matrix["مدیر"] = matrix["مدیر"].astype("string").str.strip().fillna("").astype(object)
-        matrix["نام رشته"] = matrix["نام رشته"].astype("string").str.strip().fillna("").astype(object)
-        matrix["نام مدرسه"] = matrix["نام مدرسه"].astype("string").fillna("").astype(object)
-        matrix["عادی مدرسه"] = matrix["عادی مدرسه"].astype("string").str.strip().fillna("").astype(object)
-        matrix["جایگزین"] = matrix["جایگزین"].astype("string").str.strip().fillna("").astype(object)
+        matrix["پشتیبان"] = (
+            ensure_series(matrix["پشتیبان"])
+            .astype("string")
+            .str.strip()
+            .fillna("")
+            .astype(object)
+        )
+        matrix["مدیر"] = (
+            ensure_series(matrix["مدیر"])
+            .astype("string")
+            .str.strip()
+            .fillna("")
+            .astype(object)
+        )
+        matrix["نام رشته"] = (
+            ensure_series(matrix["نام رشته"])
+            .astype("string")
+            .str.strip()
+            .fillna("")
+            .astype(object)
+        )
+        matrix["نام مدرسه"] = (
+            ensure_series(matrix["نام مدرسه"])
+            .astype("string")
+            .fillna("")
+            .astype(object)
+        )
+        matrix["عادی مدرسه"] = (
+            ensure_series(matrix["عادی مدرسه"])
+            .astype("string")
+            .str.strip()
+            .fillna("")
+            .astype(object)
+        )
+        matrix["جایگزین"] = (
+            ensure_series(matrix["جایگزین"])
+            .astype("string")
+            .str.strip()
+            .fillna("")
+            .astype(object)
+        )
         if finance_col in matrix.columns:
-            matrix[finance_col] = matrix[finance_col].astype("Int64")
+            matrix[finance_col] = ensure_series(matrix[finance_col]).astype("Int64")
         if center_col in matrix.columns:
-            matrix[center_col] = matrix[center_col].astype("int64")
-        matrix["جنسیت"] = matrix["جنسیت"].astype("Int64")
-        matrix["دانش آموز فارغ"] = matrix["دانش آموز فارغ"].astype("Int64")
+            matrix[center_col] = ensure_series(matrix[center_col]).astype("int64")
+        matrix["جنسیت"] = ensure_series(matrix["جنسیت"]).astype("Int64")
+        matrix["دانش آموز فارغ"] = ensure_series(matrix["دانش آموز فارغ"]).astype("Int64")
 
         dedupe_cols = [col for col in DEDUP_KEY_ORDER if col in matrix.columns]
         if dedupe_cols:
@@ -1529,8 +1583,8 @@ def validate_with_students(
         {
             "student_postal": postal_series,
             "alias_norm": postal_series,
-            "mentor_name": stud_raw["نام پشتیبان"].astype(str).str.strip(),
-            "manager": stud_raw["مدیر"].astype(str).str.strip(),
+            "mentor_name": ensure_series(stud_raw["نام پشتیبان"]).astype(str).str.strip(),
+            "manager": ensure_series(stud_raw["مدیر"]).astype(str).str.strip(),
             "school_code": stud_raw[COL_SCHOOL1].apply(
                 lambda x: school_name_to_code.get(normalize_fa(x), "")
             )
@@ -1556,8 +1610,8 @@ def validate_with_students(
     )
 
     mat = matrix_df.copy()
-    mat["alias_norm"] = mat["جایگزین"].apply(to_numlike_str)
-    mat["school_code"] = mat[school_code_col].astype(str).str.strip()
+    mat["alias_norm"] = ensure_series(mat["جایگزین"]).apply(to_numlike_str)
+    mat["school_code"] = ensure_series(mat[school_code_col]).astype(str).str.strip()
 
     def _student_type_from_postal(v: str) -> str:
         if not v:
