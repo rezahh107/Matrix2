@@ -10,6 +10,28 @@ from app.infra import io_utils
 from app.infra.io_utils import write_xlsx_atomic
 
 
+def test_flatten_columns_recovers_from_mismatched_flat_index(monkeypatch) -> None:
+    """MultiIndex با توابع معیوب نیز نباید باعث استثناء شود."""
+
+    columns = pd.MultiIndex.from_product([["الف", "ب"], ["جزئیات"]])
+    df = pd.DataFrame([[1, 2], [3, 4]], columns=columns)
+
+    original = pd.MultiIndex.to_flat_index
+
+    def _broken_flat_index(self):  # type: ignore[override]
+        result = original(self)
+        return result[: len(result) - 1]
+
+    monkeypatch.setattr(pd.MultiIndex, "to_flat_index", _broken_flat_index)
+
+    with pytest.warns(RuntimeWarning, match="Flattened column count mismatch"):
+        flattened = io_utils._flatten_columns(df)
+
+    assert list(flattened.columns) == ["الف__جزئیات", "ب__جزئیات"]
+    expected = pd.DataFrame(df.to_numpy(), columns=["الف__جزئیات", "ب__جزئیات"])
+    pd.testing.assert_frame_equal(flattened, expected)
+
+
 @pytest.mark.parametrize("engine", ["openpyxl", "xlsxwriter"])
 def test_write_xlsx_atomic_handles_duplicate_columns(tmp_path: Path, monkeypatch, engine: str) -> None:
     try:
