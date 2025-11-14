@@ -791,14 +791,7 @@ def allocate_batch(
 
         if result.mentor_row is not None:
             chosen_index = result.mentor_row.name
-            mentor_identifier_logged = result.log.get("mentor_id")
-            mentor_identifier = mentor_identifier_logged
-            if mentor_identifier is None:
-                mentor_row_en = canonicalize_headers(
-                    result.mentor_row.to_frame().T,
-                    header_mode=policy.excel.header_mode_internal,
-                ).iloc[0]
-                mentor_identifier = mentor_row_en.get("mentor_id")
+            mentor_identifier = _resolve_mentor_identifier(result, policy=policy)
             resolved_identifier, state_entry = _resolve_mentor_state_entry(
                 mentor_state, mentor_identifier
             )
@@ -828,19 +821,14 @@ def allocate_batch(
                 chosen_index, "occupancy_ratio"
             ]
 
+            mentor_id_display = result.log.get("mentor_id")
+            if mentor_id_display is None:
+                mentor_id_display = resolved_identifier
             allocations.append(
                 {
                     "student_id": student_dict.get("student_id", ""),
                     "mentor": result.mentor_row.get("پشتیبان", ""),
-                    "mentor_id": (
-                        ""
-                        if mentor_identifier_logged is None and resolved_identifier is None
-                        else str(
-                            mentor_identifier_logged
-                            if mentor_identifier_logged is not None
-                            else resolved_identifier
-                        )
-                    ),
+                    "mentor_id": "" if mentor_id_display is None else str(mentor_id_display),
                 }
             )
 
