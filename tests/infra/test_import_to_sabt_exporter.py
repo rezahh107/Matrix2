@@ -264,3 +264,22 @@ def test_coalesce_duplicate_identifier_rows_handles_duplicate_columns() -> None:
 
     assert result.shape[0] == 1
     assert result.loc[result.index[0], "value"] == "filled"
+
+
+def test_coalesce_duplicate_identifier_rows_handles_non_range_index() -> None:
+    frame = pd.DataFrame(
+        {
+            "student_id": ["B1", "B1"],
+            "value": ["first", "second"],
+        },
+        index=[10, 50],
+    )
+
+    result = _coalesce_duplicate_identifier_rows(
+        frame,
+        "student_id",
+        entity_name="student",
+    )
+
+    assert result.shape[0] == 1
+    assert list(result["value"]) == ["first"]
