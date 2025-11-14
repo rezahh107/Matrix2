@@ -83,6 +83,44 @@ def _normalize_mentor_identifier(value: object) -> object | None:
     return value
 
 
+def _resolve_mentor_identifier(
+    result: AllocationResult, *, policy: PolicyConfig
+) -> object:
+    """بازیابی شناسهٔ پشتیبان با اولویت: log → سطر فارسی → سطر canonical.
+
+    مثال::
+
+        >>> _resolve_mentor_identifier(result, policy=policy)
+        'EMP-101'
+    """
+
+    mentor_identifier_logged = _normalize_mentor_identifier(result.log.get("mentor_id"))
+    if mentor_identifier_logged is not None:
+        result.log["mentor_id"] = mentor_identifier_logged
+        return mentor_identifier_logged
+
+    if result.mentor_row is None:
+        raise KeyError("Mentor identifier missing: row not provided")
+
+    mentor_identifier = _normalize_mentor_identifier(
+        result.mentor_row.get("کد کارمندی پشتیبان")
+    )
+    if mentor_identifier is not None:
+        result.log["mentor_id"] = mentor_identifier
+        return mentor_identifier
+
+    mentor_row_en = canonicalize_headers(
+        result.mentor_row.to_frame().T,
+        header_mode=policy.excel.header_mode_internal,
+    ).iloc[0]
+    mentor_identifier = _normalize_mentor_identifier(mentor_row_en.get("mentor_id"))
+    if mentor_identifier is not None:
+        result.log["mentor_id"] = mentor_identifier
+        return mentor_identifier
+
+    raise KeyError("Mentor identifier missing from allocation log and row")
+
+
 def _noop_progress(_: int, __: str) -> None:
     """تابع پیش‌فرض progress که کاری انجام نمی‌دهد."""
 
@@ -678,27 +716,7 @@ def allocate_batch(
 
         if result.mentor_row is not None:
             chosen_index = result.mentor_row.name
-            mentor_identifier = _normalize_mentor_identifier(
-                result.log.get("mentor_id")
-            )
-            if mentor_identifier is None:
-                mentor_identifier = _normalize_mentor_identifier(
-                    result.mentor_row.get("کد کارمندی پشتیبان")
-                )
-            if mentor_identifier is None:
-                mentor_row_en = canonicalize_headers(
-                    result.mentor_row.to_frame().T,
-                    header_mode=policy.excel.header_mode_internal,
-                ).iloc[0]
-                mentor_identifier = _normalize_mentor_identifier(
-                    mentor_row_en.get("mentor_id")
-                )
-                if mentor_identifier is not None:
-                    result.log["mentor_id"] = mentor_identifier
-            else:
-                result.log["mentor_id"] = mentor_identifier
-            if mentor_identifier is None:
-                raise KeyError("Mentor identifier missing from allocation log and row")
+            mentor_identifier = _resolve_mentor_identifier(result, policy=policy)
             state_entry = mentor_state.get(mentor_identifier)
             if state_entry is None:
                 raise KeyError(

@@ -66,3 +66,14 @@ def test_allocate_batch_recovers_missing_log_identifier(monkeypatch):
 
     assert allocations.iloc[0]["mentor_id"] == "EMP-101"
     assert logs.iloc[0]["mentor_id"] == "EMP-101"
+
+
+def test_resolve_mentor_identifier_uses_canonical_headers():
+    policy = load_policy()
+    mentor_row = pd.Series({" Mentor Id ": "EMP-202"})
+    result = allocator.AllocationResult(mentor_row=mentor_row, trace=[], log={"mentor_id": pd.NA})
+
+    resolved = allocator._resolve_mentor_identifier(result, policy=policy)
+
+    assert resolved == "EMP-202"
+    assert result.log["mentor_id"] == "EMP-202"
