@@ -176,6 +176,25 @@ def test_allocate_batch_capacity_full_sets_error(_base_pool: pd.DataFrame) -> No
     assert logs.iloc[0]["detailed_reason"] == "No capacity among matched candidates"
 
 
+def test_allocate_student_handles_empty_ranking(
+    monkeypatch: pytest.MonkeyPatch, _base_pool: pd.DataFrame
+) -> None:
+    student = _single_student().iloc[0].to_dict()
+
+    def _empty_ranked(df: pd.DataFrame, **_: object) -> pd.DataFrame:
+        empty = df.iloc[0:0].copy()
+        empty.attrs["fairness_reason"] = None
+        return empty
+
+    monkeypatch.setattr("app.core.allocate_students.apply_ranking_policy", _empty_ranked)
+
+    result = allocate_student(student, _base_pool)
+
+    assert result.mentor_row is None
+    assert result.log["error_type"] == "INTERNAL_ERROR"
+    assert "Ranking policy returned no candidates" in str(result.log["detailed_reason"])
+
+
 def test_allocate_batch_progress_reports_start_and_end(_base_pool: pd.DataFrame) -> None:
     students = pd.concat([_single_student(), _single_student(student_id="STD-002")], ignore_index=True)
     progress_calls: List[Tuple[int, str]] = []

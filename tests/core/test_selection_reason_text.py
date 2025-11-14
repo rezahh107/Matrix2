@@ -126,6 +126,73 @@ def test_tiebreak_explanation_reflects_policy() -> None:
     assert "۳) شناسه پشتیبان" in reason_text
 
 
+def test_selection_reason_handles_duplicate_student_rows() -> None:
+    policy = load_policy()
+    allocations = pd.DataFrame(
+        [
+            {
+                "student_id": "STU-dup",
+                "mentor_id": "M-200",
+                "occupancy_ratio": 0.1,
+                "allocations_new": 1,
+                policy.capacity_column: 5,
+                "counter": 3,
+            }
+        ]
+    )
+    students = pd.DataFrame(
+        [
+            {
+                "student_id": "STU-dup",
+                "کدملی": "001",
+                "نام": "دانش‌آموز اول",
+                "نام خانوادگی": "نسخه A",
+                "کدرشته": 1010,
+                "گروه آزمایشی": "ریاضی",
+                "جنسیت": policy.gender_codes.female.value,
+                "دانش آموز فارغ": 0,
+                "مرکز گلستان صدرا": 0,
+                "مالی حکمت بنیاد": 0,
+                "کد مدرسه": 11,
+            },
+            {
+                "student_id": "STU-dup",
+                "کدملی": "002",
+                "نام": "دانش‌آموز دوم",
+                "نام خانوادگی": "نسخه B",
+                "کدرشته": 1010,
+                "گروه آزمایشی": "ریاضی",
+                "جنسیت": policy.gender_codes.female.value,
+                "دانش آموز فارغ": 0,
+                "مرکز گلستان صدرا": 0,
+                "مالی حکمت بنیاد": 0,
+                "کد مدرسه": 11,
+            },
+        ]
+    )
+    mentors = pd.DataFrame(
+        [
+            {
+                "mentor_id": "M-200",
+                "mentor_name": "منتور آزمون",
+            }
+        ]
+    )
+
+    reasons = build_selection_reason_rows(
+        allocations,
+        students,
+        mentors,
+        policy=policy,
+        logs=None,
+        trace=None,
+    )
+
+    assert len(reasons) == 1
+    assert reasons.iloc[0]["نام"] == "دانش‌آموز اول"
+    assert reasons.iloc[0]["نام خانوادگی"] == "نسخه A"
+
+
 def test_safe_truncate_unicode_boundary() -> None:
     text = "عبارت با ایموجی 😊 و ترکیب‌ها"
     truncated = safe_truncate(text, 12)
