@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Sequence, Tuple
 
 import pandas as pd
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import QByteArray, QSettings, Qt, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
+    QSplitter,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -57,13 +58,16 @@ class MainWindow(QMainWindow):
         policy_file = Path("config/policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
 
-        central = QWidget(self)
-        main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(16, 16, 16, 16)
-        main_layout.setSpacing(16)
+        self._splitter = QSplitter(Qt.Vertical, self)
+        self._splitter.setChildrenCollapsible(False)
+
+        top_pane = QWidget(self._splitter)
+        top_layout = QVBoxLayout(top_pane)
+        top_layout.setContentsMargins(16, 16, 16, 8)
+        top_layout.setSpacing(16)
 
         dashboard = self._build_dashboard()
-        main_layout.addWidget(dashboard)
+        top_layout.addWidget(dashboard)
 
         self._tabs = QTabWidget(self)
         self._tabs.setDocumentMode(True)
@@ -73,7 +77,12 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._build_rule_engine_page(), "موتور قواعد")
         self._tabs.addTab(self._build_validate_page(), "اعتبارسنجی")
         self._tabs.addTab(self._build_explain_page(), "توضیحات")
-        main_layout.addWidget(self._tabs)
+        top_layout.addWidget(self._tabs)
+
+        bottom_pane = QWidget(self._splitter)
+        bottom_layout = QVBoxLayout(bottom_pane)
+        bottom_layout.setContentsMargins(16, 0, 16, 16)
+        bottom_layout.setSpacing(12)
 
         status_layout = QHBoxLayout()
         status_layout.setContentsMargins(0, 0, 0, 0)
@@ -85,24 +94,34 @@ class MainWindow(QMainWindow):
         self._progress.setObjectName("progressBar")
         status_layout.addWidget(self._status, 0)
         status_layout.addWidget(self._progress, 1)
-        main_layout.addLayout(status_layout)
+        bottom_layout.addLayout(status_layout)
 
         self._log = QTextEdit()
         self._log.setReadOnly(True)
         self._log.setObjectName("textLog")
-        main_layout.addWidget(self._log, 1)
+        bottom_layout.addWidget(self._log, 1)
 
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_layout.setSpacing(12)
-        bottom_layout.addStretch(1)
+        controls_layout = QHBoxLayout()
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(12)
+        controls_layout.addStretch(1)
         self._btn_demo = QPushButton("اجرای تست (دمو Progress)")
         self._btn_demo.setObjectName("btnDemo")
         self._btn_demo.clicked.connect(self._start_demo_task)
-        bottom_layout.addWidget(self._btn_demo)
-        main_layout.addLayout(bottom_layout)
+        controls_layout.addWidget(self._btn_demo)
+        bottom_layout.addLayout(controls_layout)
 
-        self.setCentralWidget(central)
+        self._splitter.addWidget(top_pane)
+        self._splitter.addWidget(bottom_pane)
+        self._splitter.setStretchFactor(0, 3)
+        self._splitter.setStretchFactor(1, 1)
+
+        self.setCentralWidget(self._splitter)
+
+        settings = QSettings()
+        state = settings.value("ui/main_splitter")
+        if isinstance(state, QByteArray):
+            self._splitter.restoreState(state)
 
         self._interactive: List[QWidget] = []
         self._register_interactive_controls()
@@ -155,21 +174,36 @@ class MainWindow(QMainWindow):
         """فرم ورودی‌های سناریوی ساخت ماتریس."""
 
         page = QWidget(self)
-        form = QFormLayout(page)
-        form.setLabelAlignment(Qt.AlignRight)
-        form.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(24, 24, 24, 24)
+        outer.setSpacing(16)
+
+        inputs_group = QGroupBox("ورودی‌ها", page)
+        inputs_layout = QFormLayout(inputs_group)
+        inputs_layout.setLabelAlignment(Qt.AlignRight)
+        inputs_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
 
         self._picker_inspactor = FilePicker(page, placeholder="فایل Inspactor")
         self._picker_inspactor.setObjectName("editInspactor")
-        form.addRow("گزارش Inspactor", self._picker_inspactor)
+        self._picker_inspactor.setToolTip("خروجی گزارش Inspactor که فهرست پشتیبان‌ها را دارد")
+        inputs_layout.addRow("گزارش Inspactor", self._picker_inspactor)
 
         self._picker_schools = FilePicker(page, placeholder="فایل مدارس")
         self._picker_schools.setObjectName("editSchools")
-        form.addRow("گزارش مدارس", self._picker_schools)
+        self._picker_schools.setToolTip("فایل رسمی مدارس برای تطبیق کد و نام مدرسه")
+        inputs_layout.addRow("گزارش مدارس", self._picker_schools)
 
         self._picker_crosswalk = FilePicker(page, placeholder="فایل Crosswalk")
         self._picker_crosswalk.setObjectName("editCrosswalk")
-        form.addRow("Crosswalk", self._picker_crosswalk)
+        self._picker_crosswalk.setToolTip("جدول Crosswalk جهت نگاشت رشته‌ها و گروه‌ها")
+        inputs_layout.addRow("Crosswalk", self._picker_crosswalk)
+
+        outer.addWidget(inputs_group)
+
+        policy_group = QGroupBox("سیاست", page)
+        policy_layout = QFormLayout(policy_group)
+        policy_layout.setLabelAlignment(Qt.AlignRight)
+        policy_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
 
         self._picker_policy_build = FilePicker(
             page, placeholder="پیش‌فرض: config/policy.json"
@@ -177,18 +211,30 @@ class MainWindow(QMainWindow):
         self._picker_policy_build.setObjectName("editPolicy1")
         if self._default_policy_path:
             self._picker_policy_build.setText(self._default_policy_path)
-        form.addRow("سیاست", self._picker_policy_build)
+        policy_layout.addRow("سیاست", self._picker_policy_build)
+        outer.addWidget(policy_group)
+
+        output_group = QGroupBox("خروجی", page)
+        output_layout = QFormLayout(output_group)
+        output_layout.setLabelAlignment(Qt.AlignRight)
+        output_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
 
         self._picker_output_matrix = FilePicker(
             page, save=True, placeholder="فایل خروجی ماتریس (*.xlsx)"
         )
         self._picker_output_matrix.setObjectName("editMatrixOut")
-        form.addRow("خروجی ماتریس", self._picker_output_matrix)
+        self._picker_output_matrix.setToolTip("مسیر ذخیرهٔ فایل خروجی ماتریس اهلیت")
+        output_layout.addRow("خروجی ماتریس", self._picker_output_matrix)
+        outer.addWidget(output_group)
 
         self._btn_build = QPushButton("ساخت ماتریس")
         self._btn_build.setObjectName("btnBuildMatrix")
         self._btn_build.clicked.connect(self._start_build)
-        form.addRow("", self._btn_build)
+        action_layout = QHBoxLayout()
+        action_layout.addStretch(1)
+        action_layout.addWidget(self._btn_build)
+        outer.addLayout(action_layout)
+        outer.addStretch(1)
 
         return page
 
@@ -196,19 +242,33 @@ class MainWindow(QMainWindow):
         """فرم ورودی‌های سناریوی تخصیص."""
 
         page = QWidget(self)
-        form = QFormLayout(page)
-        form.setLabelAlignment(Qt.AlignRight)
-        form.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(24, 24, 24, 24)
+        outer.setSpacing(16)
+
+        inputs_group = QGroupBox("ورودی‌های تخصیص", page)
+        inputs_layout = QFormLayout(inputs_group)
+        inputs_layout.setLabelAlignment(Qt.AlignRight)
+        inputs_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
 
         self._picker_students = FilePicker(
             page, placeholder="دانش‌آموزان (*.xlsx یا *.csv)"
         )
         self._picker_students.setObjectName("editStudents")
-        form.addRow("فایل دانش‌آموزان", self._picker_students)
+        self._picker_students.setToolTip("لیست دانش‌آموزانی که باید به پشتیبان متصل شوند")
+        inputs_layout.addRow("فایل دانش‌آموزان", self._picker_students)
 
         self._picker_pool = FilePicker(page, placeholder="استخر منتورها (*.xlsx)")
         self._picker_pool.setObjectName("editPool")
-        form.addRow("استخر منتورها", self._picker_pool)
+        self._picker_pool.setToolTip("فهرست منتورها یا پشتیبان‌ها برای تخصیص")
+        inputs_layout.addRow("استخر منتورها", self._picker_pool)
+
+        outer.addWidget(inputs_group)
+
+        advanced_group = QGroupBox("تنظیمات پیشرفته", page)
+        advanced_layout = QFormLayout(advanced_group)
+        advanced_layout.setLabelAlignment(Qt.AlignRight)
+        advanced_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
 
         self._picker_policy_allocate = FilePicker(
             page, placeholder="پیش‌فرض: config/policy.json"
@@ -216,19 +276,21 @@ class MainWindow(QMainWindow):
         self._picker_policy_allocate.setObjectName("editPolicy2")
         if self._default_policy_path:
             self._picker_policy_allocate.setText(self._default_policy_path)
-        form.addRow("سیاست", self._picker_policy_allocate)
+        advanced_layout.addRow("سیاست", self._picker_policy_allocate)
 
         self._picker_alloc_out = FilePicker(
             page, save=True, placeholder="فایل خروجی تخصیص (*.xlsx)"
         )
         self._picker_alloc_out.setObjectName("editAllocOut")
-        form.addRow("خروجی تخصیص", self._picker_alloc_out)
+        self._picker_alloc_out.setToolTip("مسیر ذخیرهٔ نتیجه نهایی تخصیص دانش‌آموز-منتور")
 
         self._edit_capacity = QLineEdit(page)
         self._edit_capacity.setPlaceholderText("remaining_capacity")
         self._edit_capacity.setText("remaining_capacity")
         self._edit_capacity.setObjectName("editCapacityCol")
-        form.addRow("ستون ظرفیت", self._edit_capacity)
+        advanced_layout.addRow("ستون ظرفیت", self._edit_capacity)
+
+        outer.addWidget(advanced_group)
 
         register_box = QGroupBox("شناسهٔ ثبت‌نام", page)
         register_box.setObjectName("registrationGroupBox")
@@ -241,7 +303,9 @@ class MainWindow(QMainWindow):
         self._combo_academic_year.setInsertPolicy(QComboBox.NoInsert)
         self._combo_academic_year.setObjectName("academicYearInput")
         self._combo_academic_year.lineEdit().setPlaceholderText("مثلاً 1404")
-        self._combo_academic_year.setToolTip("سال تحصیلی شروع (مثلاً 1404)")
+        self._combo_academic_year.setToolTip(
+            "سال تحصیلی شروع شمارنده‌ها را تعیین کنید تا کدها درست ادامه یابند"
+        )
         for year in range(1395, 1411):
             self._combo_academic_year.addItem(str(year))
         register_layout.addRow("سال تحصیلی", self._combo_academic_year)
@@ -267,12 +331,23 @@ class MainWindow(QMainWindow):
         self._btn_autodetect.clicked.connect(self._autodetect_counters)
         register_layout.addRow("", self._btn_autodetect)
 
-        form.addRow(register_box)
+        outer.addWidget(register_box)
+
+        output_group = QGroupBox("خروجی", page)
+        output_layout = QFormLayout(output_group)
+        output_layout.setLabelAlignment(Qt.AlignRight)
+        output_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+        output_layout.addRow("خروجی تخصیص", self._picker_alloc_out)
+        outer.addWidget(output_group)
 
         self._btn_allocate = QPushButton("تخصیص")
         self._btn_allocate.setObjectName("btnAllocate")
         self._btn_allocate.clicked.connect(self._start_allocate)
-        form.addRow("", self._btn_allocate)
+        action_layout = QHBoxLayout()
+        action_layout.addStretch(1)
+        action_layout.addWidget(self._btn_allocate)
+        outer.addLayout(action_layout)
+        outer.addStretch(1)
 
         return page
 
@@ -280,41 +355,30 @@ class MainWindow(QMainWindow):
         """فرم اجرای موتور قواعد بر پایه ماتریس موجود."""
 
         page = QWidget(self)
-        form = QFormLayout(page)
-        form.setLabelAlignment(Qt.AlignRight)
-        form.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(24, 24, 24, 24)
+        outer.setSpacing(16)
+
+        inputs_group = QGroupBox("ورودی‌ها", page)
+        inputs_layout = QFormLayout(inputs_group)
+        inputs_layout.setLabelAlignment(Qt.AlignRight)
+        inputs_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
 
         self._picker_rule_matrix = FilePicker(
             page, placeholder="ماتریس اهلیت (*.xlsx)"
         )
         self._picker_rule_matrix.setObjectName("editRuleMatrix")
-        form.addRow("فایل ماتریس", self._picker_rule_matrix)
+        self._picker_rule_matrix.setToolTip("فایل ماتریس اهلیت ساخته‌شده را انتخاب کنید")
+        inputs_layout.addRow("فایل ماتریس", self._picker_rule_matrix)
 
         self._picker_rule_students = FilePicker(
             page, placeholder="دانش‌آموزان (*.xlsx یا *.csv)"
         )
         self._picker_rule_students.setObjectName("editRuleStudents")
-        form.addRow("فایل دانش‌آموزان", self._picker_rule_students)
+        self._picker_rule_students.setToolTip("لیست دانش‌آموزان برای ارزیابی مجدد با موتور قواعد")
+        inputs_layout.addRow("فایل دانش‌آموزان", self._picker_rule_students)
 
-        self._picker_policy_rule = FilePicker(
-            page, placeholder="پیش‌فرض: config/policy.json"
-        )
-        self._picker_policy_rule.setObjectName("editRulePolicy")
-        if self._default_policy_path:
-            self._picker_policy_rule.setText(self._default_policy_path)
-        form.addRow("سیاست", self._picker_policy_rule)
-
-        self._picker_rule_output = FilePicker(
-            page, save=True, placeholder="خروجی تخصیص (*.xlsx)"
-        )
-        self._picker_rule_output.setObjectName("editRuleOutput")
-        form.addRow("خروجی", self._picker_rule_output)
-
-        self._edit_rule_capacity = QLineEdit(page)
-        self._edit_rule_capacity.setPlaceholderText("remaining_capacity")
-        self._edit_rule_capacity.setText("remaining_capacity")
-        self._edit_rule_capacity.setObjectName("editRuleCapacity")
-        form.addRow("ستون ظرفیت", self._edit_rule_capacity)
+        outer.addWidget(inputs_group)
 
         register_box = QGroupBox("شناسهٔ ثبت‌نام", page)
         register_box.setObjectName("ruleRegistrationGroup")
@@ -327,6 +391,9 @@ class MainWindow(QMainWindow):
         self._combo_rule_academic_year.setInsertPolicy(QComboBox.NoInsert)
         self._combo_rule_academic_year.setObjectName("ruleAcademicYearInput")
         self._combo_rule_academic_year.lineEdit().setPlaceholderText("مثلاً 1404")
+        self._combo_rule_academic_year.setToolTip(
+            "سال تحصیلی مرجع شمارنده‌ها برای موتور قواعد را مشخص کنید"
+        )
         for year in range(1395, 1411):
             self._combo_rule_academic_year.addItem(str(year))
         register_layout.addRow("سال تحصیلی", self._combo_rule_academic_year)
@@ -350,12 +417,49 @@ class MainWindow(QMainWindow):
         self._btn_rule_autodetect.clicked.connect(self._autodetect_rule_engine_counters)
         register_layout.addRow("", self._btn_rule_autodetect)
 
-        form.addRow(register_box)
+        outer.addWidget(register_box)
+
+        advanced_group = QGroupBox("تنظیمات پیشرفته", page)
+        advanced_layout = QFormLayout(advanced_group)
+        advanced_layout.setLabelAlignment(Qt.AlignRight)
+        advanced_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        self._picker_policy_rule = FilePicker(
+            page, placeholder="پیش‌فرض: config/policy.json"
+        )
+        self._picker_policy_rule.setObjectName("editRulePolicy")
+        if self._default_policy_path:
+            self._picker_policy_rule.setText(self._default_policy_path)
+        advanced_layout.addRow("سیاست", self._picker_policy_rule)
+
+        self._edit_rule_capacity = QLineEdit(page)
+        self._edit_rule_capacity.setPlaceholderText("remaining_capacity")
+        self._edit_rule_capacity.setText("remaining_capacity")
+        self._edit_rule_capacity.setObjectName("editRuleCapacity")
+        advanced_layout.addRow("ستون ظرفیت", self._edit_rule_capacity)
+
+        outer.addWidget(advanced_group)
+
+        output_group = QGroupBox("خروجی", page)
+        output_layout = QFormLayout(output_group)
+        output_layout.setLabelAlignment(Qt.AlignRight)
+        output_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+        self._picker_rule_output = FilePicker(
+            page, save=True, placeholder="خروجی تخصیص (*.xlsx)"
+        )
+        self._picker_rule_output.setObjectName("editRuleOutput")
+        self._picker_rule_output.setToolTip("فایل خروجی موتور قواعد برای ذخیره گزارش جدید")
+        output_layout.addRow("خروجی", self._picker_rule_output)
+        outer.addWidget(output_group)
 
         self._btn_rule_engine = QPushButton("اجرای موتور قواعد")
         self._btn_rule_engine.setObjectName("btnRuleEngine")
         self._btn_rule_engine.clicked.connect(self._start_rule_engine)
-        form.addRow("", self._btn_rule_engine)
+        action_layout = QHBoxLayout()
+        action_layout.addStretch(1)
+        action_layout.addWidget(self._btn_rule_engine)
+        outer.addLayout(action_layout)
+        outer.addStretch(1)
 
         return page
 
@@ -894,6 +998,9 @@ class MainWindow(QMainWindow):
         if self._worker is not None and self._worker.isRunning():
             self._worker.request_cancel()
             self._worker.wait(3000)
+        if hasattr(self, "_splitter"):
+            settings = QSettings()
+            settings.setValue("ui/main_splitter", self._splitter.saveState())
         super().closeEvent(event)
 
 
