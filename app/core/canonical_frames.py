@@ -203,7 +203,9 @@ def canonicalize_students_frame(
     students = resolve_aliases(students_df.copy(deep=True), "report")
     school_fa = CANON_EN_TO_FA["school_code"]
     if school_fa in students.columns:
-        pre_normal_raw = students[school_fa].astype("string").str.strip()
+        # استفاده از ensure_series باعث می‌شود در صورت وجود ستون‌های تکراری، فقط
+        # نخستین ستون انتخاب شده و از خطای «DataFrame.str» جلوگیری گردد.
+        pre_normal_raw = ensure_series(students[school_fa]).astype("string").str.strip()
     else:
         pre_normal_raw = pd.Series(
             [pd.NA] * len(students), dtype="string", index=students.index
