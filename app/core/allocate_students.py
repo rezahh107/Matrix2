@@ -462,6 +462,19 @@ def allocate_student(
             formatted = fairness_message
         log["fairness_reason_text"] = formatted
 
+    if ranked.empty:
+        log.update(
+            {
+                "detailed_reason": "Ranking policy returned no candidates",
+                "error_type": "INTERNAL_ERROR",
+                "suggested_actions": [
+                    "بازبینی دادهٔ استخر پشتیبان",
+                    "بررسی قوانین رتبه‌بندی",
+                ],
+            }
+        )
+        return AllocationResult(None, trace, log)
+
     chosen_row = ranked.iloc[0].copy()
     chosen_index = chosen_row["__candidate_index__"]
     ranked = ranked.drop(columns=["__candidate_index__"], errors="ignore")
