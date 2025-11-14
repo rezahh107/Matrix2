@@ -420,6 +420,18 @@ def test_allocate_batch_logs_capacity_transition(_base_pool: pd.DataFrame) -> No
     assert int(updated_pool.loc[0, "remaining_capacity"]) == 1
 
 
+def test_allocate_batch_reconciles_numeric_mentor_ids(_base_pool: pd.DataFrame) -> None:
+    students = _single_student()
+    pool = _base_pool.copy()
+    pool["کد کارمندی پشتیبان"] = [101, 102]
+
+    allocations, updated_pool, logs, _ = allocate_batch(students, pool)
+
+    assert logs.iloc[0]["error_type"] is None
+    assert allocations.iloc[0]["mentor_id"] == "101"
+    assert int(updated_pool.loc[0, "remaining_capacity"]) == 1
+
+
 def test_allocate_batch_handles_missing_state(monkeypatch: pytest.MonkeyPatch, _base_pool: pd.DataFrame) -> None:
     students = _single_student()
 
