@@ -23,6 +23,7 @@ from app.core.canonical_frames import (
     canonicalize_pool_frame,
     canonicalize_students_frame,
 )
+from app.core.common import columns
 from app.core.common.types import JoinKeyValues
 from app.core.policy_loader import load_policy, parse_policy_dict
 from app.infra.excel_writer import write_selection_reasons_sheet
@@ -67,6 +68,27 @@ def _single_student(**overrides: object) -> pd.DataFrame:
     }
     base.update(overrides)
     return pd.DataFrame([base])
+
+
+def test_canonicalize_students_frame_infers_missing_exam_group() -> None:
+    policy = load_policy()
+    students = pd.DataFrame(
+        {
+            "student_id": ["STD-001"],
+            "کدرشته": [1201],
+            "جنسیت": [1],
+            "دانش آموز فارغ": [0],
+            "مرکز گلستان صدرا": [1],
+            "مالی حکمت بنیاد": [0],
+            "کد مدرسه": [3581],
+        }
+    )
+
+    normalized = canonicalize_students_frame(students, policy=policy)
+
+    exam_group_col = columns.CANON_EN_TO_FA["exam_group"]
+    assert exam_group_col in normalized.columns
+    assert normalized[exam_group_col].isna().all()
 
 
 def test_allocate_student_dict_missing_school_field_skips_filter(
@@ -469,8 +491,12 @@ def test_policy_required_fields_enforced_from_config(
     allocate_batch(students, _base_pool, policy=policy)
 
     missing_group = students.drop(columns=["گروه_آزمایشی"]).copy()
-    with pytest.raises(ValueError, match="Missing columns"):
-        allocate_batch(missing_group, _base_pool, policy=policy)
+    normalized = canonicalize_students_frame(missing_group, policy=policy)
+
+    exam_group_col = columns.CANON_EN_TO_FA["exam_group"]
+    assert exam_group_col in normalized.columns
+    assert normalized[exam_group_col].isna().all()
+    allocate_batch(missing_group, _base_pool, policy=policy)
 
 
 @pytest.mark.skipif(importlib.util.find_spec("openpyxl") is None, reason="openpyxl لازم است")

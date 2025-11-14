@@ -182,6 +182,17 @@ def _ensure_student_defaults(frame: pd.DataFrame, policy: PolicyConfig) -> pd.Da
     return ensured
 
 
+def _ensure_exam_group_column(frame: pd.DataFrame) -> pd.DataFrame:
+    """افزودن ستون «گروه آزمایشی» در صورت نبود، با مقادیر تهی."""
+
+    exam_en = CANON_FA_TO_EN.get(normalize_fa(CANON_EN_TO_FA["exam_group"]), "exam_group")
+    if exam_en in frame.columns:
+        return frame
+    ensured = frame.copy()
+    ensured[exam_en] = pd.Series([pd.NA] * len(ensured), dtype="string", index=ensured.index)
+    return ensured
+
+
 def canonicalize_students_frame(
     students_df: pd.DataFrame,
     *,
@@ -206,6 +217,7 @@ def canonicalize_students_frame(
     if "school_code_raw" not in students_en.columns:
         students_en["school_code_raw"] = pre_normal_raw.reindex(students_en.index)
     students_en = enrich_school_columns_en(students_en)
+    students_en = _ensure_exam_group_column(students_en)
     students = canonicalize_headers(students_en, header_mode="fa")
     default_index = students_en.index
     school_code_raw = students_en.get(
