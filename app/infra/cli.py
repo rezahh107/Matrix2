@@ -170,11 +170,6 @@ def _coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     for key, positions in groups.items():
         subset = df.iloc[:, positions]
-        if subset.shape[1] == 0:
-            result_df[representatives[key]] = pd.Series(
-                [pd.NA] * len(df), index=df.index
-            )
-            continue
         if subset.shape[1] == 1:
             result_df[representatives[key]] = subset.iloc[:, 0]
             continue

@@ -51,6 +51,76 @@ __all__ = [
 ]
 
 
+def _normalize_mentor_identifier(value: object) -> object | None:
+    """تبدیل امن شناسهٔ پشتیبان به مقدار قابل جست‌وجو در state.
+
+    مثال::
+
+        >>> _normalize_mentor_identifier(" EMP-7 ")
+        'EMP-7'
+    """
+
+    if value is None:
+        return None
+    if isinstance(value, pd.Series):
+        if value.empty:
+            return None
+        return _normalize_mentor_identifier(value.iloc[0])
+    if isinstance(value, pd.DataFrame):
+        if value.empty:
+            return None
+        return _normalize_mentor_identifier(value.iloc[0])
+    if isinstance(value, (list, tuple, set, dict)):
+        return None
+    try:
+        if pd.isna(value):  # type: ignore[arg-type]
+            return None
+    except TypeError:
+        pass
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    return value
+
+
+def _resolve_mentor_identifier(
+    result: AllocationResult, *, policy: PolicyConfig
+) -> object:
+    """بازیابی شناسهٔ پشتیبان با اولویت: log → سطر فارسی → سطر canonical.
+
+    مثال::
+
+        >>> _resolve_mentor_identifier(result, policy=policy)
+        'EMP-101'
+    """
+
+    mentor_identifier_logged = _normalize_mentor_identifier(result.log.get("mentor_id"))
+    if mentor_identifier_logged is not None:
+        result.log["mentor_id"] = mentor_identifier_logged
+        return mentor_identifier_logged
+
+    if result.mentor_row is None:
+        raise KeyError("Mentor identifier missing: row not provided")
+
+    mentor_identifier = _normalize_mentor_identifier(
+        result.mentor_row.get("کد کارمندی پشتیبان")
+    )
+    if mentor_identifier is not None:
+        result.log["mentor_id"] = mentor_identifier
+        return mentor_identifier
+
+    mentor_row_en = canonicalize_headers(
+        result.mentor_row.to_frame().T,
+        header_mode=policy.excel.header_mode_internal,
+    ).iloc[0]
+    mentor_identifier = _normalize_mentor_identifier(mentor_row_en.get("mentor_id"))
+    if mentor_identifier is not None:
+        result.log["mentor_id"] = mentor_identifier
+        return mentor_identifier
+
+    raise KeyError("Mentor identifier missing from allocation log and row")
+
+
 def _noop_progress(_: int, __: str) -> None:
     """تابع پیش‌فرض progress که کاری انجام نمی‌دهد."""
 
@@ -421,20 +491,34 @@ def allocate_student(
         )
         return AllocationResult(None, trace, log)
 
+    def _fail_allocation(
+        detailed_reason: str,
+        *,
+        error_type: str = "INTERNAL_ERROR",
+        suggested_actions: Sequence[str] | None = None,
+        extra_updates: Mapping[str, object] | None = None,
+    ) -> AllocationResult:
+        payload = {
+            "detailed_reason": detailed_reason,
+            "error_type": error_type,
+            "suggested_actions": list(suggested_actions or []),
+        }
+        if extra_updates:
+            payload.update(extra_updates)
+        log.update(payload)
+        return AllocationResult(None, trace, log)
+
     log["candidate_count"] = int(eligible.shape[0])
     log["stage_candidate_counts"] = dict(stage_candidate_counts)
     log["rule_reason_code"] = rule_reason_code
     log["rule_reason_text"] = rule_reason_text
 
     if eligible.empty:
-        log.update(
-            {
-                "detailed_reason": "No candidates matched join keys",
-                "error_type": "ELIGIBILITY_NO_MATCH",
-                "suggested_actions": ["بازبینی دادهٔ ورودی", "تطبیق join keys"],
-            }
+        return _fail_allocation(
+            "No candidates matched join keys",
+            error_type="ELIGIBILITY_NO_MATCH",
+            suggested_actions=["بازبینی دادهٔ ورودی", "تطبیق join keys"],
         )
-        return AllocationResult(None, trace, log)
 
     progress(30, "capacity")
     state_frame = pool_state_view if pool_state_view is not None else candidate_pool
@@ -468,14 +552,11 @@ def allocate_student(
     log["stage_candidate_counts"] = dict(stage_candidate_counts)
 
     if capacity_filtered.empty:
-        log.update(
-            {
-                "detailed_reason": "No capacity among matched candidates",
-                "error_type": "CAPACITY_FULL",
-                "suggested_actions": ["افزایش ظرفیت", "بازنگری محدودیت‌ها"],
-            }
+        return _fail_allocation(
+            "No capacity among matched candidates",
+            error_type="CAPACITY_FULL",
+            suggested_actions=["افزایش ظرفیت", "بازنگری محدودیت‌ها"],
         )
-        return AllocationResult(None, trace, log)
 
     progress(60, "ranking")
     ranking_input = capacity_filtered.copy()
@@ -501,79 +582,59 @@ def allocate_student(
         log["fairness_reason_text"] = formatted
 
     if ranked.empty:
-        log.update(
-            {
-                "detailed_reason": "Ranking policy returned no candidates",
-                "error_type": "INTERNAL_ERROR",
-                "suggested_actions": [
-                    "بازبینی دادهٔ استخر پشتیبان",
-                    "بررسی قوانین رتبه‌بندی",
-                ],
-            }
+        return _fail_allocation(
+            "Ranking policy returned no candidates",
+            suggested_actions=[
+                "بازبینی دادهٔ استخر پشتیبان",
+                "بررسی قوانین رتبه‌بندی",
+            ],
         )
-        return AllocationResult(None, trace, log)
 
     try:
         first_ranked = ranked.head(1)
     except Exception:  # pragma: no cover - defensive, head() should not fail
         first_ranked = ranked.iloc[:1]
     if first_ranked.empty:
-        log.update(
-            {
-                "detailed_reason": "Ranked candidates lost during extraction",
-                "error_type": "INTERNAL_ERROR",
-                "suggested_actions": [
-                    "بازبینی خروجی apply_ranking_policy",
-                    "بررسی دادهٔ استخر پس از رتبه‌بندی",
-                ],
-            }
+        return _fail_allocation(
+            "Ranked candidates lost during extraction",
+            suggested_actions=[
+                "بازبینی خروجی apply_ranking_policy",
+                "بررسی دادهٔ استخر پس از رتبه‌بندی",
+            ],
         )
-        return AllocationResult(None, trace, log)
 
     try:
         chosen_row = first_ranked.iloc[0].copy()
     except IndexError:
-        log.update(
-            {
-                "detailed_reason": "Ranked candidates missing despite non-empty frame",
-                "error_type": "INTERNAL_ERROR",
-                "suggested_actions": [
-                    "بازبینی منطق رتبه‌بندی",
-                    "بررسی فیلترهای capacity",
-                ],
-            }
+        return _fail_allocation(
+            "Ranked candidates missing despite non-empty frame",
+            suggested_actions=[
+                "بازبینی منطق رتبه‌بندی",
+                "بررسی فیلترهای capacity",
+            ],
         )
-        return AllocationResult(None, trace, log)
 
     chosen_index = chosen_row["__candidate_index__"]
     ranked = ranked.drop(columns=["__candidate_index__"], errors="ignore")
     ranked_en = canonicalize_headers(ranked, header_mode=policy.excel.header_mode_internal)
     if ranked_en.empty:
-        log.update(
-            {
-                "detailed_reason": "Canonicalization returned empty ranked view",
-                "error_type": "INTERNAL_ERROR",
-                "suggested_actions": [
-                    "بازبینی canonicalize_headers",
-                    "هماهنگی schema استخر با Policy",
-                ],
-            }
+        return _fail_allocation(
+            "Canonicalization returned empty ranked view",
+            suggested_actions=[
+                "بازبینی canonicalize_headers",
+                "هماهنگی schema استخر با Policy",
+            ],
         )
-        return AllocationResult(None, trace, log)
     try:
         chosen_en = ranked_en.iloc[0]
     except IndexError:
-        log.update(
-            {
-                "detailed_reason": "Unable to read ranked row after canonicalization",
-                "error_type": "INTERNAL_ERROR",
-                "suggested_actions": [
-                    "بازبینی stage رتبه‌بندی",
-                    "بررسی canonicalize_headers",
-                ],
-            }
+        return _fail_allocation(
+            "Unable to read ranked row after canonicalization",
+            suggested_actions=[
+                "بازبینی stage رتبه‌بندی",
+                "بررسی canonicalize_headers",
+            ],
         )
-        return AllocationResult(None, trace, log)
 
     mentor_identifier = chosen_row.get("mentor_id_en", chosen_en.get("mentor_id"))
     state_entry_snapshot = active_state.get(mentor_identifier, {}) if active_state else {}
@@ -638,7 +699,7 @@ def allocate_student(
             "row_index": int(chosen_index) if chosen_index is not None else 0,
             "allocation_status": "success",
             "mentor_selected": str(mentor_name),
-            "mentor_id": str(mentor_id_text),
+            "mentor_id": mentor_id_text,
             "occupancy_ratio": float(occupancy_value),
             "selection_reason": "policy: min occ → min alloc → natural mentor_id",
             "tie_breakers": tie_breakers,
