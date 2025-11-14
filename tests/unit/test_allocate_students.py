@@ -152,6 +152,22 @@ def test_canonicalize_students_frame_flattens_multiindex_school_columns() -> Non
     assert normalized[school_fa].iloc[0] == 1357
 
 
+def test_canonicalize_pool_frame_handles_duplicate_mentor_columns(
+    _base_pool: pd.DataFrame,
+) -> None:
+    policy = load_policy()
+    pool = _base_pool.copy()
+    pool.insert(0, "mentor_dup", pool["کد کارمندی پشتیبان"])
+    columns = pool.columns.tolist()
+    columns[0] = "کد کارمندی پشتیبان"
+    pool.columns = columns
+
+    normalized = canonicalize_pool_frame(pool, policy=policy, sanitize_pool=False)
+
+    assert normalized["mentor_id"].tolist() == ["EMP-001", "EMP-002"]
+    assert normalized["کد کارمندی پشتیبان"].tolist() == ["EMP-001", "EMP-002"]
+
+
 def test_allocate_student_dict_missing_school_field_skips_filter(
     _base_pool: pd.DataFrame,
 ) -> None:
