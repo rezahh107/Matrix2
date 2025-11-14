@@ -237,6 +237,16 @@ def build_selection_reason_rows(
         student_index_key = pd.Index(students_en.index.map(str))
     students_index = students_en.set_index(student_index_key, drop=False)
 
+    student_lookup: dict[str, pd.Series] = {}
+    for index_value, student_row in students_index.iterrows():
+        row_copy = student_row.copy()
+        primary_id = str(row_copy.get("student_id", "") or "").strip()
+        fallback_id = str(index_value if index_value is not None else "").strip()
+        if primary_id:
+            student_lookup.setdefault(primary_id, row_copy)
+        if fallback_id and fallback_id not in student_lookup:
+            student_lookup[fallback_id] = row_copy
+
     def _alias(column: str) -> str:
         try:
             alias = canonicalize_headers(pd.DataFrame(columns=[column]), header_mode="en").columns[0]
@@ -245,11 +255,9 @@ def build_selection_reason_rows(
         return alias
 
     def _student_value(student_id: str, *columns: str) -> str:
-        if student_id not in students_index.index:
+        row = student_lookup.get(student_id)
+        if row is None:
             return ""
-        row = students_index.loc[student_id]
-        if isinstance(row, pd.DataFrame):
-            row = row.iloc[0]
         for column in columns:
             if column and column in row.index:
                 value = row.get(column)
