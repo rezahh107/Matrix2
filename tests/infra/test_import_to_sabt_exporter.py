@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -15,7 +16,9 @@ from app.infra.excel.import_to_sabt import (  # noqa: E402
     build_sheet2_frame,
     build_summary_frame,
     ensure_template_workbook,
+    ImportToSabtExportError,
     load_exporter_config,
+    prepare_allocation_export_frame,
     write_import_to_sabt_excel,
 )
 
@@ -165,3 +168,73 @@ def test_alias_rule_prefers_alias_when_present() -> None:
     df_sheet2 = apply_alias_rule(df_sheet2, df_alloc)
     assert df_sheet2.loc[0, "کد پستی"] == "0000054321"
     assert df_sheet2.loc[1, "کد پستی"] == "0000067890"
+
+
+def test_prepare_allocation_export_frame_preserves_length_and_index() -> None:
+    alloc = pd.DataFrame(
+        [
+            {"student_id": "STD-1", "mentor_id": "EMP-1", "allocation_status": "success"},
+            {"student_id": "STD-2", "mentor_id": "EMP-2", "allocation_status": "success"},
+        ]
+    )
+    students = pd.DataFrame(
+        [
+            {"student_id": "STD-1", "GF_FirstName": "سارا"},
+            {"student_id": "STD-2", "GF_FirstName": "علی"},
+        ]
+    )
+    mentors = pd.DataFrame(
+        [
+            {"mentor_id": "EMP-1", "mentor_name": "پشتیبان ۱"},
+            {"mentor_id": "EMP-2", "mentor_name": "پشتیبان ۲"},
+        ]
+    )
+
+    merged = prepare_allocation_export_frame(alloc, students, mentors)
+
+    assert len(merged) == len(alloc)
+    assert list(merged.index) == list(alloc.index)
+
+
+def test_prepare_allocation_export_frame_rejects_duplicate_students() -> None:
+    alloc = pd.DataFrame([
+        {"student_id": "STD-1", "mentor_id": "EMP-1"},
+    ])
+    students = pd.DataFrame(
+        [
+            {"student_id": "STD-1", "GF_FirstName": "سارا"},
+            {"student_id": "STD-1", "GF_FirstName": "زهرا"},
+        ]
+    )
+    mentors = pd.DataFrame([
+        {"mentor_id": "EMP-1", "mentor_name": "پشتیبان ۱"},
+    ])
+
+    with pytest.raises(ImportToSabtExportError) as excinfo:
+        prepare_allocation_export_frame(alloc, students, mentors)
+
+    message = str(excinfo.value)
+    assert "duplicate" in message
+    assert "STD-1" in message
+
+
+def test_prepare_allocation_export_frame_rejects_duplicate_mentors() -> None:
+    alloc = pd.DataFrame([
+        {"student_id": "STD-1", "mentor_id": "EMP-1"},
+    ])
+    students = pd.DataFrame([
+        {"student_id": "STD-1", "GF_FirstName": "سارا"},
+    ])
+    mentors = pd.DataFrame(
+        [
+            {"mentor_id": "EMP-1", "mentor_name": "پشتیبان ۱"},
+            {"mentor_id": "EMP-1", "mentor_name": "پشتیبان ۲"},
+        ]
+    )
+
+    with pytest.raises(ImportToSabtExportError) as excinfo:
+        prepare_allocation_export_frame(alloc, students, mentors)
+
+    message = str(excinfo.value)
+    assert "duplicate" in message
+    assert "EMP-1" in message
