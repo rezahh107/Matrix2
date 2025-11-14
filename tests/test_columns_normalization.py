@@ -103,6 +103,21 @@ def test_canonicalize_headers_bilingual() -> None:
     ]
 
 
+def test_enrich_school_columns_respects_empty_as_zero() -> None:
+    df = pd.DataFrame(
+        {
+            "school_code_raw": ["نامشخص", " ۶۶۳ "],
+            "school_flag": [0, 0],
+        }
+    )
+
+    enriched = columns.enrich_school_columns_en(df, empty_as_zero=True)
+
+    school_col = "school_code"
+    assert list(enriched[school_col].astype("Int64")) == [0, 663]
+    assert list(enriched["school_code_norm"].astype("Int64")) == [0, 663]
+
+
 def test_ensure_series_handles_duplicate_column_selection() -> None:
     df = pd.DataFrame([[1, 2]], columns=["x", "x"])
     extracted = columns.ensure_series(df["x"])

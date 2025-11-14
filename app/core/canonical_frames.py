@@ -216,7 +216,9 @@ def canonicalize_students_frame(
     students_en = canonicalize_headers(students, header_mode="en")
     if "school_code_raw" not in students_en.columns:
         students_en["school_code_raw"] = pre_normal_raw.reindex(students_en.index)
-    students_en = enrich_school_columns_en(students_en)
+    students_en = enrich_school_columns_en(
+        students_en, empty_as_zero=policy.school_code_empty_as_zero
+    )
     students_en = _ensure_exam_group_column(students_en)
     students = canonicalize_headers(students_en, header_mode="fa")
     default_index = students_en.index
