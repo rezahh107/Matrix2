@@ -25,6 +25,7 @@ from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple, TypeV
 import numpy as np
 import pandas as pd
 
+from app.core.canonical_frames import canonicalize_pool_frame
 from app.core.common.columns import coerce_semantics, ensure_required_columns, resolve_aliases
 from app.core.common.column_normalizer import normalize_input_columns
 from app.core.common.domain import (
@@ -1235,6 +1236,17 @@ def build_matrix(
     insp_df = coerce_semantics(insp_df, "inspactor")
     insp_df = ensure_required_columns(insp_df, REQUIRED_INSPACTOR_COLUMNS, "inspactor")
     insp_df, _ = normalize_input_columns(insp_df, kind="InspactorReport")
+    school_name_columns = [
+        column for column in insp_df.columns if column.strip().startswith("نام مدرسه")
+    ]
+    insp_df = canonicalize_pool_frame(
+        insp_df,
+        policy=cfg.policy,
+        sanitize_pool=False,
+        pool_source="inspactor",
+        require_join_keys=False,
+        preserve_columns=school_name_columns,
+    )
     schools_df = resolve_aliases(schools_df, "school")
     schools_df = coerce_semantics(schools_df, "school")
     schools_df = ensure_required_columns(schools_df, REQUIRED_SCHOOL_COLUMNS, "school")

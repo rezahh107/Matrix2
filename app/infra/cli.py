@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import platform
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +25,10 @@ from pandas import testing as pd_testing
 from pandas.api import types as pd_types
 
 from app.core.allocate_students import allocate_batch, build_selection_reason_rows
+from app.core.canonical_frames import (
+    canonicalize_allocation_frames,
+    sanitize_pool_for_allocation as _sanitize_pool_for_allocation,
+)
 from app.core.build_matrix import build_matrix
 from app.core.policy_loader import PolicyConfig, load_policy
 from app.infra.excel_writer import write_selection_reasons_sheet
@@ -51,14 +54,8 @@ from app.core.common.columns import (
     CANON_EN_TO_FA,
     HeaderMode,
     canonicalize_headers,
-    coerce_semantics,
     enrich_school_columns_en,
-    ensure_series,
-    resolve_aliases,
 )
-from app.core.common.column_normalizer import normalize_input_columns
-from app.core.common.normalization import safe_int_value
-from app.core.common.utils import normalize_fa
 from app.core.counter import (
     assert_unique_student_ids,
     assign_counters,
@@ -73,98 +70,6 @@ ProgressFn = Callable[[int, str], None]
 _DEFAULT_POLICY_PATH = Path("config/policy.json")
 _DEFAULT_EXPORTER_CONFIG_PATH = Path("config/SmartAlloc_Exporter_Config_v1.json")
 _DEFAULT_SABT_TEMPLATE_PATH = Path("templates/ImportToSabt (1404) - Copy.xlsx")
-
-
-def _make_unique_columns(columns: Sequence[str]) -> list[str]:
-    """ساخت نام ستون یکتا با حفظ ترتیب اولیه."""
-
-    seen: dict[str, int] = {}
-    result: list[str] = []
-    for column in columns:
-        base = str(column).strip() or "column"
-        count = seen.get(base, 0)
-        name = base if count == 0 else f"{base} ({count + 1})"
-        while name in seen:
-            count += 1
-            name = f"{base} ({count + 1})"
-        seen[base] = count + 1
-        seen[name] = 1
-        result.append(name)
-    return result
-
-
-def _sanitize_pool_for_allocation(
-    df: pd.DataFrame,
-    *,
-    policy: PolicyConfig | None = None,
-) -> pd.DataFrame:
-    """پاک‌سازی استخر پشتیبان‌ها برای تخصیص مطابق Policy.
-
-    مثال::
-
-        >>> import pandas as pd
-        >>> raw = pd.DataFrame({
-        ...     "mentor_name": ["مجازی", "علی"],
-        ...     "alias": [7501, 102],
-        ...     "remaining_capacity": [100, 2],
-        ... })
-        >>> cleaned = _sanitize_pool_for_allocation(raw)
-        >>> cleaned["remaining_capacity"].tolist()
-        [2]
-    """
-
-    active_policy = policy or load_policy()
-    frame = canonicalize_headers(
-        df, header_mode=active_policy.excel.header_mode_internal
-    ).copy()
-    if isinstance(frame.columns, pd.MultiIndex):
-        frame.columns = ["__".join(map(str, tpl)).strip() for tpl in frame.columns.to_flat_index()]
-    if frame.columns.duplicated().any():
-        frame.columns = _make_unique_columns(frame.columns)
-
-    mask_virtual = pd.Series(False, index=frame.index)
-    patterns = active_policy.virtual_name_patterns
-    regex: re.Pattern[str] | None = None
-    if patterns:
-        joined = "|".join(f"(?:{pattern})" for pattern in patterns)
-        regex = re.compile(joined, re.IGNORECASE)
-    if regex and "mentor_name" in frame.columns:
-        mask_virtual |= frame["mentor_name"].astype(str).map(lambda text: bool(regex.search(text)))
-
-    alias_ranges = active_policy.virtual_alias_ranges
-    for column_name in ("alias", "mentor_id"):
-        if column_name not in frame.columns:
-            continue
-        alias_numeric = pd.to_numeric(ensure_series(frame[column_name]), errors="coerce")
-        for start, end in alias_ranges:
-            mask_virtual |= alias_numeric.between(start, end, inclusive="both")
-
-    sanitized = frame.loc[~mask_virtual].copy()
-
-    rename_candidates = {
-        "remaining_capacity | remaining_capacity": "remaining_capacity",
-    }
-    for old, new in rename_candidates.items():
-        if old in sanitized.columns and new not in sanitized.columns:
-            sanitized = sanitized.rename(columns={old: new})
-
-    defaults = {
-        "remaining_capacity": ("Int64", 0),
-        "allocations_new": ("Int64", 0),
-        "mentor_id": ("Int64", pd.NA),
-    }
-    for column, (dtype, default) in defaults.items():
-        if column not in sanitized.columns:
-            sanitized[column] = pd.Series([default] * len(sanitized), dtype=dtype)
-        else:
-            series = ensure_series(sanitized[column])
-            if dtype == "Int64":
-                series = pd.to_numeric(series, errors="coerce").astype("Int64")
-            else:
-                series = series.astype(dtype)
-            sanitized[column] = series
-
-    return canonicalize_headers(sanitized, header_mode=active_policy.excel.header_mode_internal)
 
 
 def _default_progress(pct: int, message: str) -> None:
@@ -660,14 +565,8 @@ def _load_matrix_candidate_pool(matrix_path: Path, policy: PolicyConfig) -> pd.D
     except Exception as exc:  # pragma: no cover - خطای خواندن پیش‌بینی‌نشده
         raise ValueError(f"خطا در خواندن ماتریس {matrix_path}: {exc}") from exc
 
-    sanitized = _sanitize_pool_for_allocation(frame, policy=policy)
-    sanitized = resolve_aliases(sanitized, "inspactor")
-    sanitized = coerce_semantics(sanitized, "inspactor")
-    sanitized, _ = normalize_input_columns(
-        sanitized, kind="MentorMatrix", include_alias=True, report=False
-    )
     return canonicalize_headers(
-        sanitized, header_mode=policy.excel.header_mode_internal
+        frame, header_mode=policy.excel.header_mode_internal
     )
 
 
@@ -679,94 +578,15 @@ def _prepare_allocation_frames(
     sanitize_pool: bool = True,
     pool_source: str = "inspactor",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """نرمال‌سازی ستون‌های ورودی برای اجرای تخصیص.
+    """نرمال‌سازی ستون‌های ورودی برای اجرای تخصیص."""
 
-    مثال::
-
-        >>> import pandas as pd
-        >>> students = pd.DataFrame({"student_id": [1]})
-        >>> pool = pd.DataFrame({"mentor_id": [10]})
-        >>> policy = load_policy()  # doctest: +SKIP
-        >>> prepared_students, prepared_pool = _prepare_allocation_frames(  # doctest: +SKIP
-        ...     students,
-        ...     pool,
-        ...     policy=policy,
-        ... )
-        >>> "student_id" in prepared_students.columns  # doctest: +SKIP
-        True
-
-    Args:
-        students_df: دیتافریم خام دانش‌آموزان.
-        pool_df: دیتافریم خام یا نیمه‌نرمال منتورها.
-        policy: سیاست فعال برای اعمال استانداردها.
-        sanitize_pool: در صورت True، منتورهای مجازی حذف می‌شوند.
-        pool_source: نوع ورودی برای نگاشت ستون‌ها (report/inspactor).
-
-    Returns:
-        دو دیتافریم آماده برای ارسال به allocate_batch.
-    """
-
-    students = students_df.copy(deep=True)
-    pool = pool_df.copy(deep=True)
-
-    if sanitize_pool:
-        pool = _sanitize_pool_for_allocation(pool, policy=policy)
-
-    if "کدرشته" not in students.columns:
-        if "group_code" in students.columns:
-            students["کدرشته"] = students["group_code"]
-        else:
-            students["کدرشته"] = 0
-    if "گروه آزمایشی" not in students.columns:
-        students["گروه آزمایشی"] = "نامشخص"
-    if "جنسیت" not in students.columns:
-        if "gender" in students.columns:
-            students["جنسیت"] = students["gender"]
-        else:
-            students["جنسیت"] = 1
-    if "دانش آموز فارغ" not in students.columns:
-        if "وضعیت تحصیلی" in students.columns:
-            students["دانش آموز فارغ"] = students["وضعیت تحصیلی"]
-        else:
-            students["دانش آموز فارغ"] = 0
-    if "مرکز گلستان صدرا" not in students.columns:
-        students["مرکز گلستان صدرا"] = 0
-    if "مالی حکمت بنیاد" not in students.columns:
-        students["مالی حکمت بنیاد"] = 0
-    if "کد مدرسه" not in students.columns:
-        students["کد مدرسه"] = 0
-
-    students = resolve_aliases(students, "report")
-    students = coerce_semantics(students, "report")
-    students, _ = normalize_input_columns(
-        students, kind="StudentReport", include_alias=True, report=False
+    return canonicalize_allocation_frames(
+        students_df,
+        pool_df,
+        policy=policy,
+        sanitize_pool=sanitize_pool,
+        pool_source=pool_source,
     )
-
-    pool = resolve_aliases(pool, pool_source)  # type: ignore[arg-type]
-    pool = coerce_semantics(pool, pool_source)  # type: ignore[arg-type]
-    pool, _ = normalize_input_columns(
-        pool,
-        kind="MentorPool" if pool_source == "inspactor" else "MentorMatrix",
-        include_alias=True,
-        report=False,
-    )
-
-    if "کد کارمندی پشتیبان" in pool.columns:
-        pool["کد کارمندی پشتیبان"] = (
-            pool["کد کارمندی پشتیبان"].fillna("").astype(str).str.strip()
-        )
-    else:
-        pool["کد کارمندی پشتیبان"] = [f"MENTOR_{i}" for i in range(len(pool))]
-
-    if "occupancy_ratio" not in pool.columns:
-        pool["occupancy_ratio"] = 0.0
-    if "allocations_new" not in pool.columns:
-        pool["allocations_new"] = 0
-    if "remaining_capacity" not in pool.columns:
-        pool["remaining_capacity"] = 1
-
-    return students, pool
-
 
 def _allocate_and_write(
     students_base: pd.DataFrame,
@@ -789,6 +609,7 @@ def _allocate_and_write(
         policy=policy,
         progress=progress,
         capacity_column=capacity_column,
+        frames_already_canonical=True,
     )
 
     header_internal: HeaderMode = policy.excel.header_mode_internal  # type: ignore[assignment]
@@ -876,6 +697,7 @@ def _allocate_and_write(
             policy=policy,
             progress=lambda *_: None,
             capacity_column=capacity_column,
+            frames_already_canonical=True,
         )
 
         header_internal = policy.excel.header_mode_internal
@@ -957,8 +779,8 @@ def _run_rule_engine(
         students_df,
         pool_df,
         policy=policy,
-        sanitize_pool=False,
-        pool_source="inspactor",
+        sanitize_pool=True,
+        pool_source="matrix",
     )
 
     return _allocate_and_write(
