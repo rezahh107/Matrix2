@@ -234,7 +234,7 @@ def _deduplicate_columns(frame: pd.DataFrame, *, context: str) -> pd.DataFrame:
         base = ensure_series(subset.iloc[:, 0])
         for idx in range(1, subset.shape[1]):
             candidate = ensure_series(subset.iloc[:, idx])
-            if not base.equals(candidate):
+            if not _series_semantically_equal(base, candidate):
                 conflicts.append(str(name))
                 break
     if conflicts:
@@ -246,6 +246,25 @@ def _deduplicate_columns(frame: pd.DataFrame, *, context: str) -> pd.DataFrame:
 
     mask = ~columns.duplicated(keep="first")
     return frame.loc[:, mask].copy()
+
+
+def _series_semantically_equal(left: pd.Series, right: pd.Series) -> bool:
+    """مقایسهٔ دو ستون با نادیده گرفتن اختلاف تایپ یا صفرهای پیشرو."""
+
+    left_series = ensure_series(left)
+    right_series = ensure_series(right)
+    if len(left_series) != len(right_series):
+        return False
+
+    left_numeric = pd.to_numeric(left_series, errors="coerce")
+    right_numeric = pd.to_numeric(right_series, errors="coerce")
+    if left_numeric.notna().any() or right_numeric.notna().any():
+        if left_numeric.equals(right_numeric):
+            return True
+
+    left_normalized = left_series.astype("string").fillna("").str.strip()
+    right_normalized = right_series.astype("string").fillna("").str.strip()
+    return left_normalized.equals(right_normalized)
 
 
 def _is_missing_value(value: Any) -> bool:
