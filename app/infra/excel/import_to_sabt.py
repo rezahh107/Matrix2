@@ -198,7 +198,7 @@ def _coalesce_duplicate_identifier_rows(
     merged_lookup: dict[str, dict[str, Any]] = {}
     records: list[dict[str, Any]] = []
     for idx, row in frame.iterrows():
-        identifier = normalized.iloc[idx]
+        identifier = normalized.loc[idx]
         if pd.isna(identifier) or str(identifier).strip() == "":
             records.append(row.to_dict())
             continue
