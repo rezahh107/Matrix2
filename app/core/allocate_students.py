@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from numbers import Number
-from typing import Callable, Dict, List, Mapping, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
 
 import pandas as pd
 
@@ -132,6 +132,81 @@ class AllocationResult:
     mentor_row: pd.Series | None
     trace: List[TraceStageRecord]
     log: AllocationLogRecord
+
+
+def _maybe_int_from_text(value: object) -> int | None:
+    """Try to coerce heterogeneous inputs to a stable integer identifier."""
+
+    try:
+        numeric = pd.to_numeric([value], errors="coerce")[0]
+    except Exception:
+        return None
+    if isinstance(numeric, Number):
+        if isinstance(numeric, float):
+            if float(numeric).is_integer():
+                return int(numeric)
+            return None
+        return int(numeric)
+    if pd.isna(numeric):  # type: ignore[arg-type]
+        return None
+    return None
+
+
+def _resolve_mentor_state_entry(
+    mentor_state: Mapping[Any, Mapping[str, int]],
+    identifier: object,
+) -> tuple[Any | None, Mapping[str, int] | None]:
+    """Resolve mentor state entry while tolerating dtype mismatches."""
+
+    if isinstance(identifier, pd.Series):
+        if identifier.empty:
+            identifier = None
+        else:
+            identifier = identifier.iloc[0]
+    if identifier is None:
+        return None, None
+    try:
+        if pd.isna(identifier):  # type: ignore[arg-type]
+            return None, None
+    except TypeError:
+        pass
+
+    candidates: List[Any] = []
+    seen: set[str] = set()
+
+    def _push(value: object) -> None:
+        if value is None:
+            return
+        try:
+            if pd.isna(value):  # type: ignore[arg-type]
+                return
+        except TypeError:
+            pass
+        marker = repr(value)
+        if marker in seen:
+            return
+        seen.add(marker)
+        candidates.append(value)
+
+    _push(identifier)
+    if isinstance(identifier, str):
+        stripped = identifier.strip()
+        if stripped and stripped != identifier:
+            _push(stripped)
+        numeric_candidate = _maybe_int_from_text(stripped)
+        if numeric_candidate is not None:
+            _push(numeric_candidate)
+    else:
+        numeric_candidate = _maybe_int_from_text(identifier)
+        if numeric_candidate is not None:
+            _push(numeric_candidate)
+        _push(str(identifier))
+
+    for candidate in candidates:
+        entry = mentor_state.get(candidate)
+        if entry is not None:
+            return candidate, entry
+    return None, None
 
 
 class JoinKeyDataMissingError(ValueError):
@@ -716,8 +791,17 @@ def allocate_batch(
 
         if result.mentor_row is not None:
             chosen_index = result.mentor_row.name
-            mentor_identifier = _resolve_mentor_identifier(result, policy=policy)
-            state_entry = mentor_state.get(mentor_identifier)
+            mentor_identifier_logged = result.log.get("mentor_id")
+            mentor_identifier = mentor_identifier_logged
+            if mentor_identifier is None:
+                mentor_row_en = canonicalize_headers(
+                    result.mentor_row.to_frame().T,
+                    header_mode=policy.excel.header_mode_internal,
+                ).iloc[0]
+                mentor_identifier = mentor_row_en.get("mentor_id")
+            resolved_identifier, state_entry = _resolve_mentor_state_entry(
+                mentor_state, mentor_identifier
+            )
             if state_entry is None:
                 raise KeyError(
                     f"Mentor '{mentor_identifier}' missing from state after allocation"
@@ -748,7 +832,15 @@ def allocate_batch(
                 {
                     "student_id": student_dict.get("student_id", ""),
                     "mentor": result.mentor_row.get("پشتیبان", ""),
-                    "mentor_id": mentor_identifier,
+                    "mentor_id": (
+                        ""
+                        if mentor_identifier_logged is None and resolved_identifier is None
+                        else str(
+                            mentor_identifier_logged
+                            if mentor_identifier_logged is not None
+                            else resolved_identifier
+                        )
+                    ),
                 }
             )
 
