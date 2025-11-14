@@ -6,6 +6,7 @@ import sys
 
 import pandas as pd
 import pytest
+from openpyxl import Workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -141,6 +142,74 @@ def test_sheet2_structure_matches_template(tmp_path: Path) -> None:
     assert str(df_result.iloc[0]["کد ملی"]).zfill(10) == "0012345678"
     assert str(df_result.iloc[0]["تلفن همراه"]).zfill(11) == "09123456789"
     assert str(df_result.iloc[0]["کد پستی"]).zfill(10) == "0000054321"
+
+
+def test_write_import_to_sabt_excel_repairs_mismatched_headers(tmp_path: Path) -> None:
+    cfg = load_exporter_config("config/SmartAlloc_Exporter_Config_v1.json")
+    df_alloc = _sample_alloc_frame()
+    df_sheet2 = build_sheet2_frame(df_alloc, cfg, today=datetime(2024, 3, 20))
+    df_sheet2 = apply_alias_rule(df_sheet2, df_alloc)
+    df_summary = build_summary_frame(
+        cfg,
+        total_students=2,
+        allocated_count=1,
+        error_count=1,
+    )
+    df_errors = build_errors_frame(
+        pd.DataFrame(
+            [
+                {"student_id": "STD-1", "allocation_status": "success"},
+                {"student_id": "STD-2", "allocation_status": "failed"},
+            ]
+        ),
+        cfg,
+    )
+    df_sheet5 = build_optional_sheet_frame(cfg, "Sheet5")
+    df_9394 = build_optional_sheet_frame(cfg, "9394")
+
+    workbook = Workbook()
+    ws_sheet2 = workbook.active
+    ws_sheet2.title = "Sheet2"
+    sheet2_expected = len(cfg["sheets"]["Sheet2"]["columns"])
+    for idx in range(sheet2_expected + 3):
+        ws_sheet2.cell(row=1, column=idx + 1, value=f"قدیمی {idx + 1}")
+
+    summary = workbook.create_sheet("Summary")
+    summary_expected = len(cfg["sheets"]["Summary"]["columns"])
+    for idx in range(summary_expected):
+        summary.cell(row=1, column=idx + 1, value=f"سابق {idx + 1}")
+
+    errors = workbook.create_sheet("Errors")
+    errors_expected = len(cfg["sheets"]["Errors"]["columns"])
+    for idx in range(errors_expected + 1):
+        errors.cell(row=1, column=idx + 1, value=f"ستون {idx + 1}")
+
+    sheet5 = workbook.create_sheet("Sheet5")
+    sheet5_expected = len(cfg["sheets"]["Sheet5"]["columns"])
+    for idx in range(sheet5_expected):
+        sheet5.cell(row=1, column=idx + 1, value=f"۵-{idx + 1}")
+
+    sheet9394 = workbook.create_sheet("9394")
+    sheet9394_expected = len(cfg["sheets"]["9394"]["columns"])
+    for idx in range(sheet9394_expected):
+        sheet9394.cell(row=1, column=idx + 1, value=f"۹۳-{idx + 1}")
+    template = tmp_path / "template.xlsx"
+    workbook.save(template)
+
+    output = tmp_path / "sabt.xlsx"
+    write_import_to_sabt_excel(
+        df_sheet2,
+        df_summary,
+        df_errors,
+        df_sheet5,
+        df_9394,
+        template,
+        output,
+    )
+
+    expected_columns = list(cfg["sheets"]["Sheet2"]["columns"].keys())
+    df_result = pd.read_excel(output, sheet_name="Sheet2")
+    assert df_result.columns.tolist() == expected_columns
 
 
 def test_hekmat_rule_resets_non_matching_rows() -> None:

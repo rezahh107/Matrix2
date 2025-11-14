@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 
 import pandas as pd
 
 from app.core.common.columns import canonicalize_headers, ensure_series
+from app.core.common.normalization import normalize_fa
 
 GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
     "GF_NationalCode": (
@@ -34,6 +36,8 @@ GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
 }
 
 _DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+_HEADER_SPACE_PATTERN = re.compile(r"[\s\u200c\u200f]+")
+_HEADER_PUNCT_PATTERN = re.compile(r"[\-/]+")
 
 __all__ = [
     "GF_FIELD_TO_COL",
@@ -582,16 +586,40 @@ def _write_dataframe_to_sheet(ws, df: pd.DataFrame) -> None:
             ws.cell(row=row_idx, column=col_idx, value=value)
 
 
+def _normalize_header_label(value: Any) -> str:
+    text = str(value or "").strip()
+    text = text.translate(_DIGIT_TRANSLATION)
+    text = _HEADER_PUNCT_PATTERN.sub(" ", text)
+    text = normalize_fa(text)
+    text = _HEADER_SPACE_PATTERN.sub(" ", text)
+    return text.strip()
+
+
+def _headers_equivalent(template: Sequence[str], expected: Sequence[str]) -> bool:
+    normalized_template = [_normalize_header_label(value) for value in template]
+    normalized_expected = [_normalize_header_label(value) for value in expected]
+    return normalized_template == normalized_expected
+
+
+def _rewrite_sheet_headers(ws, expected: Sequence[str]) -> None:
+    for col_idx, value in enumerate(expected, start=1):
+        ws.cell(row=1, column=col_idx, value=value)
+    max_col = ws.max_column
+    extra_cols = max_col - len(expected)
+    if extra_cols > 0:
+        ws.delete_cols(len(expected) + 1, extra_cols)
+
+
 def _verify_headers(ws, expected: Sequence[str]) -> None:
     header_cells = next(ws.iter_rows(min_row=1, max_row=1))
     headers = [cell.value if cell.value is not None else "" for cell in header_cells]
-    if len(headers) < len(expected):
+    expected_list = list(expected)
+    if len(headers) < len(expected_list):
         raise ValueError(f"Template sheet '{ws.title}' has fewer columns than expected")
-    template_headers = headers[: len(expected)]
-    if template_headers != list(expected):
-        raise ValueError(
-            f"Header mismatch for sheet '{ws.title}': template={template_headers} expected={list(expected)}"
-        )
+    template_headers = headers[: len(expected_list)]
+    if _headers_equivalent(template_headers, expected_list):
+        return
+    _rewrite_sheet_headers(ws, expected_list)
 
 
 def write_import_to_sabt_excel(
