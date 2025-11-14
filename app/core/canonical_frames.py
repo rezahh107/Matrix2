@@ -296,12 +296,17 @@ def canonicalize_pool_frame(
         report=False,
     )
 
-    if "کد کارمندی پشتیبان" in pool.columns:
-        pool["کد کارمندی پشتیبان"] = (
-            pool["کد کارمندی پشتیبان"].fillna("").astype(str).str.strip()
-        )
+    mentor_column = "کد کارمندی پشتیبان"
+    if mentor_column in pool.columns:
+        mentor_source = ensure_series(pool[mentor_column])
+        mentor_normalized = mentor_source.astype("string").fillna("").str.strip()
     else:
-        pool["کد کارمندی پشتیبان"] = [f"MENTOR_{i}" for i in range(len(pool))]
+        mentor_normalized = pd.Series(
+            [f"MENTOR_{i}" for i in range(len(pool))],
+            index=pool.index,
+            dtype="string",
+        )
+    pool[mentor_column] = mentor_normalized
 
     capacity_alias = policy.columns.remaining_capacity
     if capacity_alias in pool.columns and "remaining_capacity" not in pool.columns:
@@ -320,7 +325,7 @@ def canonicalize_pool_frame(
             pool[column] = default
 
     if "mentor_id" not in pool.columns:
-        pool["mentor_id"] = pool["کد کارمندی پشتیبان"].astype(str).str.strip()
+        pool["mentor_id"] = ensure_series(pool[mentor_column]).astype("string").str.strip()
 
     required = set(policy.join_keys) | {"کد کارمندی پشتیبان"}
     missing = [column for column in required if column not in pool.columns]
