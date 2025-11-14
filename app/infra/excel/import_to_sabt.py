@@ -91,6 +91,10 @@ def prepare_allocation_export_frame(
     students = canonicalize_headers(students_df, header_mode="en").copy()
     mentors = canonicalize_headers(mentors_df, header_mode="en").copy()
 
+    alloc = _deduplicate_columns(alloc, context="allocations")
+    students = _deduplicate_columns(students, context="students")
+    mentors = _deduplicate_columns(mentors, context="mentors")
+
     if student_ids is not None:
         aligned_ids = student_ids.reindex(students.index)
         students.loc[:, "student_id"] = aligned_ids.astype("string")
@@ -214,6 +218,34 @@ def _coalesce_duplicate_identifier_rows(
                 existing[field] = value
 
     return pd.DataFrame(records, columns=frame.columns)
+
+
+def _deduplicate_columns(frame: pd.DataFrame, *, context: str) -> pd.DataFrame:
+    """حذف ستون‌های تکراری با حفظ ترتیب و تشخیص داده‌های ناسازگار."""
+
+    columns = frame.columns
+    if columns.is_unique:
+        return frame
+
+    duplicated_names = columns[columns.duplicated()].unique().tolist()
+    conflicts: list[str] = []
+    for name in duplicated_names:
+        subset = frame.loc[:, frame.columns == name]
+        base = ensure_series(subset.iloc[:, 0])
+        for idx in range(1, subset.shape[1]):
+            candidate = ensure_series(subset.iloc[:, idx])
+            if not base.equals(candidate):
+                conflicts.append(str(name))
+                break
+    if conflicts:
+        sample = ", ".join(conflicts[:5])
+        raise ImportToSabtExportError(
+            "ImportToSabt export failed: duplicate columns with conflicting data "
+            f"detected for {context} dataframe ({sample})."
+        )
+
+    mask = ~columns.duplicated(keep="first")
+    return frame.loc[:, mask].copy()
 
 
 def _is_missing_value(value: Any) -> bool:
