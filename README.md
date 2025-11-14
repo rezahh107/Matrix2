@@ -34,3 +34,9 @@ pyinstaller --onefile --windowed --name تخصیص_دانشجو_منتور \
 ## هشدار خروجی Excel
 
 - فایل‌های Excel تولیدشده فونت‌های Vazir/Vazirmatn را **جاسازی نمی‌کنند**؛ برای اشتراک‌گذاری با سیستم‌های فاقد فونت، خروجی را به PDF تبدیل کنید.
+
+## مستندات تکمیلی
+
+- راهنمای کامل اپراتور GUI: [docs/SmartAlloc_GUI_Operator_Guide.fa.md](docs/SmartAlloc_GUI_Operator_Guide.fa.md)
+- چک‌لیست QA سرتاسری: [docs/SmartAlloc_E2E_QA_Checklist.fa.md](docs/SmartAlloc_E2E_QA_Checklist.fa.md)
+- نکات QA برای تیم توسعه: [docs/SmartAlloc_Dev_QA_Notes.md](docs/SmartAlloc_Dev_QA_Notes.md)
