@@ -72,6 +72,19 @@ COL_STATUS_B = "نوع دانش آموز"
 # Optional
 COL_GROUP_INCLUDED = "شامل گروه های آزمایشی"
 
+REQUIRED_INSPACTOR_COLUMNS = {
+    COL_MENTOR_NAME,
+    COL_MANAGER_NAME,
+    COL_MENTOR_ID,
+    COL_POSTAL,
+    COL_SCHOOL_COUNT,
+    CAPACITY_CURRENT_COL,
+    CAPACITY_SPECIAL_COL,
+    COL_GROUP,
+}
+
+REQUIRED_SCHOOL_COLUMNS = {COL_SCHOOL_CODE}
+
 # Regex / normalization
 _RE_BIDI = re.compile("[\u200c-\u200f\u202a-\u202e]")
 _RE_NONWORD = re.compile(r"[^\w\u0600-\u06FF0-9\s]+", flags=re.UNICODE)
@@ -100,6 +113,52 @@ ProgressFn = Callable[[int, str], None]
 
 def noop_progress(_: int, __: str) -> None:
     """تابع پیش‌فرض پیشرفت که هیچ کاری انجام نمی‌دهد."""
+
+
+def assert_inspactor_schema(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
+    """اعتبارسنجی اسکیمای گزارش Inspactor قبل از کاننولیزه‌کردن.
+
+    مثال ساده::
+
+        >>> import pandas as pd
+        >>> from app.core.policy_loader import load_policy
+        >>> df = pd.DataFrame({COL_MENTOR_NAME: ["الف"], COL_MANAGER_NAME: ["ب"]})
+        >>> assert_inspactor_schema(df, load_policy())  # doctest: +SKIP
+
+    Args:
+        df: دیتافریم خام گزارش Inspactor.
+        policy: پیکربندی سیاست فعال برای پیام خطا.
+
+    Returns:
+        دیتافریمی با ستون‌های هم‌نام‌شده و تایپ‌شده.
+
+    Raises:
+        KeyError: اگر هر یک از ستون‌های اجباری مفقود باشند.
+    """
+
+    context = "inspactor"
+    normalized = resolve_aliases(df, context)
+    coerced = coerce_semantics(normalized, context)
+    try:
+        ensured = ensure_required_columns(coerced, REQUIRED_INSPACTOR_COLUMNS, context)
+    except ValueError as exc:
+        missing = _missing_inspactor_columns(coerced)
+        raise KeyError(_schema_error_message(missing, policy)) from exc
+    missing_after = _missing_inspactor_columns(ensured)
+    if missing_after:
+        raise KeyError(_schema_error_message(missing_after, policy))
+    return ensured
+
+
+def _missing_inspactor_columns(df: pd.DataFrame) -> list[str]:
+    columns = set(map(str, df.columns))
+    return sorted(col for col in REQUIRED_INSPACTOR_COLUMNS if col not in columns)
+
+
+def _schema_error_message(missing: Collection[str], policy: PolicyConfig) -> str:
+    columns = list(missing) or ["<unknown>"]
+    joined = ", ".join(columns)
+    return f"[policy {policy.version}] missing Inspactor columns: {joined}"
 
 
 # =============================================================================
@@ -1245,9 +1304,22 @@ def build_matrix(
     Returns:
         شش‌تایی دیتافریم شامل ماتریس و جداول کنترلی.
     """
-    insp_df = resolve_aliases(insp_df, "inspactor")
-    insp_df = coerce_semantics(insp_df, "inspactor")
-    insp_df = ensure_required_columns(insp_df, REQUIRED_INSPACTOR_COLUMNS, "inspactor")
+    try:
+        insp_df = assert_inspactor_schema(insp_df, cfg.policy)
+    except KeyError as exc:
+        schema_reason = str(exc)
+        schema_invalid = pd.DataFrame(
+            [
+                {
+                    "row_index": 0,
+                    "پشتیبان": "",
+                    "مدیر": "",
+                    "reason": schema_reason,
+                }
+            ]
+        )
+        setattr(exc, "invalid_mentors_df", schema_invalid)
+        raise
     insp_df, _ = normalize_input_columns(insp_df, kind="InspactorReport")
     school_name_columns = [
         column for column in insp_df.columns if column.strip().startswith("نام مدرسه")
@@ -1699,16 +1771,3 @@ DEDUP_KEY_ORDER = [
 ]
 
 SORT_COLUMNS = ["مرکز گلستان صدرا", "کدرشته", "کد مدرسه", "جایگزین"]
-
-REQUIRED_INSPACTOR_COLUMNS = {
-    COL_MENTOR_NAME,
-    COL_MANAGER_NAME,
-    COL_MENTOR_ID,
-    COL_POSTAL,
-    COL_SCHOOL_COUNT,
-    CAPACITY_CURRENT_COL,
-    CAPACITY_SPECIAL_COL,
-    COL_GROUP,
-}
-
-REQUIRED_SCHOOL_COLUMNS = {COL_SCHOOL_CODE}
