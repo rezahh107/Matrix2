@@ -399,7 +399,9 @@ def _inject_student_ids(
     current_df = _read_optional_first_sheet(current_path)
 
     students_en = canonicalize_headers(students_df, header_mode="en")
-    students_en = enrich_school_columns_en(students_en)
+    students_en = enrich_school_columns_en(
+        students_en, empty_as_zero=policy.school_code_empty_as_zero
+    )
     students_fa = canonicalize_headers(students_en, header_mode="fa")
     school_fa = CANON_EN_TO_FA.get("school_code", "کد مدرسه")
     if school_fa in students_fa.columns:

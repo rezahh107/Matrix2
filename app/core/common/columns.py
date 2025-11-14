@@ -314,13 +314,20 @@ def _replace_gender_tokens(series: pd.Series) -> pd.Series:
     return series
 
 
-def enrich_school_columns_en(df: pd.DataFrame) -> pd.DataFrame:
+def enrich_school_columns_en(
+    df: pd.DataFrame, *, empty_as_zero: bool = False
+) -> pd.DataFrame:
     """تولید ستون‌های خام و نرمال مدرسه روی DataFrame انگلیسی.
 
     ستون‌های اضافه‌شده:
         - ``school_code_raw``: مقدار متنی اولیه (trim شده)
         - ``school_code`` و ``school_code_norm``: مقدار Int64 پس از پاک‌سازی ارقام
         - ``school_status_resolved``: نتیجهٔ نهایی تشخیص مدرسه (Int64: ۰ یا ۱)
+
+    Args:
+        df: دیتافریم منبع با نام ستون‌های انگلیسی یا فارسی.
+        empty_as_zero: در صورت True، مقادیر نامعتبر/خالی به ۰ نگاشت می‌شوند تا با
+            سیاست «school_code_empty_as_zero» هم‌سو باشد.
     """
 
     result = df.copy()
@@ -346,6 +353,9 @@ def enrich_school_columns_en(df: pd.DataFrame) -> pd.DataFrame:
 
     result["school_code_raw"] = raw
     normalized = to_int64(raw)
+    if empty_as_zero:
+        normalized = normalized.fillna(0)
+    normalized = normalized.astype("Int64")
     result["school_code_norm"] = normalized
     result["school_code"] = normalized
 
