@@ -379,11 +379,12 @@ class MainWindow(QMainWindow):
         )
         sabt_layout.addRow("فایل قالب", self._picker_sabt_template_alloc)
 
-        sabt_hint = QLabel(
+        sabt_hint_text = (
             "اگر فایل قالب خالی بماند، ensure_template_workbook براساس"
             " SmartAlloc_Exporter_Config_v1.json یک Workbook حداقلی می‌سازد و"
             " نیازی به فایل باینری جدا نیست."
         )
+        sabt_hint = QLabel(sabt_hint_text)
         sabt_hint.setWordWrap(True)
         sabt_layout.addRow("", sabt_hint)
 
@@ -540,10 +541,11 @@ class MainWindow(QMainWindow):
         )
         sabt_layout.addRow("فایل قالب", self._picker_sabt_template_rule)
 
-        sabt_hint = QLabel(
+        sabt_hint_text = (
             "خالی‌گذاشتن قالب باعث می‌شود ensure_template_workbook از تنظیمات"
             " JSON یک فایل پایه بسازد و نیازی به قالب جدا نیست."
         )
+        sabt_hint = QLabel(sabt_hint_text)
         sabt_hint.setWordWrap(True)
         sabt_layout.addRow("", sabt_hint)
 
