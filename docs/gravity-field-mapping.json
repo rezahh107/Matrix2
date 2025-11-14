@@ -1,0 +1,28 @@
+{
+  "columns": {
+    "کد ثبت نام": {
+      "gf_field_id": 46,
+      "transform": "string"
+    },
+    "جنسیت": {
+      "gf_field_id": 92,
+      "transform": "map: {زن: '0', دختر:'0', پسر:'1', مرد:'1'}"
+    },
+    "وضعیت ثبت نام": {
+      "gf_field_id": 75,
+      "transform": "identity"
+    },
+    "گروه آزمایشی": {
+      "gf_field_id": 73,
+      "transform": "int"
+    },
+    "کد مدرسه": {
+      "gf_field_id": 30,
+      "transform": "string"
+    },
+    "کد پستی جایگزین": {
+      "source": "allocator.alias_code_used"
+    }
+  },
+  "notes": "لطفاً GF Field IDs را تأیید کنید. سایر ستون‌ها را در این ساختار اضافه می‌کنیم."
+}

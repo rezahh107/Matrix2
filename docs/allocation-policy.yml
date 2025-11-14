@@ -1,0 +1,38 @@
+# Allocation Policy (FINAL)
+version: 1
+defaults:
+  capacity_limit: 60  # اگر در ورودی خالی باشد
+mappings:
+  gender: {girl: "0", boy: "1"}  # دختر=0، پسر=1
+eligibility:
+  # فیلترهای واجد شرایط بودن
+  - rule: gender_match
+    when: "student.gender in ['0','1'] and mentor.gender_accepts == student.gender"
+  - rule: group_allowed
+    when: "student.group_code in mentor.allowed_group_codes"
+  - rule: school_whitelist
+    when: "mentor.is_school_limited == false or student.school_code in mentor.school_whitelist"
+  - rule: capacity
+    when: "(mentor.assigned_baseline + mentor.allocations_new) < mentor.capacity_limit"
+precedence:
+  # قاعده ارجح: اگر هم alias_code و هم مدرسه‌ها پر باشند، 'مدرسه‌ای' فرض می‌شود
+  school_mode_overrides_alias: true
+scoring:
+  # رتبه‌بندی: نسبت اشغال کمتر بهتر
+  primary: "(mentor.assigned_baseline + mentor.allocations_new) / mentor.capacity_limit"
+  tie_breakers:
+    - "mentor.allocations_new"   # کمتر بهتر
+    - "mentor.mentor_id"         # پایدار و شفاف
+output:
+  alias_code_used:
+    when_school_limited: "mentor.mentor_id"  # «کد پستی جایگزین» = ردیف پشتیبان
+    when_alias_exists: "mentor.alias_code"   # در حالت غیرمدرسه‌ای از کدپستی استفاده کن
+    fallback: "mentor.mentor_id"
+modes:
+  auto:
+    shortlist: null
+  manual:
+    shortlist: []  # اگر داده شود، فقط داخل همان‌ها رتبه‌بندی کن
+audit:
+  enabled: true
+  fields: ["student.uid","mentor.mentor_id","alias_code_used","mode","policy_version"]

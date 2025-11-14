@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mentors Master Schema",
+  "type": "object",
+  "properties": {
+    "mentor_id": {
+      "type": "string",
+      "description": "کد کارمندی پشتیبان (ردیف پایدار)"
+    },
+    "alias_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "کد پستی جایگزین؛ اگر نداشته باشد null"
+    },
+    "gender_accepts": {
+      "type": "string",
+      "enum": [
+        "0",
+        "1"
+      ],
+      "description": "0=دختر, 1=پسر"
+    },
+    "allowed_group_codes": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "کدهای گروه/پایه مجاز"
+    },
+    "is_school_limited": {
+      "type": "boolean",
+      "description": "پشتیبان مدرسه‌ای است؟"
+    },
+    "school_whitelist": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "حداکثر 4 کد مدرسه"
+    },
+    "capacity_limit": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 60
+    },
+    "assigned_baseline": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "تعداد تحت پوشش فعلی (از فایل ورودی)"
+    },
+    "manager_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "کلید مدیر"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "mentor_id",
+    "gender_accepts",
+    "allowed_group_codes",
+    "capacity_limit",
+    "assigned_baseline",
+    "active"
+  ],
+  "additionalProperties": true,
+  "x_indexes": [
+    {
+      "name": "idx_mentor_id",
+      "fields": [
+        "mentor_id"
+      ],
+      "unique": true
+    },
+    {
+      "name": "idx_alias_code",
+      "fields": [
+        "alias_code"
+      ],
+      "unique": false
+    },
+    {
+      "name": "idx_manager_id",
+      "fields": [
+        "manager_id"
+      ],
+      "unique": false
+    }
+  ]
+}

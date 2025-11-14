@@ -1,0 +1,634 @@
+{
+  "version": "2.8",
+  "forms": [
+    {
+      "id": 150,
+      "title": "ثبت دانش‌آموز (SmartAlloc) — v2.2",
+      "description": "",
+      "labelPlacement": "top_label",
+      "descriptionPlacement": "below",
+      "button": {
+        "type": "text",
+        "text": "ثبت اطلاعات"
+      },
+      "fields": [
+        {
+          "type": "text",
+          "id": 101,
+          "label": "نام",
+          "isRequired": true,
+          "description": ""
+        },
+        {
+          "type": "text",
+          "id": 102,
+          "label": "نام خانوادگی",
+          "isRequired": true,
+          "description": ""
+        },
+        {
+          "type": "hidden",
+          "id": 1,
+          "label": "نام و نام‌خانوادگی (خودکار)",
+          "defaultValue": ""
+        },
+        {
+          "type": "text",
+          "id": 3,
+          "label": "نام پدر",
+          "isRequired": false,
+          "description": ""
+        },
+        {
+          "type": "text",
+          "id": 143,
+          "label": "کد ملّی",
+          "isRequired": true,
+          "description": "۱۰ رقم؛ ولیدیشن کامل سمت سرور",
+          "cssClass": "sa-english-digits",
+          "inputMask": true,
+          "inputMaskValue": "9999999999"
+        },
+        {
+          "type": "date",
+          "id": 2,
+          "label": "تاریخ تولد",
+          "isRequired": false,
+          "dateType": "datepicker",
+          "dateFormat": "ymd"
+        },
+        {
+          "type": "radio",
+          "id": 92,
+          "label": "جنسیت",
+          "isRequired": true,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "دختر",
+              "value": "F",
+              "isSelected": false
+            },
+            {
+              "text": "پسر",
+              "value": "M",
+              "isSelected": false
+            }
+          ]
+        },
+        {
+          "type": "radio",
+          "id": 93,
+          "label": "وضعیت تحصیلی",
+          "isRequired": true,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "دانش‌آموز",
+              "value": "دانش‌آموز",
+              "isSelected": false
+            },
+            {
+              "text": "فارغ‌التحصیل",
+              "value": "فارغ‌التحصیل",
+              "isSelected": false
+            }
+          ]
+        },
+        {
+          "type": "radio",
+          "id": 98,
+          "label": "اتباع خارجی",
+          "isRequired": true,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "خیر",
+              "value": "0",
+              "isSelected": false
+            },
+            {
+              "text": "بله",
+              "value": "1",
+              "isSelected": false
+            }
+          ]
+        },
+        {
+          "type": "radio",
+          "id": 4,
+          "label": "وضعیت هنرستان",
+          "isRequired": false,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "خیر",
+              "value": "0",
+              "isSelected": false
+            },
+            {
+              "text": "بله",
+              "value": "1",
+              "isSelected": false
+            }
+          ]
+        },
+        {
+          "type": "phone",
+          "id": 20,
+          "label": "موبایل دانش‌آموز",
+          "isRequired": true,
+          "phoneFormat": "international",
+          "cssClass": "sa-english-digits",
+          "inputMask": true,
+          "inputMaskValue": "09#########"
+        },
+        {
+          "type": "phone",
+          "id": 21,
+          "label": "موبایل رابط 1",
+          "isRequired": true,
+          "phoneFormat": "international",
+          "cssClass": "sa-english-digits",
+          "inputMask": true,
+          "inputMaskValue": "09#########"
+        },
+        {
+          "type": "phone",
+          "id": 23,
+          "label": "موبایل رابط 2",
+          "isRequired": false,
+          "phoneFormat": "international",
+          "cssClass": "sa-english-digits",
+          "inputMask": true,
+          "inputMaskValue": "09#########"
+        },
+        {
+          "type": "phone",
+          "id": 22,
+          "label": "تلفن ثابت",
+          "isRequired": false,
+          "phoneFormat": "international",
+          "cssClass": "sa-english-digits",
+          "inputMask": true,
+          "inputMaskValue": "0##########"
+        },
+        {
+          "type": "select",
+          "id": 24,
+          "label": "نسبت رابط 1",
+          "isRequired": false,
+          "enableEnhancedUI": true,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "پدر",
+              "value": "پدر",
+              "isSelected": false
+            },
+            {
+              "text": "مادر",
+              "value": "مادر",
+              "isSelected": false
+            },
+            {
+              "text": "سرپرست",
+              "value": "سرپرست",
+              "isSelected": false
+            },
+            {
+              "text": "سایر",
+              "value": "سایر",
+              "isSelected": false
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": 25,
+          "label": "نام رابط 1",
+          "isRequired": false,
+          "description": ""
+        },
+        {
+          "type": "select",
+          "id": 26,
+          "label": "نسبت رابط 2",
+          "isRequired": false,
+          "enableEnhancedUI": true,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "پدر",
+              "value": "پدر",
+              "isSelected": false
+            },
+            {
+              "text": "مادر",
+              "value": "مادر",
+              "isSelected": false
+            },
+            {
+              "text": "سرپرست",
+              "value": "سرپرست",
+              "isSelected": false
+            },
+            {
+              "text": "سایر",
+              "value": "سایر",
+              "isSelected": false
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": 27,
+          "label": "نام رابط 2",
+          "isRequired": false,
+          "description": ""
+        },
+        {
+          "type": "select",
+          "id": 73,
+          "label": "گروه آزمایشی نهایی",
+          "isRequired": true,
+          "enableEnhancedUI": true,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "تجربی",
+              "value": "تجربی",
+              "isSelected": false
+            },
+            {
+              "text": "ریاضی",
+              "value": "ریاضی",
+              "isSelected": false
+            },
+            {
+              "text": "انسانی",
+              "value": "انسانی",
+              "isSelected": false
+            },
+            {
+              "text": "هنر",
+              "value": "هنر",
+              "isSelected": false
+            },
+            {
+              "text": "زبان",
+              "value": "زبان",
+              "isSelected": false
+            }
+          ]
+        },
+        {
+          "type": "hidden",
+          "id": 31,
+          "label": "کُد گروه/رشته",
+          "defaultValue": ""
+        },
+        {
+          "type": "number",
+          "id": 5,
+          "label": "معدل",
+          "isRequired": false,
+          "rangeStep": 0.01,
+          "rangeMin": 0,
+          "rangeMax": 20
+        },
+        {
+          "type": "select",
+          "id": 30,
+          "label": "کُد مدرسه 1",
+          "isRequired": true,
+          "enableEnhancedUI": true,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "سایر (9000)",
+              "value": "9000",
+              "isSelected": false
+            }
+          ],
+          "description": "اگر مدرسه در لیست نیست، «سایر (9000)» را انتخاب کنید.",
+          "conditionalLogic": {
+            "actionType": "show",
+            "logicType": "all",
+            "rules": [
+              {
+                "fieldId": 93,
+                "operator": "is",
+                "value": "دانش‌آموز"
+              }
+            ],
+            "enabled": true
+          },
+          "gppa-choices-enabled": "1",
+          "gppa-choices-source": "v_sa_school_codes",
+          "gppa-choices-label-template": "[{school_code}] {school_name} – {city}",
+          "gppa-choices-value-property": "school_code",
+          "gppa-choices-filterGroups": [
+            {
+              "type": "and",
+              "filters": [
+                {
+                  "property": "center",
+                  "operator": "=",
+                  "value": "{Field:94}"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": 29,
+          "label": "نام مدرسه (در صورت سایر)",
+          "isRequired": true,
+          "description": "",
+          "conditionalLogic": {
+            "actionType": "show",
+            "logicType": "all",
+            "rules": [
+              {
+                "fieldId": 30,
+                "operator": "is",
+                "value": "9000"
+              }
+            ],
+            "enabled": true
+          }
+        },
+        {
+          "type": "select",
+          "id": 94,
+          "label": "مرکز ثبت‌نام",
+          "isRequired": true,
+          "enableEnhancedUI": true,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "مرکز 0",
+              "value": "0",
+              "isSelected": false
+            },
+            {
+              "text": "مرکز 1",
+              "value": "1",
+              "isSelected": false
+            },
+            {
+              "text": "مرکز 2",
+              "value": "2",
+              "isSelected": false
+            }
+          ]
+        },
+        {
+          "type": "radio",
+          "id": 75,
+          "label": "وضعیت ثبت‌نام",
+          "isRequired": true,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "عادی",
+              "value": "0",
+              "isSelected": false
+            },
+            {
+              "text": "بنیاد",
+              "value": "1",
+              "isSelected": false
+            },
+            {
+              "text": "حکمت",
+              "value": "3",
+              "isSelected": false
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": 76,
+          "label": "کُد رهگیری حکمت",
+          "isRequired": true,
+          "description": "",
+          "cssClass": "sa-english-digits",
+          "inputMask": true,
+          "inputMaskValue": "9999999999999999",
+          "conditionalLogic": {
+            "actionType": "show",
+            "logicType": "all",
+            "rules": [
+              {
+                "fieldId": 75,
+                "operator": "is",
+                "value": "3"
+              }
+            ],
+            "enabled": true
+          }
+        },
+        {
+          "type": "select",
+          "id": 97,
+          "label": "نوع بسته حکمت",
+          "isRequired": false,
+          "enableEnhancedUI": true,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "عادی",
+              "value": "عادی",
+              "isSelected": false
+            },
+            {
+              "text": "ویژه",
+              "value": "ویژه",
+              "isSelected": false
+            }
+          ],
+          "conditionalLogic": {
+            "actionType": "show",
+            "logicType": "all",
+            "rules": [
+              {
+                "fieldId": 75,
+                "operator": "is",
+                "value": "3"
+              }
+            ],
+            "enabled": true
+          }
+        },
+        {
+          "type": "text",
+          "id": 60,
+          "label": "کُدپستی",
+          "isRequired": false,
+          "description": "",
+          "cssClass": "sa-english-digits",
+          "inputMask": true,
+          "inputMaskValue": "9999999999"
+        },
+        {
+          "type": "text",
+          "id": 61,
+          "label": "کُدپستی جایگزین (Alias)",
+          "isRequired": false,
+          "description": "",
+          "cssClass": "sa-english-digits",
+          "inputMask": true,
+          "inputMaskValue": "9999999999"
+        },
+        {
+          "type": "text",
+          "id": 7,
+          "label": "شماره کلاس",
+          "isRequired": false,
+          "description": ""
+        },
+        {
+          "type": "text",
+          "id": 8,
+          "label": "شماره صندلی",
+          "isRequired": false,
+          "description": ""
+        },
+        {
+          "type": "select",
+          "id": 96,
+          "label": "سهمیه کنکور",
+          "isRequired": false,
+          "enableEnhancedUI": true,
+          "enableChoiceValue": true,
+          "choices": [
+            {
+              "text": "منطقه 1",
+              "value": "منطقه1",
+              "isSelected": false
+            },
+            {
+              "text": "منطقه 2",
+              "value": "منطقه2",
+              "isSelected": false
+            },
+            {
+              "text": "منطقه 3",
+              "value": "منطقه3",
+              "isSelected": false
+            },
+            {
+              "text": "ایثارگران",
+              "value": "ایثارگران",
+              "isSelected": false
+            },
+            {
+              "text": "سایر",
+              "value": "سایر",
+              "isSelected": false
+            }
+          ]
+        },
+        {
+          "type": "select",
+          "id": 39,
+          "label": "پشتیبان پیشنهادی",
+          "isRequired": false,
+          "enableEnhancedUI": true,
+          "enableChoiceValue": true,
+          "choices": [],
+          "description": "اختیاری برای اپراتور؛ موتور تخصیص مستقل عمل می‌کند.",
+          "gppa-choices-enabled": "1",
+          "gppa-choices-source": "v_sa_candidate_mentors",
+          "gppa-choices-label-template": "{mentor_name} — نسبت اشغال: {occupancy_ratio}% — مرکز: {center_alias} — مدیر: {manager_name}",
+          "gppa-choices-value-property": "mentor_id",
+          "gppa-choices-filterGroups": [
+            {
+              "type": "and",
+              "filters": [
+                {
+                  "property": "gender",
+                  "operator": "=",
+                  "value": "{Field:92}"
+                },
+                {
+                  "property": "center",
+                  "operator": "in",
+                  "value": "{Field:94},ALL"
+                },
+                {
+                  "type": "or",
+                  "filters": [
+                    {
+                      "property": "school_code",
+                      "operator": "=",
+                      "value": "{Field:30}"
+                    },
+                    {
+                      "property": "school_code",
+                      "operator": "=",
+                      "value": "0"
+                    }
+                  ]
+                },
+                {
+                  "property": "reg_status",
+                  "operator": "=",
+                  "value": "{Field:75}"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "textarea",
+          "id": 62,
+          "label": "توضیحات/یادداشت",
+          "isRequired": false
+        },
+        {
+          "type": "hidden",
+          "id": 150,
+          "label": "منبع ارسال",
+          "defaultValue": "web"
+        },
+        {
+          "type": "hidden",
+          "id": 151,
+          "label": "sa_form_version",
+          "defaultValue": "2.2"
+        }
+      ],
+      "version": "2.8",
+      "gravityforms_version": "2.8",
+      "confirmations": [
+        {
+          "id": "confirm_default",
+          "name": "Default Confirmation",
+          "isDefault": true,
+          "type": "message",
+          "message": "سپاس! اطلاعات شما ثبت شد.",
+          "messageFormat": "html"
+        }
+      ],
+      "notifications": {
+        "admin_note": {
+          "id": "admin_note",
+          "name": "Admin Notification",
+          "isActive": true,
+          "event": "form_submission",
+          "to": "{admin_email}",
+          "toType": "email",
+          "subject": "New entry on {form_title}",
+          "message": "{all_fields}"
+        }
+      },
+      "nextFieldId": 300,
+      "is_active": true,
+      "sa_form_version": "2.2"
+    }
+  ]
+}

@@ -1,0 +1,287 @@
+{
+  "version": "1.0",
+  "excel_template": "ImportToSabt (1404).xlsx",
+  "sheets": {
+    "Sheet2": {
+      "primary": true,
+      "columns": {
+        "پشتیبان": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "کد ثبت نام": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "گروه آزمایشی": {
+          "source": "gf",
+          "field": "73",
+          "type": "choice"
+        },
+        "جنسیت": {
+          "source": "gf",
+          "field": "92",
+          "type": "choice",
+          "map": {
+            "F": "دختر",
+            "M": "پسر"
+          }
+        },
+        "وضعیت ثبت نام": {
+          "source": "gf",
+          "field": "75",
+          "type": "choice_value",
+          "map": {
+            "0": "عادی",
+            "1": "بنیاد",
+            "3": "حکمت"
+          }
+        },
+        "اتباع خارجی": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "کد ملی": {
+          "source": "gf",
+          "field": "143",
+          "type": "text",
+          "normalize": "digits_10"
+        },
+        "نام": {
+          "source": "gf",
+          "field": "101",
+          "type": "text"
+        },
+        "نام خانوادگی": {
+          "source": "gf",
+          "field": "102",
+          "type": "text"
+        },
+        "نام پدر": {
+          "source": "gf",
+          "field": "3",
+          "type": "text"
+        },
+        "تاری//خ/ /تولد": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "وضعیت تحصیلی": {
+          "source": "gf",
+          "field": "93",
+          "type": "choice"
+        },
+        "وضعیت هنرستان": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "تلفن": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "تلفن همراه": {
+          "source": "gf",
+          "field": "20",
+          "type": "text",
+          "normalize": "mobile_ir"
+        },
+        "معدل": {
+          "source": "gf",
+          "field": "5",
+          "type": "number",
+          "precision": 2
+        },
+        "معدل نیم سال": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "شماره قبض": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "کد پستی": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "آدرس پست الکترونیک": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "آدرس": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "کد پستی جایگزین": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "پشتیبان خاص": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "آزمون پیشرفت تحصیلی": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "كار در منزل و مجله": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "آزمون CD": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "زبان خارجی": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "اقلیت مذهبی": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "شماره پرونده": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "نسبت": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "تخفیف": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "نحوه آشنایی با کانون": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "نسبت رابط 1": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "نام رابط 1": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "تلفن رابط 1": {
+          "source": "gf",
+          "field": "21",
+          "type": "text",
+          "normalize": "mobile_ir"
+        },
+        "نسبت رابط 2": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "نام رابط 2": {
+          "source": "empty",
+          "type": "empty"
+        },
+        "تلفن رابط 2": {
+          "source": "gf",
+          "field": "23",
+          "type": "text_or_empty",
+          "normalize": "mobile_ir"
+        },
+        "شهر مدرسه 1": {
+          "source": "derived",
+          "from": "کد مدرسه 1",
+          "type": "lookup",
+          "crosswalk": "city_by_school_code"
+        },
+        "کد مدرسه 1": {
+          "source": "gf",
+          "field": "30",
+          "type": "text",
+          "on_value_9000_use": "نام مدرسه"
+        },
+        "شماره کلاس": {
+          "source": "gf",
+          "field": "7",
+          "type": "text_or_empty"
+        },
+        "سهمیه کنکور": {
+          "source": "gf",
+          "field": "96",
+          "type": "choice_or_empty"
+        },
+        "شماره صندلی": {
+          "source": "gf",
+          "field": "8",
+          "type": "text_or_empty"
+        },
+        "تاریخ ثبت نام": {
+          "source": "system",
+          "field": "date_created",
+          "type": "datetime",
+          "format": "yyyy-mm-dd"
+        },
+        "کد رهگیری حکمت": {
+          "source": "gf",
+          "field": "76",
+          "type": "text_or_empty",
+          "normalize": "digits_16",
+          "when": "وضعیت ثبت نام=3"
+        },
+        "نوع بسته حکمت": {
+          "source": "gf",
+          "field": "97",
+          "type": "choice_or_empty"
+        }
+      }
+    },
+    "Sheet5": {
+      "primary": false,
+      "note": "Filled from mentors table / crosswalk if required by downstream process.",
+      "columns": {
+        "کدپستی": {
+          "source": "db_or_empty"
+        },
+        "کد کارمندی پشتیبان": {
+          "source": "db_or_empty"
+        }
+      }
+    },
+    "9394": {
+      "primary": false,
+      "note": "Legacy sheet – kept for backward-compat; populated only if requested.",
+      "columns": {
+        "کد ملی": {
+          "source": "empty"
+        },
+        "شمارنده": {
+          "source": "empty"
+        }
+      }
+    }
+  },
+  "normalizers": {
+    "digits_10": {
+      "regex": "\\D+",
+      "replace": "",
+      "length": 10
+    },
+    "digits_16": {
+      "regex": "\\D+",
+      "replace": "",
+      "length": 16
+    },
+    "mobile_ir": {
+      "pattern": "^09\\d{9}$",
+      "fix_digits": true
+    }
+  },
+  "mappings": {
+    "group_code_by_label": {
+      "تجربی": "EX",
+      "ریاضی": "MA",
+      "انسانی": "HU",
+      "هنر": "AR",
+      "زبان": "LA"
+    }
+  },
+  "priority_rules": [
+    "if (Sheet2['کدپستی alias']) use it else Sheet2['کدپستی']",
+    "if (وضعیت ثبت نام != 3) then empty(کد رهگیری حکمت, نوع بسته حکمت)"
+  ]
+}

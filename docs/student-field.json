@@ -1,0 +1,255 @@
+[
+  {
+    "title": "اطلاعات دانش‌آموز",
+    "id": "student_info",
+    "type": "default",
+    "storage_type": "custom_table",
+    "table": "student_meta",
+    "fields": [
+      {
+        "id": "first_name",
+        "name": "نام",
+        "type": "text",
+        "required": true
+      },
+      {
+        "id": "last_name",
+        "name": "نام خانوادگی",
+        "type": "text",
+        "required": true
+      },
+      {
+        "id": "father_name",
+        "name": "نام پدر",
+        "type": "text",
+        "required": true
+      },
+      {
+        "id": "birth_date",
+        "name": "تاریخ تولد",
+        "type": "date",
+        "js_options": {
+          "dateFormat": "yy/mm/dd",
+          "changeYear": true,
+          "yearRange": "1370:1408"
+        },
+        "required": true
+      },
+      {
+        "id": "gender",
+        "name": "جنسیت",
+        "type": "radio",
+        "options": { "male": "پسر", "female": "دختر" },
+        "inline": true,
+        "required": true
+      },
+      {
+        "id": "national_code",
+        "name": "کد ملی",
+        "type": "text",
+        "required": true,
+        "pattern": "[0-9]{10}",
+        "custom_attributes": { "maxlength": "10" }
+      },
+      {
+        "id": "school",
+        "name": "مدرسه",
+        "type": "taxonomy",
+        "taxonomy": "school",
+        "field_type": "select_advanced",
+        "required": true
+      },
+      {
+        "id": "grade_level",
+        "name": "پایه تحصیلی",
+        "type": "taxonomy",
+        "taxonomy": "educational_level",
+        "field_type": "select_advanced",
+        "required": true
+      },
+      {
+        "id": "major",
+        "name": "رشته",
+        "type": "text"
+      },
+      {
+        "id": "payment_receipt_number",
+        "name": "شماره قبض پرداخت",
+        "type": "text"
+      },
+      {
+        "id": "applicant_mobile",
+        "name": "همراه داوطلب",
+        "type": "text",
+        "required": true,
+        "pattern": "[0-9]{11}",
+        "custom_attributes": { "maxlength": "11" }
+      },
+      {
+        "id": "home_phone",
+        "name": "تلفن منزل",
+        "type": "text",
+        "pattern": "[0-9]{11}",
+        "custom_attributes": { "maxlength": "11" }
+      },
+      {
+        "id": "email",
+        "name": "آدرس ایمیل",
+        "type": "email"
+      },
+      {
+        "id": "postal_code",
+        "name": "کد پستی",
+        "type": "text",
+        "pattern": "[0-9]{10}",
+        "custom_attributes": { "maxlength": "10" }
+      },
+      {
+        "id": "status",
+        "name": "وضعیت دانش‌آموز",
+        "type": "select",
+        "options": {
+          "active": "فعال",
+          "graduated": "فارغ‌التحصیل",
+          "deleted": "حذف شده"
+        }
+      },
+      {
+        "id": "financial_support_type",
+        "name": "نوع حمایت مالی",
+        "type": "select",
+        "options": {
+          "0": "عادی",
+          "1": "بنیاد شهید",
+          "3": "حکمت"
+        },
+        "required": true
+      },
+      {
+        "id": "hekmat_code",
+        "name": "کد حکمت",
+        "type": "text",
+        "visible": [
+          {
+            "when": [
+              { "field": "financial_support_type", "value": "3" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "tracking_code_hekmat",
+        "name": "کد رهگیری حکمت",
+        "type": "text",
+        "visible": [
+          {
+            "when": [
+              { "field": "financial_support_type", "value": "3" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "golestan_center",
+        "name": "مرکز گلستان صدرا",
+        "type": "taxonomy",
+        "taxonomy": "golestan_center",
+        "field_type": "select",
+        "required": false
+      },
+      {
+        "id": "average",
+        "name": "معدل",
+        "type": "number",
+        "step": "0.01"
+      },
+      {
+        "id": "semester",
+        "name": "نیم‌سال",
+        "type": "select",
+        "options": { "1": "اول", "2": "دوم" }
+      },
+      {
+        "id": "foreign_national",
+        "name": "اتباع خارجی",
+        "type": "radio",
+        "options": { "yes": "بله", "no": "خیر" }
+      },
+      {
+        "id": "art_school_status",
+        "name": "وضعیت هنرستان",
+        "type": "select",
+        "options": {
+          "studying": "در حال تحصیل",
+          "graduated": "فارغ‌التحصیل",
+          "other": "سایر"
+        }
+      },
+      {
+        "id": "progress_exam",
+        "name": "شرکت در آزمون پیشرفت",
+        "type": "checkbox",
+        "options": { "yes": "شرکت کرده‌ام" }
+      },
+      {
+        "id": "homework_submitted",
+        "name": "تحویل کار منزل",
+        "type": "checkbox",
+        "options": { "yes": "تحویل داده‌ام" }
+      },
+      {
+        "id": "cd_received",
+        "name": "دریافت CD",
+        "type": "checkbox",
+        "options": { "yes": "دریافت کردم" }
+      },
+      {
+        "id": "language",
+        "name": "زبان تخصصی",
+        "type": "select",
+        "options": {
+          "en": "انگلیسی",
+          "ar": "عربی",
+          "fr": "فرانسه"
+        }
+      },
+      {
+        "id": "religious_minority",
+        "name": "اقلیت مذهبی",
+        "type": "radio",
+        "options": { "yes": "بله", "no": "خیر" }
+      },
+      {
+        "id": "familiar_source",
+        "name": "نحوه آشنایی با کانون",
+        "type": "select",
+        "options": {
+          "ad": "تبلیغات",
+          "friends": "دوستان",
+          "school": "مدرسه",
+          "other": "سایر"
+        }
+      },
+      {
+        "id": "guardian_relationship",
+        "name": "نسبت رابط",
+        "type": "select",
+        "options": {
+          "father": "پدر",
+          "mother": "مادر",
+          "other": "سایر"
+        }
+      },
+      {
+        "id": "registration_date",
+        "name": "تاریخ ثبت‌نام",
+        "type": "date",
+        "js_options": {
+          "dateFormat": "yy/mm/dd",
+          "changeYear": true
+        }
+      }
+    ],
+    "post_types": ["student"]
+  }
+]

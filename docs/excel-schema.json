@@ -1,0 +1,194 @@
+{
+  "title": "Book1 Export Schema",
+  "generated_at": "2025-08-10T13:46:15.967605Z",
+  "sheet": "Sheet2",
+  "columns": [
+    {
+      "name": "پشتیبان",
+      "type": "string"
+    },
+    {
+      "name": "کد ثبت نام",
+      "type": "string"
+    },
+    {
+      "name": "گروه آزمایشی",
+      "type": "string"
+    },
+    {
+      "name": "جنسیت",
+      "type": "string"
+    },
+    {
+      "name": "وضعیت ثبت نام",
+      "type": "string"
+    },
+    {
+      "name": "اتباع خارجی",
+      "type": "string"
+    },
+    {
+      "name": "کد ملی",
+      "type": "string"
+    },
+    {
+      "name": "نام",
+      "type": "string"
+    },
+    {
+      "name": "نام خانوادگی",
+      "type": "string"
+    },
+    {
+      "name": "نام پدر",
+      "type": "string"
+    },
+    {
+      "name": "تاری//خ/ /تولد",
+      "type": "string"
+    },
+    {
+      "name": "وضعیت تحصیلی",
+      "type": "string"
+    },
+    {
+      "name": "وضعیت هنرستان",
+      "type": "string"
+    },
+    {
+      "name": "تلفن",
+      "type": "string"
+    },
+    {
+      "name": "تلفن همراه",
+      "type": "string"
+    },
+    {
+      "name": "معدل",
+      "type": "string"
+    },
+    {
+      "name": "معدل نیم سال",
+      "type": "string"
+    },
+    {
+      "name": "شماره قبض",
+      "type": "string"
+    },
+    {
+      "name": "کد پستی",
+      "type": "string"
+    },
+    {
+      "name": "آدرس پست الکترونیک",
+      "type": "string"
+    },
+    {
+      "name": "آدرس",
+      "type": "string"
+    },
+    {
+      "name": "کد پستی جایگزین",
+      "type": "string"
+    },
+    {
+      "name": "پشتیبان خاص",
+      "type": "string"
+    },
+    {
+      "name": "آزمون پیشرفت تحصیلی",
+      "type": "string"
+    },
+    {
+      "name": "كار در منزل و مجله",
+      "type": "string"
+    },
+    {
+      "name": "آزمون CD",
+      "type": "string"
+    },
+    {
+      "name": "زبان خارجی",
+      "type": "string"
+    },
+    {
+      "name": "اقلیت مذهبی",
+      "type": "string"
+    },
+    {
+      "name": "شماره پرونده",
+      "type": "string"
+    },
+    {
+      "name": "نسبت",
+      "type": "string"
+    },
+    {
+      "name": "تخفیف",
+      "type": "string"
+    },
+    {
+      "name": "نحوه آشنایی با کانون",
+      "type": "string"
+    },
+    {
+      "name": "نسبت رابط 1",
+      "type": "string"
+    },
+    {
+      "name": "نام رابط 1",
+      "type": "string"
+    },
+    {
+      "name": "تلفن رابط 1",
+      "type": "string"
+    },
+    {
+      "name": "نسبت رابط 2",
+      "type": "string"
+    },
+    {
+      "name": "نام رابط 2",
+      "type": "string"
+    },
+    {
+      "name": "تلفن رابط 2",
+      "type": "string"
+    },
+    {
+      "name": "شهر مدرسه 1",
+      "type": "string"
+    },
+    {
+      "name": "کد مدرسه 1",
+      "type": "string"
+    },
+    {
+      "name": "شماره کلاس",
+      "type": "string"
+    },
+    {
+      "name": "سهمیه کنکور",
+      "type": "string"
+    },
+    {
+      "name": "شماره صندلی",
+      "type": "string"
+    },
+    {
+      "name": "تاریخ ثبت نام",
+      "type": "string"
+    },
+    {
+      "name": "کد رهگیری حکمت",
+      "type": "string"
+    },
+    {
+      "name": "نوع بسته حکمت",
+      "type": "string"
+    }
+  ],
+  "special_mappings": {
+    "کد پستی جایگزین": "allocator.alias_code_used"
+  }
+}
