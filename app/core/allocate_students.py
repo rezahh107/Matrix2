@@ -8,6 +8,7 @@ from typing import Callable, Dict, List, Mapping, Sequence, Tuple
 
 import pandas as pd
 
+from .canonical_frames import canonicalize_pool_frame, canonicalize_students_frame
 from .common.column_normalizer import normalize_input_columns
 from .common.columns import (
     CANON_EN_TO_FA,
@@ -30,7 +31,12 @@ from .common.ranking import apply_ranking_policy, build_mentor_state, consume_ca
 from .common.reasons import ReasonCode, build_reason
 from .common.rules import Rule, default_stage_rule_map
 from .common.trace import TraceStagePlan, build_allocation_trace, build_trace_plan
-from .common.types import AllocationLogRecord, JoinKeyValues, TraceStageRecord
+from .common.types import (
+    AllocationLogRecord,
+    JoinKeyValues,
+    TraceStageLiteral,
+    TraceStageRecord,
+)
 from .policy_loader import PolicyConfig, load_policy
 from .reason.selection_reason import build_selection_reason_rows as _build_selection_reason_rows
 
@@ -101,28 +107,6 @@ def _student_value(student: Mapping[str, object], column: str) -> object:
     if normalized in student:
         return student[normalized]
     raise KeyError(f"Student row missing value for '{column}'")
-
-
-def _append_bilingual_alias_columns(
-    frame: pd.DataFrame, policy: PolicyConfig
-) -> pd.DataFrame:
-    """افزودن ستون‌های دوزبانه برای کلیدهای Join و ستون‌های حیاتی."""
-
-    alias_targets = list(dict.fromkeys(policy.join_keys))
-    result = frame.copy()
-    for fa_name in alias_targets:
-        if fa_name not in result.columns:
-            continue
-        normalized_key = normalize_fa(fa_name)
-        en_name = CANON_FA_TO_EN.get(normalized_key)
-        if not en_name or en_name == fa_name:
-            continue
-        bilingual = f"{fa_name} | {en_name}"
-        if bilingual in result.columns:
-            continue
-        insert_at = result.columns.get_loc(fa_name) + 1
-        result.insert(insert_at, bilingual, result[fa_name].copy())
-    return result
 
 
 def _collect_join_key_map(
@@ -225,85 +209,64 @@ def _build_log_base(
 
 
 def _normalize_students(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
-    normalized = resolve_aliases(df, "report")
-    school_fa = CANON_EN_TO_FA["school_code"]
-    if school_fa in normalized.columns:
-        pre_normal_raw = normalized[school_fa].astype("string").str.strip()
-    else:
-        pre_normal_raw = pd.Series([pd.NA] * len(normalized), dtype="string", index=normalized.index)
-    normalized = coerce_semantics(normalized, "report")
-    normalized, _ = normalize_input_columns(
-        normalized, kind="StudentReport", include_alias=True, report=False
-    )
-    normalized_en = canonicalize_headers(normalized, header_mode="en")
-    if "school_code_raw" not in normalized_en.columns:
-        normalized_en["school_code_raw"] = pre_normal_raw.reindex(normalized_en.index)
-    normalized_en = enrich_school_columns_en(normalized_en)
-    normalized = canonicalize_headers(normalized_en, header_mode="fa")
-    default_index = normalized_en.index
-    school_code_raw = normalized_en.get(
-        "school_code_raw", pd.Series([pd.NA] * len(default_index), dtype="string", index=default_index)
-    )
-    normalized["school_code_raw"] = school_code_raw
-
-    school_code_norm = normalized_en.get(
-        "school_code_norm",
-        pd.Series([pd.NA] * len(default_index), dtype="Int64", index=default_index),
-    )
-    if policy.school_code_empty_as_zero:
-        school_code_norm = school_code_norm.fillna(0)
-    school_code_norm = school_code_norm.astype("Int64")
-    normalized["school_code_norm"] = school_code_norm
-    normalized["school_status_resolved"] = normalized_en.get(
-        "school_status_resolved",
-        pd.Series([0] * len(default_index), dtype="Int64", index=default_index),
-    )
-    school_fa = CANON_EN_TO_FA["school_code"]
-    if school_fa in normalized.columns:
-        normalized[school_fa] = school_code_norm
-    missing = [column for column in policy.join_keys if column not in normalized.columns]
-    if missing:
-        raise KeyError(f"Student data missing columns: {missing}")
-    required_fields = set(policy.required_student_fields)
-    missing_required = []
-    for field in required_fields:
-        canonical = CANON_EN_TO_FA.get(field, field)
-        if field not in normalized.columns and canonical not in normalized.columns:
-            missing_required.append(field)
-    if missing_required:
-        raise ValueError(f"Missing columns: {missing_required}")
-    normalized = enforce_join_key_types(normalized, policy.join_keys)
-    return normalized
+    return canonicalize_students_frame(df, policy=policy)
 
 
 def _normalize_pool(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
-    normalized = resolve_aliases(df, "inspactor")
-    normalized = coerce_semantics(normalized, "inspactor")
-    normalized, _ = normalize_input_columns(
-        normalized, kind="MentorPool", include_alias=True, report=False
+    return canonicalize_pool_frame(
+        df,
+        policy=policy,
+        sanitize_pool=False,
+        pool_source="inspactor",
     )
-    required = set(policy.join_keys) | {"کد کارمندی پشتیبان"}
-    missing = [column for column in required if column not in normalized.columns]
+
+
+def _ensure_students_canonical(
+    df: pd.DataFrame, policy: PolicyConfig
+) -> pd.DataFrame:
+    students = df.copy(deep=True)
+    missing = [column for column in policy.join_keys if column not in students.columns]
     if missing:
-        raise KeyError(f"Pool data missing columns: {missing}")
+        raise ValueError(f"Canonical student frame missing columns: {missing}")
+    student_id = students.get("student_id")
+    if student_id is not None:
+        empty_mask = student_id.astype("string").str.strip().eq("")
+        if empty_mask.any():
+            raise ValueError("Canonical student frame contains empty student_id values")
+    for column in policy.join_keys:
+        series = pd.to_numeric(students[column], errors="coerce")
+        if series.isna().any():
+            raise ValueError(f"Canonical student join key '{column}' has invalid values")
+    return students
 
-    capacity_alias = policy.columns.remaining_capacity
-    if capacity_alias in normalized.columns and "remaining_capacity" not in normalized.columns:
-        normalized["remaining_capacity"] = ensure_series(normalized[capacity_alias])
 
-    for column_name in {
-        capacity_alias,
+def _ensure_pool_canonical(
+    df: pd.DataFrame,
+    policy: PolicyConfig,
+    capacity_column: str,
+) -> pd.DataFrame:
+    pool = df.copy(deep=True)
+    required = set(policy.join_keys) | {
+        "کد کارمندی پشتیبان",
+        "mentor_id",
         "remaining_capacity",
-    }:
-        if column_name in normalized.columns:
-            series = ensure_series(normalized[column_name])
-            normalized[column_name] = (
-                pd.to_numeric(series, errors="coerce")
-                .fillna(0)
-                .astype("Int64")
-            )
-    normalized = enforce_join_key_types(normalized, policy.join_keys)
-    return _append_bilingual_alias_columns(normalized, policy)
+        "allocations_new",
+        "occupancy_ratio",
+    }
+    missing = [column for column in required if column not in pool.columns]
+    if missing:
+        raise ValueError(f"Canonical pool frame missing columns: {missing}")
+    numeric_candidates = {
+        capacity_column,
+        policy.columns.remaining_capacity,
+        "remaining_capacity",
+    }
+    for column in numeric_candidates:
+        if column in pool.columns:
+            numeric = pd.to_numeric(pool[column], errors="coerce")
+            if numeric.isna().any():
+                raise ValueError(f"Canonical pool column '{column}' has non-numeric values")
+    return pool
 
 
 def allocate_student(
@@ -619,6 +582,7 @@ def allocate_batch(
     policy: PolicyConfig | None = None,
     progress: ProgressFn = _noop_progress,
     capacity_column: str | None = None,
+    frames_already_canonical: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """تخصیص دسته‌ای دانش‌آموزان و بازگشت خروجی‌های چهارتایی."""
     if policy is None:
@@ -630,8 +594,14 @@ def allocate_batch(
         header_mode=policy.excel.header_mode_internal,
     ).columns[0]
 
-    students_norm = _normalize_students(students, policy)
-    pool_norm = _normalize_pool(candidate_pool, policy)
+    if frames_already_canonical:
+        students_norm = _ensure_students_canonical(students, policy)
+        pool_norm = _ensure_pool_canonical(
+            candidate_pool, policy, resolved_capacity_column
+        )
+    else:
+        students_norm = _normalize_students(students, policy)
+        pool_norm = _normalize_pool(candidate_pool, policy)
     extra_columns = [
         column for column in pool_norm.columns if column not in candidate_pool.columns
     ]
@@ -685,9 +655,12 @@ def allocate_batch(
 
         if result.mentor_row is not None:
             chosen_index = result.mentor_row.name
-            mentor_identifier = str(result.log.get("mentor_id", "")).strip() or str(
-                result.mentor_row.get("کد کارمندی پشتیبان", "")
-            ).strip()
+            mentor_row_en = canonicalize_headers(
+                result.mentor_row.to_frame().T, header_mode=policy.excel.header_mode_internal
+            ).iloc[0]
+            mentor_identifier = mentor_row_en.get("mentor_id")
+            if isinstance(mentor_identifier, pd.Series):
+                mentor_identifier = mentor_identifier.iloc[0]
             state_entry = mentor_state.get(mentor_identifier)
             if state_entry is None:
                 raise KeyError(
@@ -698,24 +671,18 @@ def allocate_batch(
                 capacity_internal != "remaining_capacity"
                 and "remaining_capacity" in pool_internal.columns
             ):
-                pool_internal.loc[chosen_index, "remaining_capacity"] = state_entry[
-                    "remaining"
-                ]
+                pool_internal.loc[chosen_index, "remaining_capacity"] = state_entry["remaining"]
             pool_internal.loc[chosen_index, "allocations_new"] = state_entry["alloc_new"]
             initial_value = max(int(state_entry.get("initial", 0)), 1)
             pool_internal.loc[chosen_index, "occupancy_ratio"] = (
                 (int(state_entry.get("initial", 0)) - state_entry["remaining"]) / initial_value
             )
-            pool_with_ids.loc[chosen_index, resolved_capacity_column] = state_entry[
-                "remaining"
-            ]
+            pool_with_ids.loc[chosen_index, resolved_capacity_column] = state_entry["remaining"]
             if (
                 resolved_capacity_column != "remaining_capacity"
                 and "remaining_capacity" in pool_with_ids.columns
             ):
-                pool_with_ids.loc[chosen_index, "remaining_capacity"] = state_entry[
-                    "remaining"
-                ]
+                pool_with_ids.loc[chosen_index, "remaining_capacity"] = state_entry["remaining"]
             pool_with_ids.loc[chosen_index, "allocations_new"] = state_entry["alloc_new"]
             pool_with_ids.loc[chosen_index, "occupancy_ratio"] = pool_internal.loc[
                 chosen_index, "occupancy_ratio"

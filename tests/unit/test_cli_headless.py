@@ -234,13 +234,41 @@ def test_load_matrix_candidate_pool_filters_virtual(
             "remaining_capacity": [0, 5],
             "allocations_new": [0, 0],
             "mentor_id": [1, 2],
+            "کدرشته": [1201, 1201],
+            "گروه آزمایشی": ["تجربی", "تجربی"],
+            "جنسیت": [1, 1],
+            "دانش آموز فارغ": [0, 0],
+            "مرکز گلستان صدرا": [0, 0],
+            "مالی حکمت بنیاد": [0, 0],
+            "کد مدرسه": [1010, 1010],
         }
     )
     with pd.ExcelWriter(matrix_path, engine=engine) as writer:
         df.to_excel(writer, sheet_name="matrix", index=False)
 
     policy = load_policy(policy_file)
-    pool = cli._load_matrix_candidate_pool(matrix_path, policy)
+    pool_raw = cli._load_matrix_candidate_pool(matrix_path, policy)
+    assert sorted(pool_raw["mentor_id"].astype(int)) == [1, 2]
 
-    assert list(pool["mentor_id"].astype(int)) == [2]
-    assert "allocations_new" in pool.columns
+    students = pd.DataFrame(
+        {
+            "student_id": ["STD-1"],
+            "کدرشته": [1201],
+            "گروه آزمایشی": ["تجربی"],
+            "جنسیت": [1],
+            "دانش آموز فارغ": [0],
+            "مرکز گلستان صدرا": [0],
+            "مالی حکمت بنیاد": [0],
+            "کد مدرسه": [1010],
+        }
+    )
+    _, pool_canon = cli._prepare_allocation_frames(
+        students,
+        pool_raw,
+        policy=policy,
+        sanitize_pool=True,
+        pool_source="matrix",
+    )
+
+    assert list(pool_canon["mentor_id"].astype(int)) == [2]
+    assert "allocations_new" in pool_canon.columns
