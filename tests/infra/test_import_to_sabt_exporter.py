@@ -246,6 +246,69 @@ def test_prepare_allocation_export_frame_coalesces_duplicate_mentor_rows() -> No
     assert merged.loc[0, "mentor_mentor_name"] == "پشتیبان نهایی"
     assert merged.loc[0, "mentor_mentor_postal_code"] == "54321"
 
+
+def test_prepare_allocation_export_frame_handles_duplicate_columns_after_canon() -> None:
+    alloc = pd.DataFrame(
+        [
+            {
+                "student_id": "STD-1",
+                "mentor_id": "EMP-1",
+                "کد کارمندی پشتیبان": "EMP-1",
+            }
+        ]
+    )
+    students = pd.DataFrame(
+        [
+            {
+                "student_id": "STD-1",
+                "GF_FirstName": "سارا",
+                "کد ملی": "0012345678",
+            }
+        ]
+    )
+    mentors = pd.DataFrame(
+        [
+            {
+                "mentor_id": "EMP-1",
+                "کد کارمندی پشتیبان": "EMP-1",
+                "mentor_name": "پشتیبان الف",
+            }
+        ]
+    )
+
+    merged = prepare_allocation_export_frame(alloc, students, mentors)
+
+    assert merged.loc[0, "student_GF_FirstName"] == "سارا"
+    assert merged.loc[0, "mentor_mentor_name"] == "پشتیبان الف"
+
+
+def test_prepare_allocation_export_frame_raises_on_conflicting_duplicate_columns() -> None:
+    alloc = pd.DataFrame(
+        [
+            {"student_id": "STD-1", "mentor_id": "EMP-1"},
+        ]
+    )
+    students = pd.DataFrame(
+        [
+            {
+                "student_id": "STD-1",
+                "GF_FirstName": "سارا",
+                "کد ملی": "001",
+                "national_id": "999",
+            }
+        ]
+    )
+    mentors = pd.DataFrame(
+        [
+            {"mentor_id": "EMP-1", "mentor_name": "پشتیبان ۱"},
+        ]
+    )
+
+    with pytest.raises(ImportToSabtExportError) as excinfo:
+        prepare_allocation_export_frame(alloc, students, mentors)
+
+    assert "duplicate columns" in str(excinfo.value)
+
 def test_coalesce_duplicate_identifier_rows_handles_duplicate_columns() -> None:
     frame = pd.DataFrame(
         {
