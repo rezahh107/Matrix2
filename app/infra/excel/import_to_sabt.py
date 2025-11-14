@@ -116,6 +116,11 @@ def prepare_allocation_export_frame(
 
     students_prefixed = _prefix(students, "student_", {"student_id"})
     mentors_prefixed = _prefix(mentors, "mentor_", {"mentor_id"})
+    mentors_prefixed = _coalesce_duplicate_identifier_rows(
+        mentors_prefixed,
+        "mentor_id",
+        entity_name="mentor",
+    )
 
     _ensure_unique_identifier(students_prefixed, "student_id", entity_name="student")
     _ensure_unique_identifier(mentors_prefixed, "mentor_id", entity_name="mentor")
@@ -170,6 +175,53 @@ def _ensure_unique_identifier(frame: pd.DataFrame, column: str, *, entity_name: 
             f"{entity_name}_id values ({sample}). Each {entity_name}_id must be unique "
             "in ImportToSabt exporter inputs. لطفاً داده ورودی را اصلاح کنید."
         )
+
+
+def _coalesce_duplicate_identifier_rows(
+    frame: pd.DataFrame,
+    column: str,
+    *,
+    entity_name: str,
+) -> pd.DataFrame:
+    """ترکیب ردیف‌های تکراری بر اساس شناسه با حفظ ترتیب و پرکردن مقادیر خالی."""
+
+    if column not in frame.columns:
+        raise ImportToSabtExportError(
+            f"ImportToSabt export failed: '{column}' column not found for {entity_name} data."
+        )
+
+    normalized = frame[column].astype("string").fillna("").str.strip()
+    duplicate_mask = normalized.duplicated(keep=False) & normalized.ne("")
+    if not bool(duplicate_mask.any()):
+        return frame
+
+    merged_lookup: dict[str, dict[str, Any]] = {}
+    records: list[dict[str, Any]] = []
+    for idx, row in frame.iterrows():
+        identifier = normalized.iloc[idx]
+        if pd.isna(identifier) or str(identifier).strip() == "":
+            records.append(row.to_dict())
+            continue
+        key = str(identifier).strip()
+        existing = merged_lookup.get(key)
+        if existing is None:
+            data = row.to_dict()
+            merged_lookup[key] = data
+            records.append(data)
+            continue
+        for field, value in row.items():
+            if _is_missing_value(existing.get(field)) and not _is_missing_value(value):
+                existing[field] = value
+
+    return pd.DataFrame(records, columns=frame.columns)
+
+
+def _is_missing_value(value: Any) -> bool:
+    """تشخیص مقدار خالی با درنظر گرفتن رشتهٔ تهی و NaN."""
+
+    if isinstance(value, str):
+        return value.strip() == ""
+    return pd.isna(value)
 
 
 def _safe_merge(

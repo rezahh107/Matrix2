@@ -218,7 +218,7 @@ def test_prepare_allocation_export_frame_rejects_duplicate_students() -> None:
     assert "STD-1" in message
 
 
-def test_prepare_allocation_export_frame_rejects_duplicate_mentors() -> None:
+def test_prepare_allocation_export_frame_coalesces_duplicate_mentor_rows() -> None:
     alloc = pd.DataFrame([
         {"student_id": "STD-1", "mentor_id": "EMP-1"},
     ])
@@ -227,14 +227,20 @@ def test_prepare_allocation_export_frame_rejects_duplicate_mentors() -> None:
     ])
     mentors = pd.DataFrame(
         [
-            {"mentor_id": "EMP-1", "mentor_name": "پشتیبان ۱"},
-            {"mentor_id": "EMP-1", "mentor_name": "پشتیبان ۲"},
+            {
+                "mentor_id": "EMP-1",
+                "mentor_name": "",
+                "mentor_postal_code": "",
+            },
+            {
+                "mentor_id": "EMP-1",
+                "mentor_name": "پشتیبان نهایی",
+                "mentor_postal_code": "54321",
+            },
         ]
     )
 
-    with pytest.raises(ImportToSabtExportError) as excinfo:
-        prepare_allocation_export_frame(alloc, students, mentors)
+    merged = prepare_allocation_export_frame(alloc, students, mentors)
 
-    message = str(excinfo.value)
-    assert "duplicate" in message
-    assert "EMP-1" in message
+    assert merged.loc[0, "mentor_mentor_name"] == "پشتیبان نهایی"
+    assert merged.loc[0, "mentor_mentor_postal_code"] == "54321"
