@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from hashlib import blake2b
 from typing import Dict, Optional, Sequence
 
 import pandas as pd
@@ -20,7 +21,11 @@ __all__ = [
     "find_max_sequence_by_prefix",
     "gender_to_mid3",
     "infer_year_strict",
+    "normalize_digits",
     "pick_counter_sheet_name",
+    "stable_counter_hash",
+    "strip_hidden_chars",
+    "validate_counter",
     "year_to_yy",
 ]
 
@@ -29,6 +34,12 @@ _DIGIT_MAP = str.maketrans(
     "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩",
     "01234567890123456789",
 )
+
+_ZERO_WIDTH = {
+    ord("\u200c"): None,
+    ord("\u200d"): None,
+    ord("\ufeff"): None,
+}
 
 _COUNTER_SHEET_CANDIDATES = [
     "شمارنده",
@@ -68,7 +79,7 @@ def pick_counter_sheet_name(sheet_names: Sequence[str]) -> str | None:
 def _normalize_nat_id(value: object) -> str:
     """نرمال‌سازی کدملی به رشتهٔ ده‌رقمی بدون کاراکتر اضافی."""
 
-    text = ("" if value is None else str(value)).strip().translate(_DIGIT_MAP)
+    text = normalize_digits(("" if value is None else str(value)).strip())
     digits = re.sub(r"\D", "", text)
     return digits.zfill(10) if digits else ""
 
@@ -170,7 +181,7 @@ def build_registration_id(yy: int, mid3: str, sequence: int) -> str:
 
 
 def _extract_sequence(counter_value: object) -> Optional[int]:
-    text = ("" if counter_value is None else str(counter_value)).strip().translate(_DIGIT_MAP)
+    text = normalize_digits(("" if counter_value is None else str(counter_value)).strip())
     if re.fullmatch(r"\d{9}", text):
         return int(text[-4:])
     return None
@@ -222,7 +233,7 @@ def detect_academic_year_from_counters(
     series = (
         current_roster_df[column]
         .astype("string")
-        .map(lambda value: (value or "").strip().translate(_DIGIT_MAP))
+        .map(lambda value: normalize_digits((value or "").strip()))
     )
     for value in series:
         if value and re.fullmatch(r"\d{9}", value):
@@ -243,7 +254,7 @@ def infer_year_strict(current_roster_df: pd.DataFrame | None) -> Optional[int]:
     series = (
         current_roster_df[column]
         .astype("string")
-        .map(lambda value: (value or "").strip().translate(_DIGIT_MAP))
+        .map(lambda value: normalize_digits((value or "").strip()))
     )
 
     prefixes = {
@@ -277,7 +288,7 @@ def find_max_sequence_by_prefix(current_roster_df: pd.DataFrame | None, prefix: 
     series = (
         current_roster_df[column]
         .astype("string")
-        .map(lambda value: value.strip().translate(_DIGIT_MAP))
+        .map(lambda value: normalize_digits((value or "").strip()))
     )
     mask = series.str.startswith(prefix, na=False)
     sequences = [seq for seq in series[mask].map(_extract_sequence) if seq is not None]
@@ -294,9 +305,14 @@ def _prior_map(prior_roster_df: pd.DataFrame | None) -> Dict[str, str]:
     mapping: Dict[str, str] = {}
     for nat, counter_value in zip(prior_roster_df[nat_col], prior_roster_df[counter_col]):
         normalized = _normalize_nat_id(nat)
-        sequence = ("" if counter_value is None else str(counter_value)).strip().translate(_DIGIT_MAP)
-        if normalized and re.fullmatch(r"\d{9}", sequence):
-            mapping[normalized] = sequence
+        if not normalized:
+            continue
+        raw_counter = ("" if counter_value is None else str(counter_value)).strip()
+        try:
+            counter_clean = validate_counter(raw_counter)
+        except ValueError:
+            continue
+        mapping[normalized] = counter_clean
     return mapping
 
 
@@ -368,20 +384,24 @@ def assign_counters(
     new_male_count = 0
     new_female_count = 0
 
+    def _assign(index_label: object, counter_value: object) -> None:
+        normalized_counter = validate_counter(counter_value)
+        result.at[index_label] = normalized_counter
+
     for position in order:
         index_label = students_df.index[position]
         normalized_nat = work.iloc[position]["__nat__"]
         gender_value = int(work.iloc[position]["__gender__"])
 
         if normalized_nat in assigned_mapping:
-            result.at[index_label] = assigned_mapping[normalized_nat]
+            _assign(index_label, assigned_mapping[normalized_nat])
             reused_count += 1
             continue
 
         if normalized_nat in prior_mapping:
             counter_value = prior_mapping[normalized_nat]
-            result.at[index_label] = counter_value
-            assigned_mapping[normalized_nat] = counter_value
+            _assign(index_label, counter_value)
+            assigned_mapping[normalized_nat] = validate_counter(counter_value)
             reused_count += 1
             continue
 
@@ -402,8 +422,8 @@ def assign_counters(
             raise ValueError("جنسیت پشتیبانی‌نشده")
 
         counter_value = build_registration_id(yy, mid3, sequence)
-        result.at[index_label] = counter_value
-        assigned_mapping[normalized_nat] = counter_value
+        _assign(index_label, counter_value)
+        assigned_mapping[normalized_nat] = validate_counter(counter_value)
 
     result.attrs["counter_summary"] = {
         "reused_count": reused_count,
@@ -414,3 +434,31 @@ def assign_counters(
     }
 
     return result
+def strip_hidden_chars(value: str) -> str:
+    """حذف کاراکترهای صفرعرض و BOM از متن ورودی."""
+
+    return value.translate(_ZERO_WIDTH)
+
+
+def normalize_digits(value: str) -> str:
+    """تبدیل تمامی ارقام فارسی/عربی به لاتین."""
+
+    return value.translate(_DIGIT_MAP)
+
+
+def validate_counter(value: object) -> str:
+    """اعتبارسنجی شمارندهٔ ۹رقمی بر اساس SSoT."""
+
+    text = strip_hidden_chars(normalize_digits(str(value or "").strip()))
+    text = re.sub(r"\s+", "", text)
+    if not re.fullmatch(r"\d{9}", text):
+        raise ValueError("فرمت شمارنده معتبر نیست.")
+    return text
+
+
+def stable_counter_hash(counter_value: object) -> int:
+    """هش پایدار ۶۴بیتی بر اساس شمارندهٔ معتبر."""
+
+    normalized = validate_counter(counter_value)
+    digest = blake2b(normalized.encode("utf-8"), digest_size=8)
+    return int.from_bytes(digest.digest(), "big")

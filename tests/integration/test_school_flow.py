@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from app.core.allocate_students import _normalize_students
+from app.core.common.reasons import ReasonCode
 from app.core.common.trace import build_allocation_trace
 from app.core.policy_loader import load_policy
 
@@ -55,12 +56,15 @@ def test_trace_records_raw_and_normalized_school_code() -> None:
     assert stage["expected_threshold"] == 0
     assert stage["expected_value"] == 663
     extras = stage["extras"]
-    assert extras == {
+    expected = {
         "school_code_raw": "۶۶۳",
         "school_code_norm": 663,
         "school_status_resolved": True,
         "school_filter_applied": True,
     }
+    for key, value in expected.items():
+        assert extras[key] == value
+    assert extras["rule_reason_code"] == ReasonCode.OK
 
 
 def test_trace_for_normal_student_marks_false() -> None:
@@ -76,9 +80,12 @@ def test_trace_for_normal_student_marks_false() -> None:
     assert stage["expected_threshold"] == 0
     assert stage["expected_value"] == 0
     extras = stage["extras"]
-    assert extras == {
+    expected = {
         "school_code_raw": "0",
         "school_code_norm": 0,
         "school_status_resolved": False,
         "school_filter_applied": False,
     }
+    for key, value in expected.items():
+        assert extras[key] == value
+    assert extras["rule_reason_code"] == ReasonCode.OK

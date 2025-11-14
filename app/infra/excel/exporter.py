@@ -7,6 +7,8 @@ from typing import Dict, Iterable, Tuple
 
 import pandas as pd
 
+from app.core.common.logging_ext import log_step
+
 from .styles import build_font_config, ensure_openpyxl_named_style, ensure_xlsxwriter_format
 from .tables import (
     TableNameRegistry,
@@ -252,11 +254,12 @@ def write_selection_reasons_sheet(
     options = policy.emission.selection_reasons
     sheet_name = options.sheet_name
     columns = options.columns
-    sanitized = _sanitize_selection_reasons_frame(df_reasons, columns)
-    sanitized.attrs["schema_hash"] = options.schema_hash
+    with log_step(_LOGGER, "selection_reason_export"):
+        sanitized = _sanitize_selection_reasons_frame(df_reasons, columns)
+        sanitized.attrs["schema_hash"] = options.schema_hash
 
-    if writer is not None:
-        sanitized.to_excel(writer, sheet_name=sheet_name, index=False)
-        _set_schema_hash_defined_name(writer, options.schema_hash)
+        if writer is not None:
+            sanitized.to_excel(writer, sheet_name=sheet_name, index=False)
+            _set_schema_hash_defined_name(writer, options.schema_hash)
 
     return sheet_name, sanitized

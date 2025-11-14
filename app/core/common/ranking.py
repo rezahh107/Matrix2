@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import re
+from hashlib import blake2b
 from pathlib import Path
 from numbers import Number
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Sequence
 
 import pandas as pd
 
 from app.core.common.columns import canonicalize_headers
 from app.core.policy_loader import PolicyConfig, load_policy
 from .ids import ensure_ranking_columns
+from .reasons import ReasonCode, build_reason
 
 __all__ = [
     "natural_key",
@@ -128,6 +130,7 @@ def apply_ranking_policy(
 
     ranked = candidate_pool.copy()
     en_view = canonicalize_headers(ranked, header_mode="en")
+    state_source = en_view.copy()
 
     if "allocations_new" not in ranked.columns and "allocations_new" in en_view.columns:
         ranked["allocations_new"] = en_view["allocations_new"]
@@ -155,7 +158,7 @@ def apply_ranking_policy(
 
     state_view: Mapping[Any, Mapping[str, int]]
     state_view = (
-        state if state is not None else build_mentor_state(en_view, policy=policy)
+        state if state is not None else build_mentor_state(state_source, policy=policy)
     )
 
     def _state_value(mentor: Any, key: str) -> int:
@@ -189,6 +192,23 @@ def apply_ranking_policy(
         ascending_flags.append(bool(rule.ascending))
 
     ranked = ranked.sort_values(by=sort_columns, ascending=ascending_flags, kind="stable")
+    ranked = ranked.reset_index(drop=True)
+    tie_columns: Sequence[str]
+    if len(sort_columns) > 1:
+        tie_columns = tuple(sort_columns[:-1])
+    else:
+        tie_columns = tuple(sort_columns)
+    ranked["__fair_origin__"] = ranked.index
+    strategy = getattr(policy, "fairness_strategy", "none") or "none"
+    ranked, fairness_applied = _apply_fairness_strategy(
+        ranked,
+        strategy=strategy,
+        tie_columns=tie_columns,
+    )
+    if fairness_applied:
+        ranked.attrs["fairness_reason"] = build_reason(ReasonCode.FAIRNESS_ORDER)
+    ranked.attrs["fairness_strategy"] = strategy
+    ranked = ranked.drop(columns=["__fair_origin__"], errors="ignore")
     return ranked.reset_index(drop=True)
 
 
@@ -228,3 +248,90 @@ def consume_capacity(state: Dict[Any, Dict[str, int]], mentor_id: Any) -> tuple[
     occupancy_ratio = (initial - after) / denominator
     entry["occupancy_ratio"] = float(occupancy_ratio)
     return before, after, float(occupancy_ratio)
+
+
+_FAIRNESS_COUNTER_CANDIDATES: tuple[str, ...] = (
+    "counter",
+    "allocation_counter",
+    "student_id",
+    "row_number",
+    "شمارنده",
+)
+
+
+def _hash_counter_series(series: pd.Series) -> pd.Series:
+    from app.core.counter import stable_counter_hash, validate_counter
+
+    def _hash(value: object) -> int:
+        text = str(value or "").strip()
+        if not text:
+            text = "0"
+        try:
+            normalized = validate_counter(text)
+        except ValueError:
+            fallback = re.sub(r"\D", "", text) or text or "0"
+            digest = blake2b(fallback.encode("utf-8"), digest_size=8)
+            return int.from_bytes(digest.digest(), "big")
+        return stable_counter_hash(normalized)
+
+    return series.map(_hash)
+
+
+def _apply_deterministic_jitter(df: pd.DataFrame, tie_columns: Sequence[str]) -> pd.DataFrame:
+    source: pd.Series | None = None
+    for column in _FAIRNESS_COUNTER_CANDIDATES:
+        if column in df.columns:
+            source = df[column].astype("string")
+            break
+    if source is None:
+        source = df.index.astype("string")
+    jitter = _hash_counter_series(source)
+    order = list(tie_columns) + ["__fairness_key__"]
+    df = df.assign(__fairness_key__=jitter)
+    df = df.sort_values(order, kind="stable")
+    return df.drop(columns=["__fairness_key__"])
+
+
+def _hash_text(value: object) -> int:
+    text = str(value or "").strip() or "0"
+    digest = blake2b(text.encode("utf-8"), digest_size=8)
+    return int.from_bytes(digest.digest(), "big")
+
+
+def _apply_round_robin(df: pd.DataFrame, tie_columns: Sequence[str]) -> pd.DataFrame:
+    if "mentor_id_en" not in df.columns:
+        return df
+    groups = df.groupby(list(tie_columns), sort=False, group_keys=False)
+    frames: list[pd.DataFrame] = []
+    for _, block in groups:
+        if len(block) <= 1:
+            frames.append(block)
+            continue
+        block = block.copy()
+        block["__fairness_key__"] = block["mentor_id_en"].astype("string").map(_hash_text)
+        block = block.sort_values("__fairness_key__", kind="stable")
+        block = block.drop(columns=["__fairness_key__"])
+        frames.append(block)
+    if not frames:
+        return df
+    return pd.concat(frames, ignore_index=True)
+
+
+def _apply_fairness_strategy(
+    ranked: pd.DataFrame,
+    *,
+    strategy: str,
+    tie_columns: Sequence[str],
+) -> tuple[pd.DataFrame, bool]:
+    if strategy == "none" or ranked.empty or not tie_columns:
+        return ranked, False
+    working = ranked.copy()
+    original = tuple(working.get("__fair_origin__", working.index))
+    if strategy == "deterministic_jitter":
+        working = _apply_deterministic_jitter(working, tie_columns)
+    elif strategy == "round_robin":
+        working = _apply_round_robin(working, tie_columns)
+    else:
+        return ranked, False
+    applied = tuple(working.get("__fair_origin__", working.index)) != original
+    return working, applied

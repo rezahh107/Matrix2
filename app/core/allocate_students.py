@@ -27,6 +27,8 @@ from .common.filters import (
 from .common.ids import build_mentor_id_map, inject_mentor_id, natural_key
 from .common.normalization import normalize_fa, to_numlike_str
 from .common.ranking import apply_ranking_policy, build_mentor_state, consume_capacity
+from .common.reasons import ReasonCode, build_reason
+from .common.rules import Rule, default_stage_rule_map
 from .common.trace import TraceStagePlan, build_allocation_trace, build_trace_plan
 from .common.types import AllocationLogRecord, JoinKeyValues, TraceStageRecord
 from .policy_loader import PolicyConfig, load_policy
@@ -177,8 +179,33 @@ def _build_log_from_join_map(
         "suggested_actions": [],
         "capacity_before": None,
         "capacity_after": None,
+        "rule_reason_code": None,
+        "rule_reason_text": None,
+        "fairness_reason_code": None,
+        "fairness_reason_text": None,
     }
     return log
+
+
+def _derive_rule_reason(trace: Sequence[TraceStageRecord]) -> tuple[str, str]:
+    """تعیین کد/متن دلیل بر اساس اولین مرحلهٔ رد."""
+
+    fallback = build_reason(ReasonCode.OK)
+    if not trace:
+        return fallback.code, fallback.message_fa
+    for record in trace:
+        extras = record.get("extras") or {}
+        code = extras.get("rule_reason_code")
+        message = extras.get("rule_reason_text")
+        after = int(record.get("total_after", 0))
+        if code and (not record.get("matched") or after == 0):
+            return str(code), str(message or fallback.message_fa)
+    tail_extras = trace[-1].get("extras") or {}
+    code = tail_extras.get("rule_reason_code")
+    message = tail_extras.get("rule_reason_text")
+    if code:
+        return str(code), str(message or fallback.message_fa)
+    return fallback.code, fallback.message_fa
 
 
 def _build_log_base(
@@ -287,6 +314,7 @@ def allocate_student(
     progress: ProgressFn = _noop_progress,
     capacity_column: str | None = None,
     trace_plan: Sequence[TraceStagePlan] | None = None,
+    stage_rules: Mapping[TraceStageLiteral, Rule] | None = None,
     state: Dict[object, Dict[str, int]] | None = None,
     pool_state_view: pd.DataFrame | None = None,
 ) -> AllocationResult:
@@ -296,6 +324,8 @@ def allocate_student(
     resolved_capacity_column = _resolve_capacity_column(policy, capacity_column)
     if trace_plan is None:
         trace_plan = build_trace_plan(policy, capacity_column=resolved_capacity_column)
+    if stage_rules is None:
+        stage_rules = default_stage_rule_map()
 
     join_map, missing_columns = _collect_join_key_map(student, policy)
 
@@ -319,7 +349,9 @@ def allocate_student(
         policy=policy,
         stage_plan=trace_plan,
         capacity_column=resolved_capacity_column,
+        stage_rules=stage_rules,
     )
+    rule_reason_code, rule_reason_text = _derive_rule_reason(trace)
 
     try:
         log = _build_log_base(
@@ -330,6 +362,12 @@ def allocate_student(
         )
     except JoinKeyDataMissingError as exc:
         log = _build_log_from_join_map(student, exc.join_map)
+        log.update(
+            {
+                "rule_reason_code": rule_reason_code,
+                "rule_reason_text": rule_reason_text,
+            }
+        )
         log["candidate_count"] = int(eligible.shape[0])
         log["stage_candidate_counts"] = dict(stage_candidate_counts)
         missing_text = ", ".join(exc.missing_columns)
@@ -347,6 +385,8 @@ def allocate_student(
 
     log["candidate_count"] = int(eligible.shape[0])
     log["stage_candidate_counts"] = dict(stage_candidate_counts)
+    log["rule_reason_code"] = rule_reason_code
+    log["rule_reason_text"] = rule_reason_text
 
     if eligible.empty:
         log.update(
@@ -411,6 +451,16 @@ def allocate_student(
         )
     )
     ranked = apply_ranking_policy(ranking_input, state=active_state, policy=policy)
+    fairness_reason = ranked.attrs.get("fairness_reason")
+    if fairness_reason is not None:
+        fairness_code = getattr(fairness_reason, "code", None)
+        fairness_message = getattr(fairness_reason, "message_fa", None)
+        log["fairness_reason_code"] = fairness_code
+        if fairness_code and fairness_message:
+            formatted = f"[{fairness_code}] {fairness_message}"
+        else:
+            formatted = fairness_message
+        log["fairness_reason_text"] = formatted
 
     chosen_row = ranked.iloc[0].copy()
     chosen_index = chosen_row["__candidate_index__"]
@@ -540,6 +590,7 @@ def allocate_batch(
     allocations: List[Mapping[str, object]] = []
     logs: List[AllocationLogRecord] = []
     trace_rows: List[Mapping[str, object]] = []
+    stage_rules = default_stage_rule_map()
 
     total = max(int(students_norm.shape[0]), 1)
     trace_plan = build_trace_plan(policy, capacity_column=resolved_capacity_column)
@@ -555,6 +606,7 @@ def allocate_batch(
             progress=_noop_progress,
             capacity_column=resolved_capacity_column,
             trace_plan=trace_plan,
+            stage_rules=stage_rules,
             state=mentor_state,
             pool_state_view=pool_internal,
         )

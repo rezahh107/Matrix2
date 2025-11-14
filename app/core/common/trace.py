@@ -32,9 +32,15 @@ import pandas as pd
 from ..policy_loader import PolicyConfig, load_policy
 from .filters import filter_school_by_value, resolve_student_school_code
 from .columns import normalize_bool_like, to_int64
+from .rules import Rule, RuleContext, apply_rule, default_stage_rule_map
 from .types import StudentRow, TraceStageLiteral, TraceStageRecord
 
-__all__ = ["TraceStagePlan", "build_trace_plan", "build_allocation_trace"]
+__all__ = [
+    "TraceStagePlan",
+    "build_trace_plan",
+    "build_stage_rule_map",
+    "build_allocation_trace",
+]
 
 
 _CANONICAL_TRACE_ORDER: tuple[TraceStageLiteral, ...] = (
@@ -97,6 +103,31 @@ def _ensure_columns(pool: pd.DataFrame, columns: Iterable[str]) -> None:
     missing = [col for col in columns if col not in pool.columns]
     if missing:
         raise KeyError(f"Missing columns in candidate pool: {missing}")
+
+
+def build_stage_rule_map(_: PolicyConfig | None = None) -> Mapping[TraceStageLiteral, Rule]:
+    """برگرداندن نگاشت مرحله→Rule پیش‌فرض."""
+
+    return default_stage_rule_map()
+
+
+def _apply_stage_rule(
+    record: TraceStageRecord,
+    stage_rules: Mapping[TraceStageLiteral, Rule],
+    student: Mapping[str, object],
+) -> None:
+    rule = stage_rules.get(record["stage"])
+    if rule is None:
+        return
+    context = RuleContext(stage_record=record, student=student)
+    result = apply_rule(rule, context)
+    extras = dict(record.get("extras") or {})
+    extras["rule_reason_code"] = result.reason.code
+    extras["rule_reason_text"] = result.reason.message_fa
+    extras["rule_passed"] = result.passed
+    if result.details:
+        extras["rule_details"] = dict(result.details)
+    record["extras"] = extras
 
 
 def _filter_stage(frame: pd.DataFrame, column: str, value: object) -> pd.DataFrame:
@@ -200,6 +231,7 @@ def build_allocation_trace(
     policy: PolicyConfig | None = None,
     stage_plan: Sequence[TraceStagePlan] | None = None,
     capacity_column: str = "remaining_capacity",
+    stage_rules: Mapping[TraceStageLiteral, Rule] | None = None,
 ) -> List[TraceStageRecord]:
     """ایجاد تریس ۸ مرحله‌ای مطابق Policy."""
 
@@ -208,6 +240,10 @@ def build_allocation_trace(
 
     if stage_plan is None:
         stage_plan = build_trace_plan(policy, capacity_column=capacity_column)
+
+    resolved_rules = (
+        dict(stage_rules) if stage_rules is not None else dict(build_stage_rule_map(policy))
+    )
 
     non_capacity_plan = [plan for plan in stage_plan if plan.stage != "capacity_gate"]
     capacity_stage = next((plan for plan in stage_plan if plan.stage == "capacity_gate"), None)
@@ -249,6 +285,7 @@ def build_allocation_trace(
                 extras=extras,
             )
         )
+        _apply_stage_rule(trace[-1], resolved_rules, student)
         current = filtered
 
     before_capacity = int(current.shape[0])
@@ -266,4 +303,5 @@ def build_allocation_trace(
             extras=None,
         )
     )
+    _apply_stage_rule(trace[-1], resolved_rules, student)
     return trace
