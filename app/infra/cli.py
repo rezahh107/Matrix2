@@ -238,32 +238,44 @@ def _safe_json_dumps(x) -> str:
         return str(x)
 
 def _coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    ادغام ستون‌های تکراری در یک دیتافریم با روش کاملاً ایمن
-    
-    این تابع تمام ستون‌هایی که نام یکسان دارند را ادغام می‌کند و فقط یک نمونه از هر نام ستون نگه می‌دارد.
-    """
+    """ادغام امن ستون‌های تکراری حتی با نام‌های تهی/NaN."""
+
     if df.empty or not any(df.columns.duplicated()):
         return df.copy()
-    
-    # ایجاد یک DataFrame جدید برای نتایج
+
     result_df = pd.DataFrame(index=df.index)
-    
-    # پردازش هر نام ستون منحصر به فرد
-    unique_columns = df.columns.unique()
-    for col_name in unique_columns:
-        # گرفتن تمام ستون‌هایی که این نام را دارند
-        cols_with_name = df.loc[:, df.columns == col_name]
-        
-        if cols_with_name.shape[1] == 1:
-            # اگر فقط یک ستون با این نام وجود داشت
-            result_df[col_name] = cols_with_name.iloc[:, 0]
-        else:
-            # اگر چند ستون با این نام وجود داشت
-            # استفاده از bfill برای پر کردن مقادیر خالی با مقادیر بعدی
-            filled = cols_with_name.bfill(axis=1)
-            result_df[col_name] = filled.iloc[:, 0]
-    
+
+    def _label_key(label: object) -> tuple[str, object | None]:
+        try:
+            if pd.isna(label):
+                return ("__nan__", None)
+        except TypeError:
+            # برچسب‌های ناسازگار (مثل لیست) برابر None فرض می‌شوند
+            return ("__nan__", None)
+        return ("value", label)
+
+    groups: dict[tuple[str, object | None], list[int]] = {}
+    representatives: dict[tuple[str, object | None], object] = {}
+    for idx, column in enumerate(df.columns):
+        key = _label_key(column)
+        if key not in groups:
+            groups[key] = []
+            representatives[key] = column
+        groups[key].append(idx)
+
+    for key, positions in groups.items():
+        subset = df.iloc[:, positions]
+        if subset.shape[1] == 0:
+            result_df[representatives[key]] = pd.Series(
+                [pd.NA] * len(df), index=df.index
+            )
+            continue
+        if subset.shape[1] == 1:
+            result_df[representatives[key]] = subset.iloc[:, 0]
+            continue
+        filled = subset.bfill(axis=1)
+        result_df[representatives[key]] = filled.iloc[:, 0]
+
     return result_df
 
 def _is_complex_safe(x) -> bool:

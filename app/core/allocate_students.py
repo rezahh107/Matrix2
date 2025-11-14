@@ -462,11 +462,80 @@ def allocate_student(
             formatted = fairness_message
         log["fairness_reason_text"] = formatted
 
-    chosen_row = ranked.iloc[0].copy()
+    if ranked.empty:
+        log.update(
+            {
+                "detailed_reason": "Ranking policy returned no candidates",
+                "error_type": "INTERNAL_ERROR",
+                "suggested_actions": [
+                    "بازبینی دادهٔ استخر پشتیبان",
+                    "بررسی قوانین رتبه‌بندی",
+                ],
+            }
+        )
+        return AllocationResult(None, trace, log)
+
+    try:
+        first_ranked = ranked.head(1)
+    except Exception:  # pragma: no cover - defensive, head() should not fail
+        first_ranked = ranked.iloc[:1]
+    if first_ranked.empty:
+        log.update(
+            {
+                "detailed_reason": "Ranked candidates lost during extraction",
+                "error_type": "INTERNAL_ERROR",
+                "suggested_actions": [
+                    "بازبینی خروجی apply_ranking_policy",
+                    "بررسی دادهٔ استخر پس از رتبه‌بندی",
+                ],
+            }
+        )
+        return AllocationResult(None, trace, log)
+
+    try:
+        chosen_row = first_ranked.iloc[0].copy()
+    except IndexError:
+        log.update(
+            {
+                "detailed_reason": "Ranked candidates missing despite non-empty frame",
+                "error_type": "INTERNAL_ERROR",
+                "suggested_actions": [
+                    "بازبینی منطق رتبه‌بندی",
+                    "بررسی فیلترهای capacity",
+                ],
+            }
+        )
+        return AllocationResult(None, trace, log)
+
     chosen_index = chosen_row["__candidate_index__"]
     ranked = ranked.drop(columns=["__candidate_index__"], errors="ignore")
     ranked_en = canonicalize_headers(ranked, header_mode=policy.excel.header_mode_internal)
-    chosen_en = ranked_en.iloc[0]
+    if ranked_en.empty:
+        log.update(
+            {
+                "detailed_reason": "Canonicalization returned empty ranked view",
+                "error_type": "INTERNAL_ERROR",
+                "suggested_actions": [
+                    "بازبینی canonicalize_headers",
+                    "هماهنگی schema استخر با Policy",
+                ],
+            }
+        )
+        return AllocationResult(None, trace, log)
+    try:
+        chosen_en = ranked_en.iloc[0]
+    except IndexError:
+        log.update(
+            {
+                "detailed_reason": "Unable to read ranked row after canonicalization",
+                "error_type": "INTERNAL_ERROR",
+                "suggested_actions": [
+                    "بازبینی stage رتبه‌بندی",
+                    "بررسی canonicalize_headers",
+                ],
+            }
+        )
+        return AllocationResult(None, trace, log)
 
     mentor_identifier = chosen_row.get("mentor_id_en", chosen_en.get("mentor_id"))
     state_entry_snapshot = active_state.get(mentor_identifier, {}) if active_state else {}
@@ -616,13 +685,14 @@ def allocate_batch(
 
         if result.mentor_row is not None:
             chosen_index = result.mentor_row.name
-            mentor_row_en = canonicalize_headers(
-                result.mentor_row.to_frame().T, header_mode=policy.excel.header_mode_internal
-            ).iloc[0]
-            mentor_identifier = mentor_row_en.get("mentor_id")
+            mentor_identifier = str(result.log.get("mentor_id", "")).strip() or str(
+                result.mentor_row.get("کد کارمندی پشتیبان", "")
+            ).strip()
             state_entry = mentor_state.get(mentor_identifier)
             if state_entry is None:
-                raise KeyError(f"Mentor '{mentor_identifier}' missing from state after allocation")
+                raise KeyError(
+                    f"Mentor '{mentor_identifier}' missing from state after allocation"
+                )
             pool_internal.loc[chosen_index, capacity_internal] = state_entry["remaining"]
             if (
                 capacity_internal != "remaining_capacity"
@@ -655,7 +725,7 @@ def allocate_batch(
                 {
                     "student_id": student_dict.get("student_id", ""),
                     "mentor": result.mentor_row.get("پشتیبان", ""),
-                    "mentor_id": mentor_row_en.get("mentor_id", ""),
+                    "mentor_id": mentor_identifier,
                 }
             )
 
