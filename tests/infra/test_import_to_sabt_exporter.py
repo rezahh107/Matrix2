@@ -20,6 +20,7 @@ from app.infra.excel.import_to_sabt import (  # noqa: E402
     load_exporter_config,
     prepare_allocation_export_frame,
     write_import_to_sabt_excel,
+    _coalesce_duplicate_identifier_rows,
 )
 
 
@@ -244,3 +245,22 @@ def test_prepare_allocation_export_frame_coalesces_duplicate_mentor_rows() -> No
 
     assert merged.loc[0, "mentor_mentor_name"] == "پشتیبان نهایی"
     assert merged.loc[0, "mentor_mentor_postal_code"] == "54321"
+
+def test_coalesce_duplicate_identifier_rows_handles_duplicate_columns() -> None:
+    frame = pd.DataFrame(
+        {
+            "student_id": ["A1", "A1"],
+            "value": [pd.NA, "filled"],
+        }
+    )
+    frame.insert(0, "dup_id", frame["student_id"])
+    frame.columns = ["student_id", "student_id", "value"]
+
+    result = _coalesce_duplicate_identifier_rows(
+        frame,
+        "student_id",
+        entity_name="student",
+    )
+
+    assert result.shape[0] == 1
+    assert result.loc[result.index[0], "value"] == "filled"
