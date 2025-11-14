@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 import pandas as pd
 
@@ -20,6 +20,7 @@ from app.core.common.policy import (
     load_selection_reason_policy,
 )
 from app.core.common.ranking import natural_key
+from app.core.common.reasons import ReasonCode, reason_message
 from app.core.common.reasoning import summarize_trace_steps
 from app.core.policy_loader import PolicyConfig
 
@@ -108,6 +109,40 @@ def _format_capacity_text(
     if remaining_capacity:
         segments.append(f"remaining={remaining_capacity}")
     return "، ".join(segments)
+
+
+def _normalize_reason_payload(
+    code_value: object | None, message_value: object | None
+) -> tuple[str | None, str | None]:
+    """نرمال‌سازی کد/پیام دلیل برای استفاده در selection_reason."""
+
+    code_text = str(code_value).strip() if code_value not in (None, "") else None
+    message_text = str(message_value).strip() if message_value not in (None, "") else None
+    if code_text:
+        try:
+            enum_value = ReasonCode(code_text)
+        except ValueError:
+            return code_text, message_text
+        message_text = message_text or reason_message(enum_value)
+        return enum_value.value, message_text
+    return code_text, message_text
+
+
+def _resolve_fairness_text(log_data: Mapping[str, Any]) -> str | None:
+    """ساخت متن عدالت با حفظ فرمت موجود و fallback بر اساس ReasonCode."""
+
+    fairness_text_raw = log_data.get("fairness_reason_text")
+    if fairness_text_raw not in (None, ""):
+        return str(fairness_text_raw)
+    code = log_data.get("fairness_reason_code")
+    if not code:
+        return None
+    resolved_code, resolved_message = _normalize_reason_payload(code, None)
+    if resolved_code and resolved_message:
+        return f"[{resolved_code}] {resolved_message}".strip()
+    if resolved_code:
+        return f"[{resolved_code}]"
+    return resolved_message
 
 
 def _build_tiebreak_text(policy: PolicyConfig, labels: SelectionReasonLabels) -> str:
@@ -394,6 +429,20 @@ def build_selection_reason_rows(
             ),
             config,
         )
+        rule_code_raw = log_data.get("rule_reason_code")
+        rule_message_raw = log_data.get("rule_reason_text")
+        rule_code, rule_message = _normalize_reason_payload(rule_code_raw, rule_message_raw)
+        fairness_text = _resolve_fairness_text(log_data)
+        reason_segments = [reason_text]
+        if rule_code and rule_message:
+            reason_segments.append(
+                fa_digitize(
+                    sanitize_bidi(f"دلیل Policy: [{rule_code}] {rule_message}")
+                )
+            )
+        if fairness_text:
+            reason_segments.append(fa_digitize(sanitize_bidi(f"عدالت: {fairness_text}")))
+        reason_text = " — ".join(segment for segment in reason_segments if segment)
 
         records.append(
             {

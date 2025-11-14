@@ -99,6 +99,12 @@ _RANKING_RULE_LIBRARY: Mapping[str, tuple[str, bool]] = {
     "min_mentor_id": ("mentor_sort_key", True),
 }
 
+_VALID_FAIRNESS_STRATEGIES: tuple[str, ...] = (
+    "none",
+    "deterministic_jitter",
+    "round_robin",
+)
+
 
 @dataclass(frozen=True)
 class PolicyColumns:
@@ -198,6 +204,7 @@ class PolicyConfig:
     virtual_alias_ranges: Tuple[Tuple[int, int], ...]
     virtual_name_patterns: Tuple[str, ...]
     emission: EmissionOptions
+    fairness_strategy: str
 
     @property
     def ranking(self) -> List[str]:
@@ -296,6 +303,9 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     excel = _normalize_excel_options(data.get("excel"))
     virtual_alias_ranges = _normalize_virtual_alias_ranges(data["virtual_alias_ranges"])
     virtual_name_patterns = _normalize_virtual_name_patterns(data["virtual_name_patterns"])
+    fairness_strategy = _normalize_fairness_strategy(
+        data.get("fairness_strategy") or data.get("fairness")
+    )
 
     return {
         "version": version,
@@ -318,6 +328,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "virtual_alias_ranges": virtual_alias_ranges,
         "virtual_name_patterns": virtual_name_patterns,
         "emission": data.get("emission", {}),
+        "fairness_strategy": fairness_strategy,
     }
 
 
@@ -356,6 +367,22 @@ def _normalize_finance_variants(value: object) -> tuple[int, ...]:
         missing = sorted(required.difference(seen))
         raise ValueError(f"finance_variants missing required codes: {missing}")
     return tuple(unique)
+
+
+def _normalize_fairness_strategy(value: object) -> str:
+    if value is None:
+        return "none"
+    candidate: object
+    if isinstance(value, Mapping):
+        candidate = value.get("strategy", "none")
+    else:
+        candidate = value
+    text = str(candidate).strip().lower()
+    if text not in _VALID_FAIRNESS_STRATEGIES:
+        raise ValueError(
+            "fairness_strategy must be one of " + ", ".join(_VALID_FAIRNESS_STRATEGIES)
+        )
+    return text
 
 
 def _normalize_center_map(value: object) -> Mapping[str, int]:
@@ -685,6 +712,7 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         ),
         virtual_name_patterns=tuple(str(item) for item in data["virtual_name_patterns"]),
         emission=_to_emission_options(data.get("emission", {})),
+        fairness_strategy=str(data.get("fairness_strategy", "none")),
     )
 
 

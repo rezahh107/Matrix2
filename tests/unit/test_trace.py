@@ -248,6 +248,7 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
                 schema_hash="hash",
             )
         ),
+        fairness_strategy="none",
     )
 
     with pytest.raises(ValueError, match="canonical 8-stage order"):

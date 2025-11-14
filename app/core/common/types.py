@@ -147,6 +147,10 @@ class AllocationLogRecord(TypedDict, total=False):
     capacity_before: Optional[int]
     capacity_after: Optional[int]
     stage_candidate_counts: Dict[str, int]
+    rule_reason_code: Optional[str]
+    rule_reason_text: Optional[str]
+    fairness_reason_code: Optional[str]
+    fairness_reason_text: Optional[str]
 
 
 TraceStageLiteral = Literal[

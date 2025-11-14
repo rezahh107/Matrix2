@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import List, Tuple
 
@@ -188,6 +189,24 @@ def test_allocate_batch_progress_reports_start_and_end(_base_pool: pd.DataFrame)
     assert progress_calls[0][1] == "start"
     assert any(pct == 100 for pct, _ in progress_calls)
     assert progress_calls[-1][1] == "done"
+
+
+def test_allocate_student_records_fairness_reason_code(_base_pool: pd.DataFrame) -> None:
+    policy = load_policy()
+    policy = replace(policy, fairness_strategy="deterministic_jitter")
+    pool = _base_pool.assign(
+        occupancy_ratio=[0.0, 0.0],
+        allocations_new=[0, 0],
+        counter=["543570002", "543570001"],
+    )
+
+    student_row = _single_student().iloc[0].to_dict()
+
+    result = allocate_student(student_row, pool, policy=policy)
+
+    assert result.log["fairness_reason_code"] == "FAIRNESS_ORDER"
+    fairness_text = result.log.get("fairness_reason_text") or ""
+    assert "[FAIRNESS_ORDER]" in fairness_text
 
 
 def test_join_key_values_validates_length() -> None:
