@@ -10,13 +10,16 @@ import logging
 import atexit
 import traceback
 import getpass
+from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, NoReturn
+from types import TracebackType
+from typing import Callable
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt, QSharedMemory, QTimer
 
 from app.infra.logging import LoggingContext, configure_logging, install_exception_hook
 from app.ui.fonts import apply_default_font
+from app.utils.path_utils import get_log_directory
 
 
 __version__ = "1.0.1"
@@ -27,6 +30,7 @@ __description__ = "سیستم تخصیص دانشجو-منتور"
 logger = logging.getLogger("app.ui.main")
 _LOGGING_CONTEXT: LoggingContext | None = None
 _RESTORE_EXCEPTION_HOOK: Callable[[], None] | None = None
+_RESTORE_GUI_EXCEPTION_HOOK: Callable[[], None] | None = None
 
 
 def _bootstrap_logging() -> LoggingContext:
@@ -72,6 +76,68 @@ def _log_startup_exception(
         extra={"error_id": error_id, "report_path": str(report_path)},
     )
     return error_id, report_path
+
+
+def _write_gui_crash_log(traceback_text: str) -> Path:
+    """ثبت استک‌تریس در فایل سادهٔ کاربر برای اشکال‌زدایی."""
+
+    log_dir = get_log_directory()
+    log_file = log_dir / "gui_crash.log"
+    timestamp = datetime.now().isoformat(timespec="seconds")
+    payload = [
+        "=" * 60,
+        f"timestamp={timestamp}",
+        f"python={sys.version.split()[0]}",
+        "traceback:",
+        traceback_text.strip(),
+        "",
+    ]
+    with log_file.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(payload))
+    return log_file
+
+
+def _show_gui_crash_dialog(log_path: Path) -> None:
+    """نمایش پیام کاربرپسند در صورت بروز خطای غیرمنتظره."""
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    box = QMessageBox()
+    box.setIcon(QMessageBox.Icon.Critical)
+    box.setWindowTitle("خطای برنامه")
+    box.setText("یک خطای غیرمنتظره رخ داد و برنامه متوقف می‌شود.")
+    box.setInformativeText(
+        "جزئیات کامل در فایل لاگ ذخیره شده است.\n"
+        f"مسیر فایل: {log_path}"
+    )
+    box.setStandardButtons(QMessageBox.StandardButton.Ok)
+    box.exec()
+    QTimer.singleShot(0, app.quit)
+
+
+def _install_gui_exception_guard() -> Callable[[], None]:
+    """نصب هوک برای نمایش پیام فارسی در خطاهای کنترل‌نشده."""
+
+    previous_hook = sys.excepthook
+
+    def _handle_exception(
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        if issubclass(exc_type, KeyboardInterrupt):
+            previous_hook(exc_type, exc_value, exc_tb)
+            return
+        traceback_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        log_path = _write_gui_crash_log(traceback_text)
+        _show_gui_crash_dialog(log_path)
+        previous_hook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _handle_exception
+
+    def restore() -> None:
+        sys.excepthook = previous_hook
+
+    return restore
 
 
 def setup_environment() -> None:
@@ -313,6 +379,9 @@ def main() -> int:
         int: کد خروج (0 = موفق، 1 = خطا)
     """
     context = _bootstrap_logging()
+    global _RESTORE_GUI_EXCEPTION_HOOK
+    if _RESTORE_GUI_EXCEPTION_HOOK is None:
+        _RESTORE_GUI_EXCEPTION_HOOK = _install_gui_exception_guard()
     guard = None
     app = None
     
@@ -404,7 +473,16 @@ def main() -> int:
         if _RESTORE_EXCEPTION_HOOK:
             _RESTORE_EXCEPTION_HOOK()
             _RESTORE_EXCEPTION_HOOK = None
+        if _RESTORE_GUI_EXCEPTION_HOOK:
+            _RESTORE_GUI_EXCEPTION_HOOK()
+            _RESTORE_GUI_EXCEPTION_HOOK = None
+
+
+def run() -> None:
+    """اجرای برنامه به عنوان تابع قابل استفاده در entry-point ها."""
+
+    sys.exit(main())
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    run()
