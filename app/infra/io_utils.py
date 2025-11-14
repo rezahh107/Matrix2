@@ -73,6 +73,28 @@ def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     flattened = ["__".join(map(str, level)).strip() for level in df.columns.to_flat_index()]
     cleaned = [col if col else "column" for col in flattened]
+    column_count = df.shape[1]
+    if len(cleaned) != column_count:
+        warnings.warn(
+            "Flattened column count mismatch: axis has "
+            f"{column_count} columns but generated {len(cleaned)} labels; "
+            "falling back to safe string conversion.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+        def _safe_name(column: object, position: int) -> str:
+            if isinstance(column, tuple):
+                parts = [str(part).strip() for part in column if str(part).strip()]
+                candidate = "__".join(parts).strip("_")
+            else:
+                candidate = str(column).strip()
+            if not candidate:
+                candidate = f"column_{position + 1}"
+            return candidate
+
+        cleaned = [_safe_name(column, idx) for idx, column in enumerate(df.columns)]
+
     return df.copy().set_axis(cleaned, axis="columns")
 
 
