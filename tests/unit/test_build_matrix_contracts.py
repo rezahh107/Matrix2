@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from app.core.build_matrix import BuildConfig, _validate_alias_contract, _validate_school_code_contract
+from app.core.build_matrix import (
+    BuildConfig,
+    _resolve_mentor_id_series,
+    _validate_alias_contract,
+    _validate_school_code_contract,
+)
 
 
 def test_validate_alias_contract_handles_duplicate_columns() -> None:
@@ -31,3 +36,17 @@ def test_validate_school_code_contract_handles_duplicate_row_types() -> None:
     matrix.columns = ["عادی مدرسه", "عادی مدرسه", "کد مدرسه"]
 
     _validate_school_code_contract(matrix, school_code_col="کد مدرسه")
+
+
+def test_resolve_mentor_id_series_coalesces_duplicate_columns() -> None:
+    mentor_df = pd.DataFrame(
+        {
+            "کد کارمندی پشتیبان": ["", ""],
+            "mentor_alias": ["EMP-1", "EMP-2"],
+        }
+    )
+    mentor_df.columns = ["کد کارمندی پشتیبان", "کد کارمندی پشتیبان"]
+
+    result = _resolve_mentor_id_series(mentor_df)
+
+    assert result.tolist() == ["EMP-1", "EMP-2"]

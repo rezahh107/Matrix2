@@ -1219,6 +1219,17 @@ def _explode_rows(
 # =============================================================================
 # BUILD MATRIX
 # =============================================================================
+
+
+def _resolve_mentor_id_series(values: pd.Series | pd.DataFrame) -> pd.Series:
+    """Normalize mentor-id selections, coalescing duplicate columns when needed."""
+
+    if isinstance(values, pd.DataFrame):
+        trimmed = values.astype("string").apply(lambda col: col.str.strip())
+        return trimmed.replace("", pd.NA).bfill(axis=1).iloc[:, 0].fillna("")
+    return values.astype("string").fillna("").str.strip()
+
+
 def build_matrix(
     insp_df: pd.DataFrame,
     schools_df: pd.DataFrame,
@@ -1293,8 +1304,8 @@ def build_matrix(
 
     # generate rows
     progress(30, "preparing vectorized base rows")
-    mentor_source = ensure_series(insp[COL_MENTOR_ID])
-    mentor_id_series = mentor_source.astype("string").fillna("").str.strip()
+    mentor_id_series = _resolve_mentor_id_series(insp[COL_MENTOR_ID])
+    insp.loc[:, COL_MENTOR_ID] = mentor_id_series
     invalid_mask = mentor_id_series.eq("")
     invalid_mentors_df = pd.DataFrame(
         {
