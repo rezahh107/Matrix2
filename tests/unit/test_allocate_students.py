@@ -244,6 +244,39 @@ def test_allocate_student_handles_empty_ranking(
     assert "Ranking policy returned no candidates" in str(result.log["detailed_reason"])
 
 
+def test_allocate_student_handles_canonicalization_empty(
+    monkeypatch: pytest.MonkeyPatch, _base_pool: pd.DataFrame
+) -> None:
+    student = _single_student().iloc[0].to_dict()
+
+    import app.core.allocate_students as module
+
+    original_canonicalize = module.canonicalize_headers
+    original_apply_ranking = module.apply_ranking_policy
+
+    def _mark_ranked(*args: object, **kwargs: object) -> pd.DataFrame:
+        ranked = original_apply_ranking(*args, **kwargs)
+        ranked["__force_canon_empty__"] = 1
+        return ranked
+
+    def _empty_ranked(df: pd.DataFrame, **kwargs: object) -> pd.DataFrame:
+        result = original_canonicalize(df, **kwargs)
+        if isinstance(df, pd.DataFrame) and "__force_canon_empty__" in df.columns:
+            return result.iloc[0:0]
+        return result
+
+    monkeypatch.setattr(module, "apply_ranking_policy", _mark_ranked)
+    monkeypatch.setattr(module, "canonicalize_headers", _empty_ranked)
+
+    result = allocate_student(student, _base_pool)
+
+    assert result.mentor_row is None
+    assert result.log["error_type"] == "INTERNAL_ERROR"
+    assert "Canonicalization returned empty ranked view" in str(
+        result.log["detailed_reason"]
+    )
+
+
 def test_allocate_batch_progress_reports_start_and_end(_base_pool: pd.DataFrame) -> None:
     students = pd.concat([_single_student(), _single_student(student_id="STD-002")], ignore_index=True)
     progress_calls: List[Tuple[int, str]] = []
