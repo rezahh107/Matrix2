@@ -29,7 +29,7 @@ __all__ = [
     "enrich_school_columns_en",
 ]
 
-Source = Literal["report", "inspactor", "school"]
+Source = Literal["report", "inspactor", "school", "matrix"]
 HeaderMode = Literal["fa", "en", "fa_en"]
 
 
@@ -103,6 +103,27 @@ CANON_FA_TO_EN: Mapping[str, str] = {
 # ---------------------------------------------------------------------------
 # Base alias maps (Policy-first; extensible via policy.column_aliases)
 # ---------------------------------------------------------------------------
+_INSPACTOR_ALIASES: Mapping[str, str] = {
+    "کد رشته": "کدرشته",
+    "کد گروه آزمایشی": "کدرشته",
+    "کدپستی": "کدپستی",
+    "کد پستی": "کدپستی",
+    "کد کارمندی پشتیبان": "کد کارمندی پشتیبان",
+    "mentor_id": "کد کارمندی پشتیبان",
+    "نام مدرسه 1": "نام مدرسه 1",
+    "نام مدرسه 2": "نام مدرسه 2",
+    "نام مدرسه 3": "نام مدرسه 3",
+    "نام مدرسه 4": "نام مدرسه 4",
+    "کد مدرسه 1": "کد مدرسه 1",
+    "کد مدرسه 2": "کد مدرسه 2",
+    "کد مدرسه 3": "کد مدرسه 3",
+    "کد مدرسه 4": "کد مدرسه 4",
+    "کد کامل مدرسه": "کد کامل مدرسه",
+    "تعداد مدارس تحت پوشش": "تعداد مدارس تحت پوشش",
+    "تعداد داوطلبان تحت پوشش": "تعداد داوطلبان تحت پوشش",
+    "تعداد تحت پوشش خاص": "تعداد تحت پوشش خاص",
+}
+
 ALIASES_DEFAULT: Mapping[Source, Mapping[str, str]] = {
     "report": {
         "وضعیت تحصیلی": "دانش آموز فارغ",
@@ -120,26 +141,7 @@ ALIASES_DEFAULT: Mapping[Source, Mapping[str, str]] = {
         "school final": "کد مدرسه",
         "school_code": "کد مدرسه",
     },
-    "inspactor": {
-        "کد رشته": "کدرشته",
-        "کد گروه آزمایشی": "کدرشته",
-        "کدپستی": "کدپستی",
-        "کد پستی": "کدپستی",
-        "کد کارمندی پشتیبان": "کد کارمندی پشتیبان",
-        "mentor_id": "کد کارمندی پشتیبان",
-        "نام مدرسه 1": "نام مدرسه 1",
-        "نام مدرسه 2": "نام مدرسه 2",
-        "نام مدرسه 3": "نام مدرسه 3",
-        "نام مدرسه 4": "نام مدرسه 4",
-        "کد مدرسه 1": "کد مدرسه 1",
-        "کد مدرسه 2": "کد مدرسه 2",
-        "کد مدرسه 3": "کد مدرسه 3",
-        "کد مدرسه 4": "کد مدرسه 4",
-        "کد کامل مدرسه": "کد کامل مدرسه",
-        "تعداد مدارس تحت پوشش": "تعداد مدارس تحت پوشش",
-        "تعداد داوطلبان تحت پوشش": "تعداد داوطلبان تحت پوشش",
-        "تعداد تحت پوشش خاص": "تعداد تحت پوشش خاص",
-    },
+    "inspactor": _INSPACTOR_ALIASES,
     "school": {
         "کد مدرسه": "کد مدرسه",
         "کد‌مدرسه": "کد مدرسه",
@@ -153,6 +155,7 @@ ALIASES_DEFAULT: Mapping[Source, Mapping[str, str]] = {
         "نام‌مدرسه": "نام مدرسه",
         "school_name": "نام مدرسه",
     },
+    "matrix": _INSPACTOR_ALIASES,
 }
 
 _STRING_COLUMNS: Mapping[str, Sequence[str]] = {
@@ -168,18 +171,20 @@ _INT_COLUMNS_BASE: Sequence[str] = (
     "school_code_4",
 )
 
+_INT_COLUMNS_INSPACTOR: Sequence[str] = _INT_COLUMNS_BASE + (
+    "graduation_status",
+    "center",
+    "finance",
+    "schools_covered_count",
+    "covered_students_count",
+    "capacity_special",
+    "capacity_current",
+)
+
 _INT_COLUMNS_BY_SOURCE: Mapping[Source, Sequence[str]] = {
     "report": _INT_COLUMNS_BASE + ("graduation_status", "center", "finance"),
-    "inspactor": _INT_COLUMNS_BASE
-    + (
-        "graduation_status",
-        "center",
-        "finance",
-        "schools_covered_count",
-        "covered_students_count",
-        "capacity_special",
-        "capacity_current",
-    ),
+    "inspactor": _INT_COLUMNS_INSPACTOR,
+    "matrix": _INT_COLUMNS_INSPACTOR,
     "school": _INT_COLUMNS_BASE,
 }
 

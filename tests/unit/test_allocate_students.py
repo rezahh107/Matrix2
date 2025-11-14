@@ -18,6 +18,11 @@ from app.core.allocate_students import (
     allocate_student,
     build_selection_reason_rows,
 )
+from app.core.canonical_frames import (
+    canonicalize_allocation_frames,
+    canonicalize_pool_frame,
+    canonicalize_students_frame,
+)
 from app.core.common.types import JoinKeyValues
 from app.core.policy_loader import load_policy, parse_policy_dict
 from app.infra.excel_writer import write_selection_reasons_sheet
@@ -108,6 +113,50 @@ def test_allocate_student_center_zero_skips_filter(_base_pool: pd.DataFrame) -> 
     assert result.log["error_type"] is None
     assert result.log["candidate_count"] == 2
     assert result.log["candidate_count"] == len(_base_pool)
+
+
+def test_allocate_batch_skips_canonicalization_when_frames_prepared(
+    _base_pool: pd.DataFrame, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = load_policy()
+    students = _single_student()
+    calls = {"students": 0, "pool": 0}
+
+    def _spy_students(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
+        calls["students"] += 1
+        return canonicalize_students_frame(df, policy=policy)
+
+    def _spy_pool(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
+        calls["pool"] += 1
+        return canonicalize_pool_frame(
+            df,
+            policy=policy,
+            sanitize_pool=False,
+            pool_source="inspactor",
+        )
+
+    monkeypatch.setattr("app.core.allocate_students._normalize_students", _spy_students)
+    monkeypatch.setattr("app.core.allocate_students._normalize_pool", _spy_pool)
+
+    allocate_batch(students.copy(deep=True), _base_pool.copy(deep=True), policy=policy)
+    assert calls == {"students": 1, "pool": 1}
+
+    students_canon, pool_canon = canonicalize_allocation_frames(
+        students.copy(deep=True),
+        _base_pool.copy(deep=True),
+        policy=policy,
+        sanitize_pool=False,
+        pool_source="inspactor",
+    )
+
+    allocate_batch(
+        students_canon,
+        pool_canon,
+        policy=policy,
+        frames_already_canonical=True,
+    )
+
+    assert calls == {"students": 1, "pool": 1}
 
 
 def test_allocate_batch_no_match_sets_error(_base_pool: pd.DataFrame) -> None:
