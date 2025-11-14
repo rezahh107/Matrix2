@@ -212,6 +212,26 @@ def test_write_import_to_sabt_excel_repairs_mismatched_headers(tmp_path: Path) -
     assert df_result.columns.tolist() == expected_columns
 
 
+def test_ensure_template_backfills_missing_summary(tmp_path: Path) -> None:
+    cfg = load_exporter_config("config/SmartAlloc_Exporter_Config_v1.json")
+    template = tmp_path / "template.xlsx"
+    workbook = Workbook()
+    ws_sheet2 = workbook.active
+    ws_sheet2.title = "Sheet2"
+    workbook.save(template)
+
+    ensure_template_workbook(template, cfg)
+
+    from openpyxl import load_workbook
+
+    loaded = load_workbook(template)
+    assert "Summary" in loaded.sheetnames
+    summary = loaded["Summary"]
+    expected_headers = cfg["sheets"]["Summary"]["columns"]
+    header_values = [cell.value for cell in next(summary.iter_rows(min_row=1, max_row=1))]
+    assert header_values[: len(expected_headers)] == expected_headers
+
+
 def test_hekmat_rule_resets_non_matching_rows() -> None:
     cfg = load_exporter_config("config/SmartAlloc_Exporter_Config_v1.json")
     df_alloc = _sample_alloc_frame()

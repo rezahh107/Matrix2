@@ -546,32 +546,49 @@ def build_optional_sheet_frame(exporter_cfg: Mapping[str, Any], name: str) -> pd
 
 
 def ensure_template_workbook(template_path: str | Path, exporter_cfg: Mapping[str, Any]) -> Path:
-    """اگر فایل قالب موجود نباشد، نسخهٔ مینیمال ایجاد می‌کند."""
+    """ساخت یا به‌روزرسانی فایل قالب بر اساس تنظیمات موجود."""
 
-    from openpyxl import Workbook
+    from openpyxl import Workbook, load_workbook
 
     path = Path(template_path)
-    if path.exists():
-        return path
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not isinstance(exporter_cfg, Mapping):
-        exporter_cfg = {}
-    workbook = Workbook()
-    sheet2 = workbook.active
-    sheet2.title = "Sheet2"
     sheets_cfg = exporter_cfg.get("sheets", {}) if isinstance(exporter_cfg, Mapping) else {}
-    sheet2_cfg = sheets_cfg.get("Sheet2", {}) if isinstance(sheets_cfg, Mapping) else {}
-    columns_cfg = sheet2_cfg.get("columns", {}) if isinstance(sheet2_cfg, Mapping) else {}
-    for col_idx, column_name in enumerate(columns_cfg.keys(), start=1):
-        sheet2.cell(row=1, column=col_idx, value=column_name)
-    for sheet_name, sheet_cfg in sheets_cfg.items():
-        if sheet_name == "Sheet2":
-            continue
-        ws = workbook.create_sheet(title=sheet_name)
-        if not isinstance(sheet_cfg, Mapping):
-            continue
-        for col_idx, column_name in enumerate(sheet_cfg.get("columns", []), start=1):
+
+    def _expected_columns(sheet_cfg: Mapping[str, Any] | Sequence[Any]) -> list[str]:
+        if isinstance(sheet_cfg, Mapping):
+            columns = sheet_cfg.get("columns", [])
+            if isinstance(columns, Mapping):
+                return [str(key) for key in columns.keys()]
+            if isinstance(columns, Sequence):
+                return [str(value) for value in columns]
+            return []
+        if isinstance(sheet_cfg, Sequence):
+            return [str(value) for value in sheet_cfg]
+        return []
+
+    def _write_headers(ws, columns: Sequence[str]) -> None:
+        if not columns:
+            return
+        for col_idx, column_name in enumerate(columns, start=1):
             ws.cell(row=1, column=col_idx, value=column_name)
+        extra_cols = ws.max_column - len(columns)
+        if extra_cols > 0:
+            ws.delete_cols(len(columns) + 1, extra_cols)
+
+    if path.exists():
+        workbook = load_workbook(path)
+    else:
+        workbook = Workbook()
+        workbook.active.title = "Sheet2"
+
+    for sheet_name, sheet_cfg in sheets_cfg.items():
+        expected = _expected_columns(sheet_cfg)
+        if sheet_name in workbook.sheetnames:
+            ws = workbook[sheet_name]
+        else:
+            ws = workbook.create_sheet(title=sheet_name)
+        _write_headers(ws, expected)
+
     workbook.save(path)
     return path
 
