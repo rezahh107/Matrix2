@@ -19,6 +19,7 @@ from app.core.allocate_students import (
     allocate_student,
     build_selection_reason_rows,
 )
+from app.core.common.reasons import ReasonCode
 from app.core.canonical_frames import (
     POOL_DUPLICATE_SUMMARY_ATTR,
     POOL_JOIN_KEY_DUPLICATES_ATTR,
@@ -1080,6 +1081,59 @@ def test_school_students_have_priority_without_center_manager_filter() -> None:
     center_row = allocations.loc[allocations["student_id"] == "STD-CENTER"].iloc[0]
     assert school_row["mentor_id"] == "EMP-001"
     assert center_row["mentor_id"] == "EMP-002"
+
+
+def test_phase_rule_trace_records_school_and_center_events() -> None:
+    policy = load_policy()
+    students = pd.concat(
+        [
+            _single_student(student_id="STD-SCHOOL", is_school_student=True),
+            _single_student(
+                student_id="STD-CENTER",
+                مرکز_گلستان_صدرا=2,
+                is_school_student=False,
+            ),
+        ],
+        ignore_index=True,
+    )
+    pool = pd.DataFrame(
+        [
+            {
+                "پشتیبان": "منتور مدرسه",
+                "کد کارمندی پشتیبان": "EMP-900",
+                "کدرشته": 1201,
+                "کدرشته | group_code": 1201,
+                "گروه آزمایشی": "تجربی",
+                "گروه آزمایشی | exam_group": "تجربی",
+                "جنسیت": 1,
+                "جنسیت | gender": 1,
+                "دانش آموز فارغ": 0,
+                "دانش آموز فارغ | graduation_status": 0,
+                "مرکز گلستان صدرا": 1,
+                "مرکز گلستان صدرا | center": 1,
+                "مالی حکمت بنیاد": 0,
+                "مالی حکمت بنیاد | finance": 0,
+                "کد مدرسه": 1111,
+                "کد مدرسه | school_code": 1111,
+                "remaining_capacity": 1,
+                "allocations_new": 0,
+                "occupancy_ratio": 0.0,
+            }
+        ]
+    )
+
+    _, _, logs, _ = allocate_batch(students, pool, policy=policy)
+
+    school_trace = logs.loc[logs["student_id"] == "STD-SCHOOL", "phase_rule_trace"].iloc[0]
+    assert any(entry.get("stage") == "school_phase_start" for entry in school_trace)
+    assert any(
+        entry.get("reason") == ReasonCode.SCHOOL_STUDENT_PRIORITY.value for entry in school_trace
+    )
+    center_trace = logs.loc[logs["student_id"] == "STD-CENTER", "phase_rule_trace"].iloc[0]
+    assert any(entry.get("stage") == "center_phase_start" for entry in center_trace)
+    assert any(
+        entry.get("reason") == ReasonCode.NO_MANAGER_FOR_CENTER.value for entry in center_trace
+    )
 
 
 @pytest.mark.skipif(importlib.util.find_spec("openpyxl") is None, reason="openpyxl لازم است")

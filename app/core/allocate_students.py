@@ -32,7 +32,13 @@ from .common.ids import build_mentor_id_map, inject_mentor_id, natural_key
 from .common.normalization import normalize_fa, to_numlike_str
 from .common.ranking import apply_ranking_policy, build_mentor_state, consume_capacity
 from .common.reasons import ReasonCode, build_reason
-from .common.rules import Rule, default_stage_rule_map
+from .common.rules import (
+    CenterPriorityRule,
+    Rule,
+    RuleEngine,
+    SchoolStudentPriorityGuard,
+    default_stage_rule_map,
+)
 from .common.trace import TraceStagePlan, build_allocation_trace, build_trace_plan
 from .common.types import (
     AllocationAlertRecord,
@@ -593,8 +599,78 @@ def _build_log_from_join_map(
         "alerts": [],
         "alias_autofill": 0,
         "alias_unmatched": 0,
+        "phase_rule_trace": [],
     }
     return log
+
+
+def _phase_guard_source(students: pd.DataFrame, policy: PolicyConfig) -> Sequence[object]:
+    """ساخت ورودی بهینه برای Stage Guard فاز مدرسه‌ای/مرکزی."""
+
+    column = policy.center_management.school_student_column
+    candidates = (
+        column,
+        column.replace(" ", "_"),
+        "is_school_student",
+        "school_status_resolved",
+    )
+    for name in candidates:
+        if name in students.columns:
+            series = ensure_series(students[name])
+            return series.fillna(0)
+    return [False] * len(students)
+
+
+def _phase_stage_extras(
+    stage: str, pool: pd.DataFrame, capacity_column: str
+) -> Mapping[str, Any]:
+    """تولید پیام مرحله‌ای ثابت برای Trace Rule Engine."""
+
+    if stage == "school_phase_start":
+        return {"message": "شروع فاز مدرسه‌ای"}
+    if stage == "center_phase_start" and capacity_column in pool.columns:
+        remaining = pd.to_numeric(pool[capacity_column], errors="coerce").fillna(0)
+        return {
+            "message": "شروع فاز مرکزی پس از اتمام مدرسه‌ای",
+            "remaining_capacity": int(remaining.sum()),
+        }
+    return {}
+
+
+def _build_phase_rule_engines(policy: PolicyConfig) -> tuple[RuleEngine, RuleEngine]:
+    """ساخت Rule Engine های فاز مدرسه‌ای و مرکزی براساس Policy."""
+
+    if not policy.center_management.enabled:
+        return RuleEngine(), RuleEngine()
+    column = policy.center_management.school_student_column
+    school_engine = RuleEngine(stage_guards=(SchoolStudentPriorityGuard(column),))
+    center_guards = (SchoolStudentPriorityGuard(column),)
+    pair_rules: tuple[CenterPriorityRule, ...]
+    if policy.center_management.centers:
+        pair_rules = (
+            CenterPriorityRule(
+                center_priority=policy.center_management.priority_order,
+                center_column=policy.stage_column("center"),
+            ),
+        )
+    else:
+        pair_rules = ()
+    center_engine = RuleEngine(stage_guards=center_guards, pair_rules=pair_rules)
+    return school_engine, center_engine
+
+
+def _phase_reason_message(reason: ReasonCode) -> str:
+    """متن فارسی پایدار برای رویدادهای Trace فازها."""
+
+    if reason is ReasonCode.SCHOOL_STUDENT_PRIORITY:
+        return "تخصیص به پشتیبان مدرسه‌ای بدون در نظر گرفتن مرکز"
+    if reason is ReasonCode.CENTER_MISMATCH:
+        return "رد به دلیل عدم تطابق مرکز دانش‌آموز و پشتیبان"
+    if reason is ReasonCode.INVALID_CENTER_VALUE:
+        return "مرکز نامعتبر به مقدار پیش‌فرض تغییر یافت"
+    if reason is ReasonCode.NO_MANAGER_FOR_CENTER:
+        return "هیچ مدیری برای این مرکز در استخر موجود نبود"
+    return build_reason(reason).message_fa
 
 
 def _sort_students_by_center_priority(
@@ -894,6 +970,16 @@ def _append_invalid_center_alert(
         "message": message,
         "context": context,
     }
+    phase_trace = log.get("phase_rule_trace")
+    if isinstance(phase_trace, list):
+        phase_trace.append(
+            {
+                "stage": "student_alert",
+                "student_id": student_id,
+                "reason": ReasonCode.INVALID_CENTER_VALUE.value,
+                "message": message,
+            }
+        )
     existing_alerts = log.get("alerts")
     if isinstance(existing_alerts, list):
         existing_alerts.append(alert)
@@ -1530,10 +1616,20 @@ def allocate_batch(
         group: pd.DataFrame,
         *,
         enforce_center_manager: bool,
+        phase_stage: str,
+        rule_engine: RuleEngine,
     ) -> None:
         nonlocal processed
         if group.empty:
             return
+        stage_students = _phase_guard_source(group, policy)
+        stage_extras = _phase_stage_extras(
+            phase_stage, pool_with_ids, resolved_capacity_column
+        )
+        base_phase_trace = rule_engine.run_stage(
+            phase_stage, stage_students, extras=stage_extras
+        )
+        is_school_phase = not enforce_center_manager
         for _, student_row in group.iterrows():
             processed += 1
             student_dict = student_row.to_dict()
@@ -1571,6 +1667,46 @@ def allocate_batch(
                 _append_invalid_center_alert(
                     result.log, invalid_center_payload, student_center
                 )
+            phase_trace = [dict(entry) for entry in base_phase_trace]
+            existing_phase_entries = result.log.get("phase_rule_trace")
+            if isinstance(existing_phase_entries, list) and existing_phase_entries:
+                phase_trace.extend(existing_phase_entries)
+            if is_school_phase:
+                phase_trace.append(
+                    {
+                        "stage": "student_allocation",
+                        "student_id": student_dict.get("student_id"),
+                        "reason": ReasonCode.SCHOOL_STUDENT_PRIORITY.value,
+                        "message": _phase_reason_message(
+                            ReasonCode.SCHOOL_STUDENT_PRIORITY
+                        ),
+                    }
+                )
+            else:
+                mentor_payload = (
+                    result.mentor_row.to_dict()
+                    if result.mentor_row is not None
+                    else None
+                )
+                phase_reason = rule_engine.evaluate_pair(student_dict, mentor_payload)
+                if phase_reason is not None:
+                    stage_name = "student_allocation"
+                    if phase_reason in (
+                        ReasonCode.CENTER_MISMATCH,
+                        ReasonCode.NO_MANAGER_FOR_CENTER,
+                    ):
+                        stage_name = "student_rejection"
+                    elif phase_reason is ReasonCode.INVALID_CENTER_VALUE:
+                        stage_name = "student_alert"
+                    phase_trace.append(
+                        {
+                            "stage": stage_name,
+                            "student_id": student_dict.get("student_id"),
+                            "reason": phase_reason.value,
+                            "message": _phase_reason_message(phase_reason),
+                        }
+                    )
+            result.log["phase_rule_trace"] = phase_trace
             logs.append(result.log)
             for stage in result.trace:
                 trace_rows.append({"student_id": result.log["student_id"], **stage})
@@ -1624,8 +1760,19 @@ def allocate_batch(
                     }
                 )
 
-    _allocate_group(school_students, enforce_center_manager=False)
-    _allocate_group(center_students, enforce_center_manager=True)
+    school_rules, center_rules = _build_phase_rule_engines(policy)
+    _allocate_group(
+        school_students,
+        enforce_center_manager=False,
+        phase_stage="school_phase_start",
+        rule_engine=school_rules,
+    )
+    _allocate_group(
+        center_students,
+        enforce_center_manager=True,
+        phase_stage="center_phase_start",
+        rule_engine=center_rules,
+    )
 
     for log in logs:
         log["alias_autofill"] = alias_autofill
