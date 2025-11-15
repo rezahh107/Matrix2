@@ -22,6 +22,7 @@ from app.infra.excel.import_to_sabt import (  # noqa: E402
     prepare_allocation_export_frame,
     write_import_to_sabt_excel,
     _coalesce_duplicate_identifier_rows,
+    _safe_merge,
 )
 
 
@@ -352,6 +353,28 @@ def test_prepare_allocation_export_frame_rejects_duplicate_students() -> None:
 
     message = str(excinfo.value)
     assert "duplicate" in message
+    assert "STD-1" in message
+
+
+def test_safe_merge_duplicate_error_includes_samples() -> None:
+    left = pd.DataFrame({"student_id": ["STD-1", "STD-2"]})
+    right = pd.DataFrame({"student_id": ["STD-1", "STD-1"]})
+
+    with pytest.raises(ImportToSabtExportError) as excinfo:
+        _safe_merge(
+            left,
+            right,
+            context="student",
+            on="student_id",
+            validate="many_to_one",
+            left_label="allocations",
+            right_label="students",
+        )
+
+    message = str(excinfo.value)
+    assert "duplicate keys" in message
+    assert "allocations" in message
+    assert "students" in message
     assert "STD-1" in message
 
 

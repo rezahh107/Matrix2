@@ -7,7 +7,7 @@ from collections import OrderedDict
 from datetime import datetime
 import re
 from pathlib import Path
-from typing import Any, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any, Iterable, Mapping, MutableMapping, NamedTuple, Sequence
 
 import pandas as pd
 
@@ -235,6 +235,8 @@ def prepare_allocation_export_frame(
         sort=False,
         validate="many_to_one",
         context="student",
+        left_label="allocations dataframe",
+        right_label="student dataframe",
     )
     merged = _safe_merge(
         merged,
@@ -244,6 +246,8 @@ def prepare_allocation_export_frame(
         sort=False,
         validate="many_to_one",
         context="mentor",
+        left_label="allocations dataframe",
+        right_label="mentor dataframe",
     )
 
     if len(merged.index) != len(alloc.index):
@@ -373,22 +377,255 @@ def _is_missing_value(value: Any) -> bool:
     return pd.isna(value)
 
 
+_MERGE_DUPLICATE_SAMPLE_LIMIT = 5
+
+
 def _safe_merge(
     left: pd.DataFrame,
     right: pd.DataFrame,
     *,
     context: str,
+    left_label: str | None = None,
+    right_label: str | None = None,
+    sample_limit: int = _MERGE_DUPLICATE_SAMPLE_LIMIT,
     **kwargs: Any,
 ) -> pd.DataFrame:
-    """اجرای merge با پیام خطای مشخص هنگام تخطی از validate."""
+    """اجرای merge امن با پیام خطای قابل‌اقدام.
+
+    مثال:
+        >>> left = pd.DataFrame({"student_id": ["A", "B"]})
+        >>> right = pd.DataFrame({"student_id": ["A", "A"]})
+        >>> _safe_merge(left, right, context="student", on="student_id", validate="one_to_one")
+        Traceback (most recent call last):
+            ... ImportToSabtExportError: ImportToSabt export failed ... duplicate keys ...
+    """
+
+    left_name = left_label or _describe_frame_source(left, default_label="left dataframe")
+    right_name = right_label or _describe_frame_source(right, default_label="right dataframe")
 
     try:
         return left.merge(right, **kwargs)
     except ValueError as exc:  # pragma: no cover - مسیر خطا تست دارد
+        duplicate_hint = _format_merge_duplicate_hint(
+            str(exc),
+            left,
+            right,
+            left_name,
+            right_name,
+            sample_limit=sample_limit,
+            merge_kwargs=kwargs,
+        )
         raise ImportToSabtExportError(
             "ImportToSabt export failed while joining "
-            f"{context} details: {exc}"
+            f"{context} details: {exc}{duplicate_hint}"
         ) from exc
+
+
+def _format_merge_duplicate_hint(
+    message: str,
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    left_label: str,
+    right_label: str,
+    *,
+    sample_limit: int,
+    merge_kwargs: Mapping[str, Any],
+) -> str:
+    """تولید پیام کمکی برای خطای merge با نمایش شناسه‌های تکراری.
+
+    مثال:
+        >>> left = pd.DataFrame({"id": ["A", "A"]})
+        >>> right = pd.DataFrame({"id": ["A", "A"]})
+        >>> _format_merge_duplicate_hint(
+        ...     "Merge keys are not unique in right dataset", left, right, "left", "right",
+        ...     sample_limit=2,
+        ...     merge_kwargs={"on": "id"},
+        ... )
+        " Sample duplicate keys detected (right frame 'right' duplicate keys: A)."
+    """
+
+    normalized_message = message.lower()
+    if "merge keys are not unique" not in normalized_message:
+        return ""
+
+    sides: set[str] = set()
+    if "left dataset" in normalized_message:
+        sides.add("left")
+    if "right dataset" in normalized_message:
+        sides.add("right")
+    if not sides and "either left or right" in normalized_message:
+        sides = {"left", "right"}
+
+    join_config = _resolve_merge_join_config(merge_kwargs)
+    left_keys = _build_merge_key_series(
+        left,
+        columns=join_config.left_on,
+        use_index=join_config.left_index,
+    )
+    right_keys = _build_merge_key_series(
+        right,
+        columns=join_config.right_on,
+        use_index=join_config.right_index,
+    )
+
+    notes: list[str] = []
+    if "left" in sides:
+        left_samples, left_duplicate_set = _collect_duplicate_key_samples(left_keys, sample_limit)
+        if left_samples:
+            matching_right = _matching_duplicate_keys(right_keys, left_duplicate_set, sample_limit)
+            note = f"left frame '{left_label}' duplicate keys: {', '.join(left_samples)}"
+            if matching_right:
+                note += f" | matching right frame '{right_label}': {', '.join(matching_right)}"
+            notes.append(note)
+    if "right" in sides:
+        right_samples, right_duplicate_set = _collect_duplicate_key_samples(right_keys, sample_limit)
+        if right_samples:
+            matching_left = _matching_duplicate_keys(left_keys, right_duplicate_set, sample_limit)
+            note = f"right frame '{right_label}' duplicate keys: {', '.join(right_samples)}"
+            if matching_left:
+                note += f" | matching left frame '{left_label}': {', '.join(matching_left)}"
+            notes.append(note)
+
+    if not notes:
+        return ""
+    return f" Sample duplicate keys detected ({'; '.join(notes)})."
+
+
+class _MergeJoinConfig(NamedTuple):
+    left_on: list[str] | None
+    right_on: list[str] | None
+    left_index: bool
+    right_index: bool
+
+
+def _resolve_merge_join_config(kwargs: Mapping[str, Any]) -> _MergeJoinConfig:
+    """استخراج تنظیمات join برای تحلیل خطا.
+
+    مثال:
+        >>> _resolve_merge_join_config({"on": "student_id"})
+        _MergeJoinConfig(left_on=['student_id'], right_on=['student_id'], left_index=False, right_index=False)
+    """
+
+    on_value = kwargs.get("on")
+    left_index = bool(kwargs.get("left_index"))
+    right_index = bool(kwargs.get("right_index"))
+
+    if on_value is not None:
+        columns = [on_value] if isinstance(on_value, str) else list(on_value)
+        return _MergeJoinConfig(columns, columns, left_index, right_index)
+
+    left_on = kwargs.get("left_on")
+    right_on = kwargs.get("right_on")
+    left_columns = [left_on] if isinstance(left_on, str) else (list(left_on) if left_on is not None else None)
+    right_columns = [right_on] if isinstance(right_on, str) else (list(right_on) if right_on is not None else None)
+    return _MergeJoinConfig(left_columns, right_columns, left_index, right_index)
+
+
+def _build_merge_key_series(
+    frame: pd.DataFrame,
+    *,
+    columns: Sequence[str] | None,
+    use_index: bool,
+) -> pd.Series:
+    """ساخت سری کلیدهای join با رشته‌سازی پایدار.
+
+    مثال:
+        >>> df = pd.DataFrame({"id": ["A", "B"], "code": [1, 2]})
+        >>> _build_merge_key_series(df, columns=["id"], use_index=False).tolist()
+        ['A', 'B']
+    """
+
+    parts: list[pd.Series] = []
+    if use_index:
+        index_series = pd.Series(frame.index, index=frame.index, name=frame.index.name or "index")
+        parts.append(index_series)
+
+    if columns:
+        existing_columns = [col for col in columns if col in frame.columns]
+        for column in existing_columns:
+            parts.append(ensure_series(frame[column]))
+
+    if not parts:
+        return pd.Series([], dtype="string")
+
+    normalized = [series.astype("string").fillna("") for series in parts]
+    if len(normalized) == 1:
+        return normalized[0]
+
+    data = pd.concat(normalized, axis=1)
+    return data.apply(lambda row: " | ".join(row.astype(str)), axis=1)
+
+
+def _collect_duplicate_key_samples(series: pd.Series, sample_limit: int) -> tuple[list[str], set[str]]:
+    """استخراج نمونه شناسه‌های تکراری از یک سری join.
+
+    مثال:
+        >>> series = pd.Series(["A", "A", "B"])
+        >>> _collect_duplicate_key_samples(series, 2)
+        (['A'], {'A'})
+    """
+
+    if series.empty:
+        return [], set()
+
+    duplicated_mask = series.duplicated(keep=False)
+    if not bool(duplicated_mask.any()):
+        return [], set()
+
+    duplicates = series[duplicated_mask]
+    seen: set[str] = set()
+    samples: list[str] = []
+    for value in duplicates:
+        key = _stringify_merge_key(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        samples.append(key)
+        if len(samples) >= sample_limit:
+            break
+    return samples, {_stringify_merge_key(value) for value in duplicates}
+
+
+def _matching_duplicate_keys(
+    series: pd.Series,
+    duplicates: set[str],
+    sample_limit: int,
+) -> list[str]:
+    """برگرداندن نمونه شناسه‌های مشترک بین سری و مجموعهٔ تکراری.
+
+    مثال:
+        >>> series = pd.Series(["A", "B", "C"])
+        >>> _matching_duplicate_keys(series, {"A", "C"}, 1)
+        ['A']
+    """
+
+    if not duplicates or series.empty:
+        return []
+
+    matches: list[str] = []
+    seen: set[str] = set()
+    for value in series:
+        key = _stringify_merge_key(value)
+        if key in duplicates and key not in seen:
+            seen.add(key)
+            matches.append(key)
+            if len(matches) >= sample_limit:
+                break
+    return matches
+
+
+def _stringify_merge_key(value: Any) -> str:
+    """تبدیل مقدار کلید join به متن پایدار برای گزارش خطا.
+
+    مثال:
+        >>> _stringify_merge_key('')
+        '<EMPTY>'
+    """
+
+    if value is None:
+        return "<EMPTY>"
+    text = str(value).strip()
+    return text if text else "<EMPTY>"
 
 
 def _normalize_digits(value: Any, length: int) -> str:
