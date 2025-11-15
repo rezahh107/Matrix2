@@ -194,4 +194,17 @@ def test_duplicate_mentors_are_filtered_before_row_generation() -> None:
     ]
     assert len(duplicate_reasons) == 2
     assert set(duplicate_reasons["پشتیبان"]) == {"زهرا", "زهرا تکراری"}
+
+    sorted_invalid = duplicate_reasons.sort_values("پشتیبان").reset_index(drop=True)
+    expected = pd.DataFrame(
+        {
+            "پشتیبان": ["زهرا", "زهرا تکراری"],
+            "reason": ["duplicate mentor employee code", "duplicate mentor employee code"],
+        }
+    )
+    pdt.assert_frame_equal(
+        sorted_invalid[["پشتیبان", "reason"]].reset_index(drop=True),
+        expected,
+        check_dtype=False,
+    )
     assert matrix["کد کارمندی پشتیبان"].eq("EMP-1").sum() == 0
