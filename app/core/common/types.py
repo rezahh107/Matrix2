@@ -89,6 +89,8 @@ __all__ = [
     "MentorRow",
     "AllocationErrorLiteral",
     "AllocationAlertRecord",
+    "MentorStateSnapshot",
+    "MentorStateDelta",
     "AllocationLogRecord",
     "TraceStageLiteral",
     "TraceStageRecord",
@@ -119,6 +121,36 @@ class MentorRow(TypedDict, total=False):
     remaining_capacity: int
     covered_now: int
     special_limit: int
+
+
+class MentorStateSnapshot(TypedDict):
+    """وضعیت خلاصه‌شدهٔ ظرفیت یک پشتیبان برای ثبت در Trace.
+
+    مثال::
+
+        >>> MentorStateSnapshot(remaining=3, alloc_new=1, occupancy_ratio=0.5)
+    """
+
+    remaining: int
+    alloc_new: int
+    occupancy_ratio: float
+
+
+class MentorStateDelta(TypedDict):
+    """تغییرات وضعیت پشتیبان قبل و بعد از تخصیص.
+
+    مثال::
+
+        >>> MentorStateDelta(
+        ...     before=MentorStateSnapshot(remaining=2, alloc_new=0, occupancy_ratio=0.0),
+        ...     after=MentorStateSnapshot(remaining=1, alloc_new=1, occupancy_ratio=0.5),
+        ...     diff=MentorStateSnapshot(remaining=-1, alloc_new=1, occupancy_ratio=0.5),
+        ... )
+    """
+
+    before: MentorStateSnapshot
+    after: MentorStateSnapshot
+    diff: MentorStateSnapshot
 
 
 AllocationErrorLiteral = Literal[
@@ -156,6 +188,7 @@ class AllocationLogRecord(TypedDict, total=False):
     suggested_actions: List[str]
     capacity_before: Optional[int]
     capacity_after: Optional[int]
+    mentor_state_delta: Optional[MentorStateDelta]
     stage_candidate_counts: Dict[str, int]
     rule_reason_code: Optional[str]
     rule_reason_text: Optional[str]

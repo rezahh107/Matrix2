@@ -452,6 +452,47 @@ def test_allocate_student_records_fairness_reason_code(_base_pool: pd.DataFrame)
     assert "[FAIRNESS_ORDER]" in fairness_text
 
 
+def test_allocate_student_records_mentor_state_delta(_base_pool: pd.DataFrame) -> None:
+    student_row = _single_student().iloc[0].to_dict()
+    state = {
+        "EMP-001": {"initial": 2, "remaining": 2, "alloc_new": 0, "occupancy_ratio": 0.0},
+        "EMP-002": {"initial": 2, "remaining": 2, "alloc_new": 0, "occupancy_ratio": 0.0},
+    }
+
+    result = allocate_student(student_row, _base_pool, state=state)
+
+    delta = result.log.get("mentor_state_delta")
+    assert delta is not None
+    assert delta["before"]["remaining"] == 2
+    assert delta["after"]["remaining"] == 1
+    assert delta["diff"]["remaining"] == -1
+    assert delta["diff"]["alloc_new"] == 1
+    assert pytest.approx(delta["after"]["occupancy_ratio"], rel=1e-3) == 0.5
+
+
+def test_allocate_student_underflow_embeds_snapshot_details(
+    _base_pool: pd.DataFrame,
+) -> None:
+    student_row = _single_student().iloc[0].to_dict()
+    pool = _base_pool.iloc[[0]].copy()
+    state = {
+        "EMP-001": {"initial": 1, "remaining": 0, "alloc_new": 1, "occupancy_ratio": 1.0},
+        "EMP-002": {"initial": 2, "remaining": 2, "alloc_new": 0, "occupancy_ratio": 0.0},
+    }
+
+    result = allocate_student(student_row, pool, state=state)
+
+    assert result.log["error_type"] == "CAPACITY_UNDERFLOW"
+    reason = result.log.get("detailed_reason") or ""
+    assert "student=STD-001" in reason
+    assert "mentor=EMP-001" in reason
+    assert "mentor snapshot" in reason
+    delta = result.log.get("mentor_state_delta")
+    assert delta is not None
+    assert delta["before"]["remaining"] == 0
+    assert delta["diff"]["alloc_new"] == 0
+
+
 def test_join_key_values_validates_length() -> None:
     with pytest.raises(ValueError):
         JoinKeyValues({"a": 1, "b": 2, "c": 3, "d": 4, "e": 5})
