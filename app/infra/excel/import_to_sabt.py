@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 from datetime import datetime
 import re
 from pathlib import Path
@@ -14,25 +15,48 @@ from app.core.common.columns import canonicalize_headers, ensure_series
 from app.core.common.normalization import normalize_fa
 
 GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
-    "GF_NationalCode": (
-        "student_GF_NationalCode",
-        "student_national_id",
-        "student_national_code",
-    ),
-    "GF_Mobile": (
-        "student_GF_Mobile",
-        "student_mobile",
-    ),
-    "GF_FirstName": (
-        "student_GF_FirstName",
-        "student_first_name",
-        "student_name",
-    ),
-    "GF_LastName": (
-        "student_GF_LastName",
-        "student_last_name",
-        "student_family_name",
-    ),
+    # اطلاعات هویتی دانش‌آموز
+    "101": ("student_first_name", "student_name", "نام"),
+    "102": ("student_last_name", "student_family_name", "نام خانوادگی"),
+    "1": ("student_full_name", "نام و نام‌خانوادگی"),
+    "3": ("student_father_name", "نام پدر"),
+    "143": ("student_national_code", "student_national_id", "کد ملی"),
+    "2": ("student_birth_date", "تاریخ تولد"),
+    "92": ("student_gender", "جنسیت"),
+    "93": ("student_educational_status", "وضعیت تحصیلی"),
+    "98": ("student_foreign_national", "اتباع خارجی"),
+    "4": ("student_art_school_status", "وضعیت هنرستان"),
+    # اطلاعات تماس
+    "20": ("student_mobile", "موبایل دانش‌آموز", "تلفن همراه"),
+    "21": ("contact1_mobile", "موبایل رابط 1", "تلفن رابط 1"),
+    "23": ("contact2_mobile", "موبایل رابط 2", "تلفن رابط 2"),
+    "22": ("student_landline", "تلفن ثابت", "تلفن"),
+    "24": ("contact1_relationship", "نسبت رابط 1"),
+    "25": ("contact1_name", "نام رابط 1"),
+    "26": ("contact2_relationship", "نسبت رابط 2"),
+    "27": ("contact2_name", "نام رابط 2"),
+    # وضعیت تحصیلی و مدرسه
+    "73": ("student_exam_group", "گروه آزمایشی"),
+    "31": ("student_major_code", "کد گروه/رشته"),
+    "5": ("student_average", "معدل"),
+    "30": ("student_school_code", "کد مدرسه 1"),
+    "29": ("student_school_name", "نام مدرسه"),
+    "94": ("student_center", "مرکز ثبت‌نام"),
+    # ثبت‌نام و حکمت
+    "75": ("student_registration_status", "وضعیت ثبت نام"),
+    "76": ("student_hekmat_tracking_code", "کد رهگیری حکمت"),
+    "97": ("student_hekmat_package_type", "نوع بسته حکمت"),
+    "60": ("student_postal_code", "کدپستی", "کد پستی"),
+    "61": ("student_postal_code_alias", "کدپستی جایگزین", "کد پستی جایگزین"),
+    # سایر فیلدها
+    "7": ("student_class_number", "شماره کلاس"),
+    "8": ("student_seat_number", "شماره صندلی"),
+    "96": ("student_konkur_quota", "سهمیه کنکور"),
+    "39": ("suggested_mentor_id", "پشتیبان پیشنهادی"),
+    "62": ("student_notes", "توضیحات"),
+    # فیلدهای سیستمی
+    "150": ("submission_source", "منبع ارسال"),
+    "151": ("form_version", "sa_form_version"),
 }
 
 _DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
@@ -63,22 +87,27 @@ class ImportToSabtExportError(ValueError):
 
 
 def load_exporter_config(path: str | Path) -> dict:
-    """بارگذاری و اعتبارسنجی حداقلی فایل تنظیمات خروجی."""
+    """بارگذاری config با حفظ ترتیب ستون‌ها و اعتبارسنجی حداقلی."""
 
     cfg_path = Path(path)
     if not cfg_path.exists():
         raise FileNotFoundError(f"Exporter config not found: {cfg_path}")
+
     with cfg_path.open("r", encoding="utf-8") as handle:
-        cfg = json.load(handle)
+        cfg = json.load(handle, object_pairs_hook=OrderedDict)
+
     sheets = cfg.get("sheets")
     if not isinstance(sheets, MutableMapping):
         raise ExporterConfigError("'sheets' must be a dict in exporter config")
+
     sheet2 = sheets.get("Sheet2")
     if not isinstance(sheet2, MutableMapping):
         raise ExporterConfigError("Exporter config must define 'Sheet2'")
+
     columns = sheet2.get("columns")
     if not isinstance(columns, MutableMapping) or not columns:
         raise ExporterConfigError("'Sheet2.columns' must be a non-empty dict")
+
     return cfg
 
 
@@ -306,38 +335,67 @@ def _normalize_digits(value: Any, length: int) -> str:
     return digits[:length]
 
 
-def _normalize_mobile(value: Any) -> str:
-    digits = _normalize_digits(value, 20)
-    if not digits:
-        return ""
-    if digits.startswith("98") and len(digits) == 12 and digits[2] == "9":
-        digits = digits[2:]
-    if digits.startswith("9") and len(digits) == 10:
-        digits = f"0{digits}"
-    if len(digits) == 11 and digits.startswith("09"):
-        return digits
-    if len(digits) > 11 and digits.endswith(digits[-11:]):
-        tail = digits[-11:]
-        if tail.startswith("09"):
-            return tail
-    if len(digits) == 11:
-        return digits
-    return digits
-
-
 def _apply_normalizers(series: pd.Series, normalizer: Any) -> pd.Series:
+    """اعمال نرمال‌سازهای تعریف‌شده روی یک سری داده."""
+
     if normalizer is None:
         return series
-    items = normalizer if isinstance(normalizer, Sequence) and not isinstance(normalizer, str) else [normalizer]
-    result = series.copy()
+
+    items = normalizer if isinstance(normalizer, (list, tuple)) else [normalizer]
+    result = series.astype("object").copy()
+
     for name in items:
         if name == "digits_10":
             result = result.map(lambda v: _normalize_digits(v, 10))
         elif name == "digits_16":
             result = result.map(lambda v: _normalize_digits(v, 16))
         elif name == "mobile_ir":
-            result = result.map(_normalize_mobile)
+            result = result.map(_normalize_mobile_ir)
+        else:
+            raise ValueError(f"Unknown normalizer: {name!r}")
+
     return result
+
+
+def _normalize_mobile_ir(value: Any) -> str:
+    """نرمال‌سازی شماره موبایل ایران به فرمت 11 رقمی 09xxxxxxxxx."""
+
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+
+    text = str(value).strip()
+    text = text.translate(_DIGIT_TRANSLATION)
+    if not text:
+        return ""
+
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if not digits:
+        return ""
+
+    if len(digits) > 11:
+        stripped = digits.lstrip("0")
+        digits = stripped if stripped else digits
+
+    if digits.startswith("0098"):
+        digits = digits[4:]
+    elif digits.startswith("098"):
+        digits = digits[3:]
+    elif digits.startswith("98"):
+        digits = digits[2:]
+
+    if len(digits) > 11:
+        digits = digits[-11:]
+
+    if len(digits) == 10 and digits.startswith("9"):
+        digits = f"0{digits}"
+
+    if len(digits) == 11 and digits.startswith("9") and not digits.startswith("09"):
+        digits = f"0{digits[-10:]}"
+
+    if len(digits) == 11 and digits.startswith("09"):
+        return digits
+
+    return digits
 
 
 def _resolve_map(map_spec: Any, cfg: Mapping[str, Any]) -> Mapping[Any, Any] | None:
@@ -362,6 +420,24 @@ def _coerce_type(series: pd.Series, type_name: str | None, precision: int | None
     return converted.fillna("")
 
 
+def _normalize_date_format(fmt: str | None) -> str:
+    if not fmt:
+        return "%Y-%m-%d"
+    normalized = str(fmt)
+    replacements = {
+        "yyyy": "%Y",
+        "yy": "%y",
+        "mm": "%m",
+        "dd": "%d",
+        "HH": "%H",
+        "MM": "%M",
+        "ss": "%S",
+    }
+    for token, replacement in replacements.items():
+        normalized = normalized.replace(token, replacement)
+    return normalized
+
+
 def _series_from_source(
     df: pd.DataFrame,
     source_cfg: Mapping[str, Any],
@@ -370,17 +446,33 @@ def _series_from_source(
     today: datetime,
 ) -> pd.Series:
     source_type = source_cfg.get("source", "df")
-    if source_type == "empty":
+    sheet_cfg = exporter_cfg.get("sheets", {}).get("Sheet2", {})
+    columns_cfg = sheet_cfg.get("columns", {}) if isinstance(sheet_cfg, Mapping) else {}
+
+    def _empty_series() -> pd.Series:
         return pd.Series(["" for _ in range(len(df))], index=df.index, dtype="string")
+
+    if source_type == "empty":
+        return _empty_series()
+
     if source_type == "literal":
         value = source_cfg.get("value", "")
         return pd.Series([value for _ in range(len(df))], index=df.index)
+
     if source_type == "system":
         field = source_cfg.get("field")
+        fmt = _normalize_date_format(source_cfg.get("format"))
+        if field == "date_created":
+            for column_name in ("student_created_at", "created_at"):
+                if column_name in df.columns:
+                    series = pd.to_datetime(df[column_name], errors="coerce")
+                    formatted = series.dt.strftime(fmt)
+                    return formatted.fillna("")
+            return pd.Series([today.strftime(fmt) for _ in range(len(df))], index=df.index)
         if field == "today":
-            fmt = source_cfg.get("format", "%Y-%m-%d")
             return pd.Series([today.strftime(fmt) for _ in range(len(df))], index=df.index)
         return pd.Series([source_cfg.get("value", "") for _ in range(len(df))], index=df.index)
+
     if source_type == "gf":
         field = source_cfg.get("field")
         candidates: list[str] = []
@@ -389,11 +481,58 @@ def _series_from_source(
             if mapped:
                 candidates.extend(mapped)
             prefixed = f"student_{field}" if not field.startswith("student_") else field
-            candidates.extend([prefixed, field])
+            candidates.extend([prefixed, f"student_gf_{field}", field])
         for column_name in dict.fromkeys(filter(None, candidates)):
             if column_name in df.columns:
-                return df[column_name]
-        return pd.Series(["" for _ in range(len(df))], index=df.index)
+                series = df[column_name]
+                fallback_column = source_cfg.get("on_value_9000_use")
+                if fallback_column:
+                    if fallback_column in df.columns:
+                        fallback_series = df[fallback_column]
+                    else:
+                        fallback_series = None
+                        fallback_spec = columns_cfg.get(fallback_column)
+                        if isinstance(fallback_spec, Mapping) and fallback_spec is not source_cfg:
+                            fallback_series = _series_from_source(
+                                df,
+                                fallback_spec,
+                                exporter_cfg,
+                                today=today,
+                            )
+                    if fallback_series is not None:
+                        mask = series.astype("string") == "9000"
+                        series = series.copy()
+                        fallback_values = ensure_series(fallback_series).reindex(df.index).fillna("")
+                        series.loc[mask] = fallback_values[mask]
+                return series
+        return _empty_series()
+
+    if source_type == "derived":
+        from_column = source_cfg.get("from")
+        crosswalk_name = source_cfg.get("crosswalk")
+        base_series: pd.Series | None = None
+        if isinstance(from_column, str):
+            if from_column in df.columns:
+                base_series = df[from_column]
+            elif isinstance(columns_cfg, Mapping):
+                from_spec = columns_cfg.get(from_column)
+                if isinstance(from_spec, Mapping) and from_spec is not source_cfg:
+                    base_series = _series_from_source(
+                        df,
+                        from_spec,
+                        exporter_cfg,
+                        today=today,
+                    )
+        if base_series is None:
+            return _empty_series()
+        if crosswalk_name:
+            lookups = exporter_cfg.get("lookups", {})
+            crosswalk = lookups.get(crosswalk_name) if isinstance(lookups, Mapping) else None
+            if isinstance(crosswalk, Mapping):
+                mapped = ensure_series(base_series).map(crosswalk)
+                return mapped.fillna("")
+        return ensure_series(base_series)
+
     if source_type == "lookup":
         lookup_name = source_cfg.get("lookup")
         column = source_cfg.get("field")
@@ -402,11 +541,12 @@ def _series_from_source(
         if isinstance(table, Mapping) and column in df.columns:
             series = df[column].map(table)
             return series.fillna("")
-        return pd.Series(["" for _ in range(len(df))], index=df.index)
+        return _empty_series()
+
     column = source_cfg.get("field")
     if column in df.columns:
         return df[column]
-    return pd.Series(["" for _ in range(len(df))], index=df.index)
+    return _empty_series()
 
 
 def build_sheet2_frame(
@@ -420,7 +560,13 @@ def build_sheet2_frame(
         today = datetime.today()
     sheet_cfg = exporter_cfg["sheets"]["Sheet2"]
     columns_cfg = sheet_cfg["columns"]
-    ordered_columns = list(columns_cfg.keys())
+    if isinstance(columns_cfg, OrderedDict):
+        ordered_columns = list(columns_cfg.keys())
+    elif isinstance(columns_cfg, Mapping):
+        ordered_columns = list(columns_cfg.keys())
+    else:
+        raise TypeError("'columns' config must be a mapping")
+
     sheet = pd.DataFrame(index=df_alloc.index)
     for column_name in ordered_columns:
         spec = columns_cfg[column_name]
@@ -429,63 +575,122 @@ def build_sheet2_frame(
             series = pd.Series(series, index=df_alloc.index)
         series = series.reindex(df_alloc.index)
         series = _apply_normalizers(series, spec.get("normalize"))
+
         map_dict = _resolve_map(spec.get("map"), exporter_cfg)
         if map_dict:
-            mapped = series.map(map_dict)
-            if mapped.isna().any():
-                mapped = mapped.fillna(series.astype("string").map(map_dict))
+            if spec.get("type") == "choice_value":
+                mapped = series.map(map_dict)
+            else:
+                mapped = series.astype("string").map(map_dict)
             series = mapped.fillna(series)
+
         series = _coerce_type(series, spec.get("type"), spec.get("precision"))
+
+        when_clause = spec.get("when")
+        if when_clause:
+            parts = str(when_clause).split("=")
+            if len(parts) == 2:
+                condition_col = parts[0].strip()
+                condition_val = parts[1].strip()
+                if condition_col in sheet.columns:
+                    targets = {condition_val}
+                    condition_spec = columns_cfg.get(condition_col)
+                    if isinstance(condition_spec, Mapping):
+                        cond_map = _resolve_map(condition_spec.get("map"), exporter_cfg)
+                        if cond_map and condition_val in cond_map:
+                            targets.add(cond_map[condition_val])
+                    mask = sheet[condition_col].astype("string").isin(targets)
+                    inactive = ~mask.fillna(False)
+                    if inactive.any():
+                        series = series.copy()
+                        series.loc[inactive] = ""
+
         sheet[column_name] = series
+
     sheet = sheet.loc[:, ordered_columns]
+
     hekmat_cfg = sheet_cfg.get("hekmat_rule")
     if isinstance(hekmat_cfg, Mapping):
         status_column = hekmat_cfg.get("status_column")
         expected = hekmat_cfg.get("expected_value")
         target_columns = hekmat_cfg.get("columns", [])
         if status_column in sheet.columns and expected is not None:
-            mask = sheet[status_column] == expected
+            mask = sheet[status_column].astype("string") == str(expected)
             for column in target_columns:
                 if column in sheet.columns:
                     sheet.loc[~mask, column] = ""
+
     sheet = sheet.astype({column: "string" for column in sheet.columns})
     sheet.attrs["exporter_config"] = exporter_cfg
     return sheet
 
 
 def apply_alias_rule(sheet2: pd.DataFrame, df_alloc: pd.DataFrame) -> pd.DataFrame:
-    """اعمال قانون alias روی ستون کدپستی خروجی."""
+    """اعمال قانون alias برای ستون‌های کد پستی و کد پستی جایگزین."""
 
     cfg = sheet2.attrs.get("exporter_config") or {}
     alias_cfg = cfg.get("alias_rule") if isinstance(cfg, Mapping) else None
-    if not isinstance(alias_cfg, Mapping):
+
+    def _first_series(candidates: Iterable[str | None]) -> pd.Series | None:
+        for name in candidates:
+            if name and name in df_alloc.columns:
+                return df_alloc[name]
+        return None
+
+    if isinstance(alias_cfg, Mapping) and alias_cfg:
+        sheet_postal = alias_cfg.get("sheet_postal_column")
+        df_postal = alias_cfg.get("df_postal_column")
+        if not sheet_postal or not df_postal or sheet_postal not in sheet2.columns:
+            return sheet2
+        source_postal = df_alloc.get(df_postal)
+        if source_postal is None:
+            return sheet2
+        normalized_postal = source_postal.astype("string").fillna("")
+        normalized_postal = normalized_postal.map(lambda v: _normalize_digits(v, 10))
+        sheet2.loc[:, sheet_postal] = normalized_postal
+
+        sheet_alias = alias_cfg.get("sheet_alias_column")
+        df_alias = alias_cfg.get("df_alias_column")
+        alias_series = df_alloc.get(df_alias) if df_alias else None
+        if alias_series is not None:
+            alias_series = alias_series.astype("string").fillna("")
+            alias_series = alias_series.map(lambda v: _normalize_digits(v, 10))
+            if sheet_alias and sheet_alias in sheet2.columns:
+                sheet2.loc[:, sheet_alias] = alias_series.reindex(df_alloc.index)
+            mask_alias = alias_series.str.strip() != ""
+            if mask_alias.any():
+                sheet2.loc[mask_alias, sheet_postal] = alias_series[mask_alias]
         return sheet2
-    sheet_postal = alias_cfg.get("sheet_postal_column")
-    sheet_alias = alias_cfg.get("sheet_alias_column")
-    df_postal = alias_cfg.get("df_postal_column")
-    df_alias = alias_cfg.get("df_alias_column")
-    if not sheet_postal or not df_postal or sheet_postal not in sheet2.columns:
+
+    sheet_postal = "کد پستی"
+    sheet_alias = "کد پستی جایگزین"
+
+    if sheet_postal not in sheet2.columns:
         return sheet2
-    source_postal = df_alloc.get(df_postal)
-    source_alias = df_alloc.get(df_alias)
-    if source_postal is None:
-        return sheet2
-    postal_series = source_postal.astype("string").fillna("")
-    alias_series: pd.Series | None = None
-    if source_alias is not None:
-        alias_series = source_alias.astype("string").fillna("")
-    alias_values = None
-    if sheet_alias and sheet_alias in sheet2.columns:
-        alias_values = sheet2[sheet_alias]
-    if alias_series is None or alias_series.empty:
-        sheet2.loc[:, sheet_postal] = postal_series
-        return sheet2
-    mask = alias_series.str.strip() != ""
-    sheet2.loc[:, sheet_postal] = sheet2.get(sheet_postal, postal_series)
-    if alias_values is None:
-        sheet2.loc[mask, sheet_postal] = alias_series[mask]
-    else:
-        sheet2.loc[mask, sheet_postal] = alias_values[mask]
+
+    mentor_alias = _first_series(
+        ["mentor_alias_code", "mentor_alias_postal_code", "mentor_postal_code"]
+    )
+    if mentor_alias is not None:
+        alias_series = mentor_alias.astype("string").fillna("")
+        alias_series = alias_series.map(lambda v: _normalize_digits(v, 10))
+        mask_alias = alias_series.str.strip() != ""
+        if mask_alias.any():
+            sheet2.loc[mask_alias, sheet_postal] = alias_series[mask_alias]
+
+    mentor_id_series = _first_series(["mentor_id", "mentor_mentor_id"])
+    school_limit_series = _first_series(["mentor_is_school_limited", "is_school_limited"])
+
+    if (
+        sheet_alias in sheet2.columns
+        and mentor_id_series is not None
+        and school_limit_series is not None
+    ):
+        school_mask = ensure_series(school_limit_series).fillna(False).astype(bool)
+        if school_mask.any():
+            mentor_ids = mentor_id_series.astype("string").fillna("")
+            sheet2.loc[school_mask, sheet_alias] = mentor_ids[school_mask]
+
     return sheet2
 
 
@@ -632,10 +837,14 @@ def _verify_headers(ws, expected: Sequence[str]) -> None:
     headers = [cell.value if cell.value is not None else "" for cell in header_cells]
     expected_list = list(expected)
     if len(headers) < len(expected_list):
-        raise ValueError(f"Template sheet '{ws.title}' has fewer columns than expected")
+        raise ValueError(
+            f"Template sheet '{ws.title}' has fewer columns ({len(headers)}) than expected "
+            f"({len(expected_list)})"
+        )
     template_headers = headers[: len(expected_list)]
     if _headers_equivalent(template_headers, expected_list):
         return
+    print(f"⚠️  Rewriting headers in sheet '{ws.title}' to match config exactly")
     _rewrite_sheet_headers(ws, expected_list)
 
 
@@ -655,6 +864,9 @@ def write_import_to_sabt_excel(
     exporter_cfg = df_sheet2.attrs.get("exporter_config") or {}
     template = ensure_template_workbook(template_path, exporter_cfg)
     workbook = load_workbook(template)
+    sheets_cfg = exporter_cfg.get("sheets", {}) if isinstance(exporter_cfg, Mapping) else {}
+    if "Sheet2" not in workbook.sheetnames:
+        raise ValueError("Template is missing sheet 'Sheet2'")
     sheets = {
         "Sheet2": df_sheet2,
         "Summary": df_summary,
@@ -665,9 +877,12 @@ def write_import_to_sabt_excel(
     for name, df in sheets.items():
         if df is None:
             continue
+        if name not in sheets_cfg and name not in workbook.sheetnames:
+            continue
         if name not in workbook.sheetnames:
-            raise ValueError(f"Template is missing sheet '{name}'")
-        ws = workbook[name]
+            ws = workbook.create_sheet(title=name)
+        else:
+            ws = workbook[name]
         _verify_headers(ws, df.columns)
         _write_dataframe_to_sheet(ws, df)
     workbook.save(Path(output_path))
