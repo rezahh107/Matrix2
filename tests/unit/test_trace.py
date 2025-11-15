@@ -177,6 +177,7 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
         prefer_major_code=True,
         coverage_threshold=0.95,
         dedup_removed_ratio_threshold=0.05,
+        join_key_duplicate_threshold=0,
         alias_rule=PolicyAliasRule(normal="postal_or_fallback_mentor_id", school="mentor_id"),
         columns=PolicyColumns(
             postal_code="کدپستی",

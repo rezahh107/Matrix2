@@ -517,6 +517,31 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         progress=progress,
     )
 
+    duplicate_threshold = int(getattr(cfg, "join_key_duplicate_threshold", 0) or 0)
+    duplicate_rows = int(len(join_key_duplicates))
+    if duplicate_rows > duplicate_threshold >= 0:
+        preview = ""
+        if "warning_type" in validation.columns and "warning_message" in validation.columns:
+            warning_mask = validation["warning_type"].notna()
+            if bool(warning_mask.any()):
+                preview = str(validation.loc[warning_mask, "warning_message"].iloc[0])
+        progress(
+            65,
+            (
+                "❌ join-key duplicates exceed threshold: "
+                f"rows={duplicate_rows} threshold={duplicate_threshold}"
+            ),
+        )
+        message = (
+            "تعداد ردیف‌های دارای کلید تکراری ({rows}) از آستانهٔ مجاز "
+            "({threshold}) بیشتر است."
+        ).format(rows=duplicate_rows, threshold=duplicate_threshold)
+        if preview:
+            message += f" نمونه: {preview}"
+        error = ValueError(message)
+        setattr(error, "is_join_key_duplicate_threshold_error", True)
+        raise error
+
     progress(70, "building sheets")
     meta = {
         "policy_version": policy.version,
@@ -1017,7 +1042,8 @@ def main(
             raise
         is_coverage_error = getattr(exc, "is_coverage_threshold_error", False)
         is_dedup_error = getattr(exc, "is_dedup_removed_threshold_error", False)
-        if not (is_coverage_error or is_dedup_error):
+        is_duplicate_error = getattr(exc, "is_join_key_duplicate_threshold_error", False)
+        if not (is_coverage_error or is_dedup_error or is_duplicate_error):
             raise
         print(f"❌ {exc}", file=sys.stderr)
         return 2

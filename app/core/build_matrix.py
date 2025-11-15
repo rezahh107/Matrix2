@@ -13,6 +13,7 @@ Summary
 from __future__ import annotations
 
 from logging import getLogger
+import json
 import math
 import re
 import unicodedata
@@ -20,12 +21,13 @@ from dataclasses import dataclass, field
 from enum import IntEnum, auto
 from functools import lru_cache
 from itertools import product
-from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple, TypeVar
+from typing import Any, Callable, Collection, Dict, Iterable, List, Mapping, Sequence, Tuple, TypeVar
 
 import numpy as np
 import pandas as pd
 
 from app.core.canonical_frames import (
+    POOL_DUPLICATE_SUMMARY_ATTR,
     POOL_JOIN_KEY_DUPLICATES_ATTR,
     canonicalize_pool_frame,
 )
@@ -213,6 +215,7 @@ class BuildConfig:
     prefer_major_code: bool | None = None
     min_coverage_ratio: float | None = None
     dedup_removed_ratio_threshold: float | None = None
+    join_key_duplicate_threshold: int | None = None
 
     def __post_init__(self) -> None:
         policy = self.policy
@@ -292,8 +295,18 @@ class BuildConfig:
             if ratio < 0 or ratio > 1:
                 raise ValueError(
                     "dedup_removed_ratio_threshold must be between 0 and 1 (inclusive)"
-                )
+            )
             self.dedup_removed_ratio_threshold = ratio
+
+        if self.join_key_duplicate_threshold is None:
+            self.join_key_duplicate_threshold = int(
+                getattr(policy, "join_key_duplicate_threshold", 0)
+            )
+        else:
+            threshold = int(self.join_key_duplicate_threshold)
+            if threshold < 0:
+                raise ValueError("join_key_duplicate_threshold must be >= 0")
+            self.join_key_duplicate_threshold = threshold
 
 
 def _as_domain_config(cfg: BuildConfig) -> DomainBuildConfig:
@@ -309,6 +322,88 @@ def _as_domain_config(cfg: BuildConfig) -> DomainBuildConfig:
         alias_rule_school=cfg.alias_rule_school or "mentor_id",
         prefer_major_code=bool(cfg.prefer_major_code),
     )
+
+
+def _duplicate_summary_payload(
+    summary: Mapping[str, object] | None,
+) -> tuple[int, list[Mapping[str, object]]]:
+    if not isinstance(summary, Mapping):
+        return 0, []
+    try:
+        total = int(summary.get("total", 0))
+    except Exception:  # pragma: no cover - نگهبان مقاومتی
+        total = 0
+    sample_raw = summary.get("sample")
+    rows: list[Mapping[str, object]] = []
+    if isinstance(sample_raw, Sequence) and not isinstance(sample_raw, (str, bytes)):
+        for item in sample_raw:
+            if isinstance(item, Mapping):
+                rows.append(item)
+    return max(total, 0), rows
+
+
+def _format_duplicate_warning_message(
+    record: Mapping[str, object], join_keys: Sequence[str], mentor_column: str
+) -> str:
+    mentor_value = record.get(mentor_column) or record.get("mentor_id") or "?"
+    group_size = record.get("duplicate_group_size")
+    group_text = (
+        f"size={group_size}"
+        if group_size not in (None, "")
+        else "size=NA"
+    )
+    join_parts = [
+        f"{key}={record.get(key)}"
+        for key in join_keys
+    ]
+    return f"mentor={mentor_value} {group_text} :: {', '.join(join_parts)}"
+
+
+def _build_duplicate_warning_rows(
+    summary: Mapping[str, object] | None,
+    *,
+    join_keys: Sequence[str],
+    mentor_column: str,
+) -> list[dict[str, object]]:
+    total, sample_rows = _duplicate_summary_payload(summary)
+    if total <= 0:
+        return []
+    warnings: list[dict[str, object]] = [
+        {
+            "warning_type": "join_key_duplicate_summary",
+            "warning_message": (
+                f"{total} join-key duplicate rows detected; "
+                f"showing {min(len(sample_rows), total)} samples"
+            ),
+            "warning_payload": json.dumps({"total": total}, ensure_ascii=False),
+        }
+    ]
+    for record in sample_rows:
+        warnings.append(
+            {
+                "warning_type": "join_key_duplicate",
+                "warning_message": _format_duplicate_warning_message(
+                    record, join_keys, mentor_column
+                ),
+                "warning_payload": json.dumps(record, ensure_ascii=False),
+            }
+        )
+    return warnings
+
+
+def _format_duplicate_progress_preview(
+    summary: Mapping[str, object] | None,
+    *,
+    join_keys: Sequence[str],
+    mentor_column: str,
+) -> str:
+    total, sample_rows = _duplicate_summary_payload(summary)
+    if total <= 0:
+        return ""
+    if sample_rows:
+        detail = _format_duplicate_warning_message(sample_rows[0], join_keys, mentor_column)
+        return f"total={total}; sample={detail}"
+    return f"total={total}; sample=NA"
 
 
 # =============================================================================
@@ -1517,6 +1612,14 @@ def build_matrix(
     if duplicate_join_keys_df is None:
         columns = list(cfg.policy.join_keys) + [COL_MENTOR_ID, "duplicate_group_size"]
         duplicate_join_keys_df = pd.DataFrame(columns=columns)
+    duplicate_summary = insp_df.attrs.get(POOL_DUPLICATE_SUMMARY_ATTR)
+    duplicate_progress_message = _format_duplicate_progress_preview(
+        duplicate_summary,
+        join_keys=cfg.policy.join_keys,
+        mentor_column=COL_MENTOR_ID,
+    )
+    if duplicate_progress_message:
+        progress(4, f"⚠️ duplicate join keys detected: {duplicate_progress_message}")
     schools_df = resolve_aliases(schools_df, "school")
     schools_df = coerce_semantics(schools_df, "school")
     schools_df = ensure_required_columns(schools_df, REQUIRED_SCHOOL_COLUMNS, "school")
@@ -1760,32 +1863,45 @@ def build_matrix(
     coverage_ratio = total_rows / total_candidates if total_candidates else 1.0
     min_coverage_ratio = float(cfg.min_coverage_ratio or 0.0)
 
-    validation = pd.DataFrame(
-        [
-            {
-                "total_rows": total_rows,
-                "distinct_supporters": matrix["پشتیبان"].nunique() if not matrix.empty else 0,
-                "school_based_rows": int((matrix["عادی مدرسه"] == "مدرسه‌ای").sum()) if not matrix.empty else 0,
-                "finance_0_rows": int((matrix[finance_col] == Finance.NORMAL).sum()) if not matrix.empty else 0,
-                "finance_1_rows": int((matrix[finance_col] == Finance.BONYAD).sum()) if not matrix.empty else 0,
-                "finance_3_rows": int((matrix[finance_col] == Finance.HEKMAT).sum()) if not matrix.empty else 0,
-                "removed_mentors": 0 if removed_mentors is None else len(removed_mentors),
-                "capacity_removed_total": capacity_metrics.total_removed,
-                "capacity_special_capacity_lost": capacity_metrics.total_special_capacity_lost,
-                "capacity_percent_pool_kept": capacity_metrics.percent_pool_kept,
-                "r0_skipped": 1 if r0_skipped else 0,
-                "unmatched_school_count": unmatched_school_count,
-                "unseen_group_count": unseen_group_count,
-                "join_key_duplicate_rows": int(len(duplicate_join_keys_df)),
-                "coverage_ratio": coverage_ratio,
-                "coverage_threshold": min_coverage_ratio,
-                "total_candidates": total_candidates,
-                "dedup_removed_rows": int(dedup_removed_rows),
-                "dedup_removed_ratio": dedup_removed_ratio,
-                "dedup_removed_threshold": dedup_threshold,
-            }
-        ]
+    duplicate_threshold = int(cfg.join_key_duplicate_threshold or 0)
+    base_row = {
+        "total_rows": total_rows,
+        "distinct_supporters": matrix["پشتیبان"].nunique() if not matrix.empty else 0,
+        "school_based_rows": int((matrix["عادی مدرسه"] == "مدرسه‌ای").sum()) if not matrix.empty else 0,
+        "finance_0_rows": int((matrix[finance_col] == Finance.NORMAL).sum()) if not matrix.empty else 0,
+        "finance_1_rows": int((matrix[finance_col] == Finance.BONYAD).sum()) if not matrix.empty else 0,
+        "finance_3_rows": int((matrix[finance_col] == Finance.HEKMAT).sum()) if not matrix.empty else 0,
+        "removed_mentors": 0 if removed_mentors is None else len(removed_mentors),
+        "capacity_removed_total": capacity_metrics.total_removed,
+        "capacity_special_capacity_lost": capacity_metrics.total_special_capacity_lost,
+        "capacity_percent_pool_kept": capacity_metrics.percent_pool_kept,
+        "r0_skipped": 1 if r0_skipped else 0,
+        "unmatched_school_count": unmatched_school_count,
+        "unseen_group_count": unseen_group_count,
+        "join_key_duplicate_rows": int(len(duplicate_join_keys_df)),
+        "join_key_duplicate_threshold": duplicate_threshold,
+        "coverage_ratio": coverage_ratio,
+        "coverage_threshold": min_coverage_ratio,
+        "total_candidates": total_candidates,
+        "dedup_removed_rows": int(dedup_removed_rows),
+        "dedup_removed_ratio": dedup_removed_ratio,
+        "dedup_removed_threshold": dedup_threshold,
+        "warning_type": pd.NA,
+        "warning_message": pd.NA,
+        "warning_payload": pd.NA,
+    }
+    duplicate_warning_rows = _build_duplicate_warning_rows(
+        duplicate_summary,
+        join_keys=cfg.policy.join_keys,
+        mentor_column=COL_MENTOR_ID,
     )
+    validation_rows = [base_row]
+    validation_columns = list(base_row.keys())
+    for warning in duplicate_warning_rows:
+        warning_row = {column: pd.NA for column in validation_columns}
+        warning_row.update(warning)
+        validation_rows.append(warning_row)
+    validation = pd.DataFrame(validation_rows, columns=validation_columns)
 
     progress_log = pd.DataFrame(
         [

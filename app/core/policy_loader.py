@@ -31,6 +31,7 @@ _DEFAULT_VIRTUAL_NAME_PATTERNS: tuple[str, ...] = (
 )
 _DEFAULT_COVERAGE_THRESHOLD = 0.95
 _DEFAULT_DEDUP_REMOVED_RATIO_THRESHOLD = 0.05
+_DEFAULT_JOIN_KEY_DUPLICATE_THRESHOLD = 0
 _DEFAULT_EXCEL_OPTIONS: Mapping[str, object] = {
     "rtl": True,
     "font_name": "Tahoma",
@@ -201,6 +202,7 @@ class PolicyConfig:
     prefer_major_code: bool
     coverage_threshold: float
     dedup_removed_ratio_threshold: float
+    join_key_duplicate_threshold: int
     alias_rule: PolicyAliasRule
     columns: PolicyColumns
     column_aliases: Mapping[str, Dict[str, str]]
@@ -308,6 +310,12 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
             _DEFAULT_DEDUP_REMOVED_RATIO_THRESHOLD,
         ),
     )
+    join_key_duplicate_threshold = _normalize_join_key_duplicate_threshold(
+        data.get(
+            "join_key_duplicate_threshold",
+            _DEFAULT_JOIN_KEY_DUPLICATE_THRESHOLD,
+        )
+    )
     alias_rule = _normalize_alias_rule(data["alias_rule"])
     gender_codes = data["gender_codes"]
     if not isinstance(gender_codes, Mapping):
@@ -336,6 +344,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "prefer_major_code": prefer_major_code,
         "coverage_threshold": coverage_threshold,
         "dedup_removed_ratio_threshold": dedup_removed_ratio_threshold,
+        "join_key_duplicate_threshold": join_key_duplicate_threshold,
         "alias_rule": alias_rule,
         "gender_codes": gender_codes,
         "columns": columns,
@@ -399,6 +408,16 @@ def _normalize_ratio_value(name: str, value: object) -> float:
 
 def _normalize_coverage_threshold(value: object) -> float:
     return _normalize_ratio_value("coverage_threshold", value)
+
+
+def _normalize_join_key_duplicate_threshold(value: object) -> int:
+    try:
+        threshold = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise TypeError("join_key_duplicate_threshold must be an integer") from exc
+    if threshold < 0:
+        raise ValueError("join_key_duplicate_threshold must be >= 0")
+    return threshold
 
 
 def _normalize_fairness_strategy(value: object) -> str:
@@ -728,6 +747,7 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         dedup_removed_ratio_threshold=float(
             data["dedup_removed_ratio_threshold"]
         ),
+        join_key_duplicate_threshold=int(data["join_key_duplicate_threshold"]),
         alias_rule=PolicyAliasRule(
             normal=str(data["alias_rule"]["normal"]),
             school=str(data["alias_rule"]["school"]),

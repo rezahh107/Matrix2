@@ -19,6 +19,7 @@ from app.core.allocate_students import (
     build_selection_reason_rows,
 )
 from app.core.canonical_frames import (
+    POOL_DUPLICATE_SUMMARY_ATTR,
     POOL_JOIN_KEY_DUPLICATES_ATTR,
     canonicalize_allocation_frames,
     canonicalize_pool_frame,
@@ -178,10 +179,13 @@ def test_canonicalize_pool_frame_reports_join_key_duplicates(
     normalized = canonicalize_pool_frame(_base_pool, policy=policy, sanitize_pool=False)
     duplicate_report = normalized.attrs[POOL_JOIN_KEY_DUPLICATES_ATTR]
     stats = normalized.attrs["pool_canonicalization_stats"]
+    summary = normalized.attrs[POOL_DUPLICATE_SUMMARY_ATTR]
 
     assert not duplicate_report.empty
     assert duplicate_report["کد کارمندی پشتیبان"].tolist() == ["EMP-001", "EMP-002"]
     assert stats.join_key_duplicates == len(duplicate_report)
+    assert summary["total"] == len(duplicate_report)
+    assert isinstance(summary["sample"], list)
 
 
 def test_sanitize_pool_records_virtual_and_capacity_stats() -> None:

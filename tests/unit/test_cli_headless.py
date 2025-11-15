@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib
 import json
 from pathlib import Path
@@ -28,6 +29,8 @@ def policy_file(tmp_path: Path) -> Path:
         "school_code_empty_as_zero": True,
         "prefer_major_code": True,
         "coverage_threshold": 0.95,
+        "dedup_removed_ratio_threshold": 0.05,
+        "join_key_duplicate_threshold": 0,
         "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
             "کدرشته",
@@ -171,6 +174,37 @@ def test_cli_reports_dedup_threshold_error(policy_file: Path, capsys: pytest.Cap
     assert captured.out == ""
 
 
+def test_cli_reports_duplicate_threshold_error(
+    policy_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fake_runner(args, policy, progress):  # type: ignore[no-untyped-def]
+        error = ValueError("کلید تکراری")
+        setattr(error, "is_join_key_duplicate_threshold_error", True)
+        raise error
+
+    exit_code = cli.main(
+        [
+            "build-matrix",
+            "--inspactor",
+            "insp.xlsx",
+            "--schools",
+            "schools.xlsx",
+            "--crosswalk",
+            "cross.xlsx",
+            "--output",
+            "out.xlsx",
+            "--policy",
+            str(policy_file),
+        ],
+        build_runner=fake_runner,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "کلید" in captured.err
+    assert captured.out == ""
+
+
 def test_cli_propagates_coverage_error_for_ui(policy_file: Path) -> None:
     def fake_runner(args, policy, progress):  # type: ignore[no-untyped-def]
         error = ValueError("fail")
@@ -195,6 +229,59 @@ def test_cli_propagates_coverage_error_for_ui(policy_file: Path) -> None:
             build_runner=fake_runner,
             ui_overrides={},
         )
+
+
+def test_run_build_matrix_raises_on_duplicate_threshold_exceeded(
+    tmp_path: Path,
+    policy_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = load_policy(policy_file)
+    insp = tmp_path / "insp.xlsx"
+    schools = tmp_path / "schools.xlsx"
+    crosswalk = tmp_path / "cross.xlsx"
+    output = tmp_path / "out.xlsx"
+    for path in (insp, schools, crosswalk):
+        path.write_text("placeholder", encoding="utf-8")
+
+    args = argparse.Namespace(
+        inspactor=str(insp),
+        schools=str(schools),
+        crosswalk=str(crosswalk),
+        output=str(output),
+        min_coverage=None,
+    )
+
+    monkeypatch.setattr(cli, "read_excel_first_sheet", lambda _: pd.DataFrame())
+    monkeypatch.setattr(
+        cli,
+        "read_crosswalk_workbook",
+        lambda _path: (pd.DataFrame(), pd.DataFrame()),
+    )
+
+    def fake_build_matrix(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        validation = pd.DataFrame(
+            [
+                {
+                    "join_key_duplicate_rows": 3,
+                    "join_key_duplicate_threshold": 0,
+                    "warning_type": pd.NA,
+                    "warning_message": pd.NA,
+                    "warning_payload": pd.NA,
+                }
+            ]
+        )
+        duplicates = pd.DataFrame({"کد کارمندی پشتیبان": ["E1", "E2", "E3"]})
+        empties = pd.DataFrame()
+        return (empties, validation, empties, empties, empties, empties, duplicates, empties)
+
+    monkeypatch.setattr(cli, "build_matrix", fake_build_matrix)
+    monkeypatch.setattr(cli, "write_xlsx_atomic", lambda *_, **__: None)
+
+    with pytest.raises(ValueError) as excinfo:
+        cli._run_build_matrix(args, policy, lambda *_args: None)
+
+    assert getattr(excinfo.value, "is_join_key_duplicate_threshold_error", False)
 
 
 def test_allocate_command_passes_through(policy_file: Path) -> None:
