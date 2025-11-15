@@ -1368,18 +1368,97 @@ def build_matrix(
     mentor_source = ensure_series(insp[COL_MENTOR_ID])
     mentor_id_series = mentor_source.astype("string").fillna("").str.strip()
     invalid_mask = mentor_id_series.eq("")
-    invalid_mentors_df = pd.DataFrame(
-        {
-            "row_index": (insp.index[invalid_mask] + 1),
-            "پشتیبان": insp.loc[invalid_mask, COL_MENTOR_NAME],
-            "مدیر": insp.loc[invalid_mask, COL_MANAGER_NAME],
-            "reason": "missing mentor employee code",
-        }
-    )
-    if invalid_mentors_df.empty:
-        invalid_mentors_df = pd.DataFrame(columns=["row_index", "پشتیبان", "مدیر", "reason"])
 
-    insp_valid = insp.loc[~invalid_mask].copy()
+    invalid_entries: list[pd.DataFrame] = []
+
+    def _collect_invalid_rows(mask: pd.Series, reason: str) -> None:
+        if not mask.any():
+            return
+        invalid_entries.append(
+            pd.DataFrame(
+                {
+                    "row_index": (insp.index[mask] + 1),
+                    "پشتیبان": insp.loc[mask, COL_MENTOR_NAME],
+                    "مدیر": insp.loc[mask, COL_MANAGER_NAME],
+                    "reason": reason,
+                }
+            )
+        )
+
+    _collect_invalid_rows(invalid_mask, "missing mentor employee code")
+
+    valid_mask = ~invalid_mask
+
+    duplicate_ids: set[str] = set()
+    inconsistent_ids: set[str] = set()
+
+    def _definition_signature(row: pd.Series) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        def _tokens(raw_values: list[Any]) -> tuple[str, ...]:
+            normalized: list[str] = []
+            for token in ensure_list(raw_values):
+                norm = normalize_fa(token)
+                if norm:
+                    normalized.append(norm)
+            if not normalized:
+                return ("",)
+            return tuple(sorted(normalized))
+
+        gender_tokens = _tokens([row.get(gender_col)]) if gender_col else ("",)
+        group_values: list[Any] = []
+        if included_col:
+            group_values.append(row.get(included_col))
+        for col in group_cols:
+            group_values.append(row.get(col))
+        group_tokens = _tokens(group_values)
+        return gender_tokens, group_tokens
+
+    duplicate_mask = mentor_id_series.duplicated(keep=False)
+    if duplicate_mask.any():
+        dup_df = insp.loc[valid_mask & duplicate_mask].copy()
+        if not dup_df.empty:
+            dup_df["_definition_signature"] = dup_df.apply(_definition_signature, axis=1)
+            grouped = dup_df.groupby(COL_MENTOR_ID, sort=False)["_definition_signature"].agg(
+                lambda values: tuple(dict.fromkeys(values))
+            )
+            for mentor_id, signatures in grouped.items():
+                if len(signatures) > 1:
+                    inconsistent_ids.add(mentor_id)
+                else:
+                    duplicate_ids.add(mentor_id)
+
+    if inconsistent_ids:
+        duplicate_ids -= inconsistent_ids
+
+    duplicate_invalid_mask = valid_mask & mentor_id_series.isin(list(duplicate_ids))
+    inconsistent_invalid_mask = valid_mask & mentor_id_series.isin(list(inconsistent_ids))
+
+    remaining_col = cfg.remaining_capacity_column or "remaining_capacity"
+    negative_capacity_mask = pd.Series(False, index=insp.index)
+    if remaining_col in insp.columns:
+        remaining_series = pd.to_numeric(
+            ensure_series(insp[remaining_col]), errors="coerce"
+        )
+        negative_capacity_mask = remaining_series.lt(0).fillna(False)
+    negative_capacity_mask &= valid_mask
+
+    _collect_invalid_rows(duplicate_invalid_mask, "duplicate mentor employee code")
+    _collect_invalid_rows(
+        inconsistent_invalid_mask, "inconsistent gender/group definition"
+    )
+    _collect_invalid_rows(negative_capacity_mask, "negative remaining capacity")
+
+    valid_mask = valid_mask & ~(
+        duplicate_invalid_mask | inconsistent_invalid_mask | negative_capacity_mask
+    )
+
+    insp_valid = insp.loc[valid_mask].copy()
+
+    if invalid_entries:
+        invalid_mentors_df = pd.concat(invalid_entries, ignore_index=True)
+    else:
+        invalid_mentors_df = pd.DataFrame(
+            columns=["row_index", "پشتیبان", "مدیر", "reason"]
+        )
 
     base_df, unseen_groups, unmatched_schools = _prepare_base_rows(
         insp_valid,

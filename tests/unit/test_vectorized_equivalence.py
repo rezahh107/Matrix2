@@ -174,3 +174,24 @@ def test_vectorized_matrix_matches_reference() -> None:
     assert unmatched_df.empty
     assert not unseen_ref
     assert not unmatched_ref
+
+
+def test_duplicate_mentors_are_filtered_before_row_generation() -> None:
+    insp_df, schools_df, crosswalk_df = _create_sample_inputs()
+    duplicate_row = insp_df.iloc[[0]].copy()
+    duplicate_row.loc[:, "نام پشتیبان"] = ["زهرا تکراری"]
+    insp_with_duplicate = pd.concat([insp_df, duplicate_row], ignore_index=True)
+
+    matrix, _, _, _, _, invalid_df = build_matrix(
+        insp_with_duplicate,
+        schools_df,
+        crosswalk_df,
+        cfg=BuildConfig(),
+    )
+
+    duplicate_reasons = invalid_df.loc[
+        invalid_df["reason"] == "duplicate mentor employee code"
+    ]
+    assert len(duplicate_reasons) == 2
+    assert set(duplicate_reasons["پشتیبان"]) == {"زهرا", "زهرا تکراری"}
+    assert matrix["کد کارمندی پشتیبان"].eq("EMP-1").sum() == 0
