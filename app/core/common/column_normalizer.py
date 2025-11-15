@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Tuple
+from typing import Callable, Dict, List, Mapping, Tuple
 import warnings
 
 import pandas as pd
@@ -125,6 +125,7 @@ def normalize_input_columns(
     kind: str = "input",
     include_alias: bool = True,
     report: bool = True,
+    collector: Callable[[ColumnNormalizationReport], None] | None = None,
 ) -> tuple[pd.DataFrame, ColumnNormalizationReport]:
     """نرمال‌سازی نام ستون‌ها و ایجاد معادل استاندارد انگلیسی.
 
@@ -133,6 +134,7 @@ def normalize_input_columns(
         kind: برچسب توصیفی برای پیام‌های گزارش.
         include_alias: در صورت True ستون‌های انگلیسی استاندارد نیز افزوده می‌شود.
         report: در صورت True، دربارهٔ ستون‌های ناشناخته هشدار می‌دهد.
+        collector: تابع اختیاری برای دریافت گزارش نهایی حتی اگر ``report=False`` باشد.
 
     Returns:
         دوگانهٔ DataFrame نرمال‌شده و گزارش عملیات.
@@ -179,5 +181,7 @@ def normalize_input_columns(
         aliases_added=tuple(sorted(set(aliases_added))),
         unmatched=tuple(sorted(unmatched)),
     )
+    if collector is not None:
+        collector(report_obj)
     return result, report_obj
 
