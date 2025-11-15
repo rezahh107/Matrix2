@@ -35,6 +35,8 @@ from .common.types import (
     AllocationAlertRecord,
     AllocationLogRecord,
     JoinKeyValues,
+    MentorStateDelta,
+    MentorStateSnapshot,
     TraceStageLiteral,
     TraceStageRecord,
 )
@@ -302,6 +304,102 @@ def _resolve_mentor_state_entry(
     return None, None
 
 
+def _safe_state_int(value: object) -> int:
+    """تبدیل امن ورودی‌های متنوع ظرفیت به int پایدار.
+
+    مثال::
+
+        >>> _safe_state_int("2")
+        2
+    """
+
+    if isinstance(value, Number):
+        try:
+            if pd.isna(value):  # type: ignore[arg-type]
+                return 0
+        except TypeError:
+            pass
+        return int(value)
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    try:
+        return int(float(text))
+    except Exception:
+        return 0
+
+
+def _safe_state_float(value: object) -> float:
+    """تبدیل عمومی مقادیر occupancy_ratio به float.
+
+    مثال::
+
+        >>> _safe_state_float("0.25")
+        0.25
+    """
+
+    if isinstance(value, Number):
+        try:
+            if pd.isna(value):  # type: ignore[arg-type]
+                return 0.0
+        except TypeError:
+            pass
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    try:
+        return float(text)
+    except Exception:
+        return 0.0
+
+
+def _snapshot_state_entry(
+    entry: Mapping[str, Any] | None,
+) -> MentorStateSnapshot:
+    """ساخت snapshot قابل‌اعتماد از وضعیت پشتیبان برای ثبت تغییرات.
+
+    مثال::
+
+        >>> _snapshot_state_entry({"remaining": "2", "alloc_new": 0, "occupancy_ratio": 0.5})
+        {'remaining': 2, 'alloc_new': 0, 'occupancy_ratio': 0.5}
+    """
+
+    source = entry or {}
+    snapshot: MentorStateSnapshot = {
+        "remaining": _safe_state_int(source.get("remaining")),
+        "alloc_new": _safe_state_int(source.get("alloc_new")),
+        "occupancy_ratio": _safe_state_float(source.get("occupancy_ratio")),
+    }
+    return snapshot
+
+
+def _build_state_delta(
+    before: MentorStateSnapshot, after: MentorStateSnapshot
+) -> MentorStateDelta:
+    """محاسبهٔ diff بین دو snapshot برای استفاده در ExplainAgent.
+
+    مثال::
+
+        >>> _build_state_delta(
+        ...     {"remaining": 2, "alloc_new": 0, "occupancy_ratio": 0.0},
+        ...     {"remaining": 1, "alloc_new": 1, "occupancy_ratio": 0.5},
+        ... )
+        {'before': {'remaining': 2, 'alloc_new': 0, 'occupancy_ratio': 0.0}, ...}
+    """
+
+    diff: MentorStateSnapshot = {
+        "remaining": after["remaining"] - before["remaining"],
+        "alloc_new": after["alloc_new"] - before["alloc_new"],
+        "occupancy_ratio": after["occupancy_ratio"] - before["occupancy_ratio"],
+    }
+    return {
+        "before": dict(before),
+        "after": dict(after),
+        "diff": diff,
+    }
+
+
 class JoinKeyDataMissingError(ValueError):
     """خطای اختصاصی برای کمبود دادهٔ کلیدهای Join در ورودی دانش‌آموز."""
 
@@ -401,6 +499,7 @@ def _build_log_from_join_map(
         "suggested_actions": [],
         "capacity_before": None,
         "capacity_after": None,
+        "mentor_state_delta": None,
         "rule_reason_code": None,
         "rule_reason_text": None,
         "rule_reason_details": None,
@@ -869,8 +968,12 @@ def allocate_student(
         )
 
     mentor_identifier = chosen_row.get("mentor_id_en", chosen_en.get("mentor_id"))
-    state_entry_snapshot = active_state.get(mentor_identifier, {}) if active_state else {}
-    capacity_before = int(state_entry_snapshot.get("remaining", 0))
+    snapshot_entry = _snapshot_state_entry(
+        active_state.get(mentor_identifier)
+        if active_state and mentor_identifier is not None
+        else None
+    )
+    capacity_before = int(snapshot_entry.get("remaining", 0))
     capacity_after = capacity_before
     occupancy_value = float(chosen_row.get("occupancy_ratio", 0.0))
 
@@ -895,13 +998,25 @@ def allocate_student(
         return AllocationResult(None, trace, log)
     except ValueError as exc:
         error_code = str(exc) or "CAPACITY_UNDERFLOW"
+        student_label = str(log.get("student_id") or student.get("student_id", ""))
+        snapshot_detail = (
+            "mentor snapshot: "
+            f"remaining={snapshot_entry['remaining']}, "
+            f"alloc_new={snapshot_entry['alloc_new']}, "
+            f"occupancy_ratio={snapshot_entry['occupancy_ratio']:.4f}"
+        )
+        log["mentor_state_delta"] = _build_state_delta(snapshot_entry, snapshot_entry)
         log.update(
             {
                 "allocation_status": "failed",
                 "mentor_selected": None,
                 "mentor_id": None,
                 "error_type": error_code,
-                "detailed_reason": "Mentor capacity underflow detected",
+                "detailed_reason": (
+                    "Mentor capacity underflow detected; "
+                    f"student={student_label or 'unknown'}; "
+                    f"mentor={mentor_identifier or 'unknown'}; {snapshot_detail}"
+                ),
                 "suggested_actions": [
                     "بازبینی ظرفیت ورودی",
                     "اجرای مجدد sanitize pool",
@@ -925,6 +1040,11 @@ def allocate_student(
             "value": list(chosen_row.get("mentor_sort_key", ())),
         },
     }
+
+    mentor_state_after = _snapshot_state_entry(
+        active_state.get(mentor_identifier) if active_state else None
+    )
+    log["mentor_state_delta"] = _build_state_delta(snapshot_entry, mentor_state_after)
 
     log.update(
         {
