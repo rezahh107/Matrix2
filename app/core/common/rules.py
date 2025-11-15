@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Protocol
+import math
+from numbers import Integral, Real
+from typing import Any, Mapping, Protocol
 
 from .reasons import LocalizedReason, ReasonCode, build_reason
 from .types import TraceStageLiteral, TraceStageRecord
@@ -109,6 +111,10 @@ class CandidateStageRule:
         for key in self.detail_keys:
             if key in source_extras:
                 extras[key] = source_extras[key]
+        if (not passed) and _should_augment_join_details(self.stage):
+            join_details = _extract_join_detail_values(record)
+            if join_details:
+                extras.update(join_details)
         return RuleResult(
             stage=self.stage,
             passed=passed,
@@ -123,6 +129,56 @@ _COMMON_DETAIL_KEYS = (
     "expected_op",
     "expected_threshold",
 )
+
+
+_SENSITIVE_JOIN_STAGES = frozenset({"gender", "center", "school"})
+
+
+def _should_augment_join_details(stage: TraceStageLiteral) -> bool:
+    return stage in _SENSITIVE_JOIN_STAGES
+
+
+def _coerce_detail_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, Integral):
+        return int(value)
+    if isinstance(value, Real):
+        numeric = float(value)
+        if math.isnan(numeric):  # pragma: no cover - محافظ NaN
+            return None
+        if numeric.is_integer():
+            return int(numeric)
+        return None
+    return None
+
+
+def _extract_join_detail_values(record: TraceStageRecord) -> Mapping[str, Any] | None:
+    extras = record.get("extras") or {}
+    student_value = None
+    mentor_value = None
+    for key in ("join_value_norm", "school_code_norm"):
+        if key in extras:
+            student_value = _coerce_detail_int(extras.get(key))
+        if student_value is not None:
+            break
+    for key in ("mentor_value_norm", "mentor_value_raw"):
+        if key in extras:
+            mentor_value = _coerce_detail_int(extras.get(key))
+        if mentor_value is not None:
+            break
+    if student_value is None and mentor_value is None:
+        return None
+    details: dict[str, Any] = {}
+    if student_value is not None:
+        details["student_value"] = student_value
+    if mentor_value is not None:
+        details["mentor_value"] = mentor_value
+    if student_value is not None and mentor_value is not None:
+        details["normalize_diff"] = student_value - mentor_value
+    return details or None
 
 
 _DEFAULT_RULE_CODES: Mapping[TraceStageLiteral, tuple[ReasonCode, tuple[str, ...]]] = {

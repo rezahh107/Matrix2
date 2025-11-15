@@ -62,3 +62,16 @@ def test_common_detail_keys_forwarded_from_extras() -> None:
     assert result.details["join_value_raw"] == "A"
     assert result.details["expected_op"] == "="
     assert result.reason.code is ReasonCode.GENDER_MISMATCH
+
+
+def test_sensitive_stage_failure_reports_join_differences() -> None:
+    mapping = default_stage_rule_map()
+    extras = {
+        "join_value_norm": 2,
+        "mentor_value_norm": 1,
+    }
+    context = RuleContext(stage_record=_stage_record("center", after=0, extras=extras))
+    result = mapping["center"](context)
+    assert result.details["student_value"] == 2
+    assert result.details["mentor_value"] == 1
+    assert result.details["normalize_diff"] == 1

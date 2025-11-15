@@ -43,6 +43,10 @@ def test_selection_reason_sheet_enriches_reason_text() -> None:
                     "stage": "gender",
                     "join_value_norm": policy.gender_codes.female.value,
                     "expected_op": "=",
+                    "student_value": policy.gender_codes.female.value,
+                    "mentor_value": policy.gender_codes.male.value,
+                    "normalize_diff": policy.gender_codes.female.value
+                    - policy.gender_codes.male.value,
                 }
             ],
             "fairness_reason_code": ["FAIRNESS_ORDER"],
@@ -61,6 +65,9 @@ def test_selection_reason_sheet_enriches_reason_text() -> None:
     assert "دلیل Policy" in reason_text
     assert "جزئیات Policy" in reason_text
     assert "join_value_norm" in reason_text
+    assert "student_value" in reason_text
+    assert "mentor_value" in reason_text
+    assert "normalize_diff" in reason_text
     assert "عدالت" in reason_text
     assert "[GENDER_MISMATCH]" in reason_text
     sheet_name, sanitized = write_selection_reasons_sheet(reasons, writer=None, policy=policy)

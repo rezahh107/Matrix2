@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from numbers import Number
 from typing import Any, Iterable, List, Mapping, Sequence
 
 import pandas as pd
@@ -133,6 +134,27 @@ def _apply_stage_rule(
 def _filter_stage(frame: pd.DataFrame, column: str, value: object) -> pd.DataFrame:
     mask = frame[column] == value
     return frame.loc[mask]
+
+
+def _candidate_join_value(frame: pd.DataFrame, column: str) -> object | None:
+    """استخراج اولین مقدار معتبر ستون از استخر فعلی کاندیداها."""
+
+    if column not in frame.columns or frame.empty:
+        return None
+    try:
+        series = frame[column]
+    except KeyError:  # pragma: no cover - محافظ همگام‌سازی ستون
+        return None
+    cleaned = series.dropna()
+    if cleaned.empty:
+        return None
+    value = cleaned.iloc[0]
+    try:
+        if value is pd.NA:  # type: ignore[comparison-overlap]
+            return None
+    except Exception:  # pragma: no cover - برای انواع غیرپشتیبان
+        pass
+    return value
 
 
 def _string_or_none(value: object) -> str | None:
@@ -261,6 +283,7 @@ def build_allocation_trace(
         expected_op: str | None = "="
         expected_threshold: object | None = None
         stage_extras: dict[str, Any] = {}
+        mentor_join_value = _candidate_join_value(current, plan.column)
         if plan.stage == "school":
             filtered, school_extras, norm_value = _school_stage_filter(
                 current, plan.column, student, policy
@@ -277,6 +300,21 @@ def build_allocation_trace(
             expected_value = value
             stage_extras["join_value_raw"] = value
             stage_extras["join_value_norm"] = _coerce_optional_int(value)
+        if mentor_join_value is not None:
+            mentor_raw: object | None = mentor_join_value
+            if isinstance(mentor_join_value, Number) and not isinstance(mentor_join_value, bool):
+                try:
+                    if pd.isna(mentor_join_value):  # type: ignore[arg-type]
+                        mentor_raw = None
+                    else:
+                        mentor_raw = int(mentor_join_value)
+                except Exception:
+                    mentor_raw = None
+            if mentor_raw is not None:
+                stage_extras["mentor_value_raw"] = mentor_raw
+            mentor_norm = _coerce_optional_int(mentor_join_value)
+            if mentor_norm is not None:
+                stage_extras["mentor_value_norm"] = mentor_norm
         stage_extras["expected_op"] = expected_op
         stage_extras["expected_threshold"] = expected_threshold
         trace.append(

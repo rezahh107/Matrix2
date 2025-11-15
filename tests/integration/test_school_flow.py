@@ -43,6 +43,10 @@ def _school_stage(trace: list[dict[str, object]]) -> dict[str, object]:
     return next(stage for stage in trace if stage["stage"] == "school")
 
 
+def _gender_stage(trace: list[dict[str, object]]) -> dict[str, object]:
+    return next(stage for stage in trace if stage["stage"] == "gender")
+
+
 def test_trace_records_raw_and_normalized_school_code() -> None:
     policy = load_policy()
     students = _normalize_students(_student_df("۶۶۳"), policy)
@@ -65,6 +69,7 @@ def test_trace_records_raw_and_normalized_school_code() -> None:
     for key, value in expected.items():
         assert extras[key] == value
     assert extras["join_value_norm"] == 663
+    assert extras["mentor_value_norm"] == 663
     assert extras["expected_op"] == ">"
     assert extras["rule_details"]["school_code_norm"] == 663
     assert extras["rule_reason_code"] == ReasonCode.OK
@@ -92,6 +97,30 @@ def test_trace_for_normal_student_marks_false() -> None:
     for key, value in expected.items():
         assert extras[key] == value
     assert extras["join_value_norm"] == 0
+    assert extras["mentor_value_norm"] == 0
     assert extras["expected_op"] == ">"
     assert extras["rule_details"]["school_code_norm"] == 0
     assert extras["rule_reason_code"] == ReasonCode.OK
+
+
+def test_gender_stage_failure_reports_join_details() -> None:
+    policy = load_policy()
+    student_df = _student_df("۶۶۳")
+    student_df["جنسیت"] = [policy.gender_codes.female.value]
+    students = _normalize_students(student_df, policy)
+    student = students.iloc[0].to_dict()
+    pool = _pool_df(663)
+    pool["جنسیت"] = [policy.gender_codes.male.value]
+
+    trace = build_allocation_trace(student, pool, policy=policy)
+    stage = _gender_stage(trace)
+
+    assert stage["total_after"] == 0
+    extras = stage["extras"]
+    assert extras["mentor_value_norm"] == policy.gender_codes.male.value
+    assert extras["rule_details"]["student_value"] == policy.gender_codes.female.value
+    assert extras["rule_details"]["mentor_value"] == policy.gender_codes.male.value
+    assert (
+        extras["rule_details"]["normalize_diff"]
+        == policy.gender_codes.female.value - policy.gender_codes.male.value
+    )
