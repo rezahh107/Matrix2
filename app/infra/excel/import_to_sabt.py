@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from collections import OrderedDict
 from datetime import datetime
+import hashlib
 import re
 from pathlib import Path
-from typing import Any, Iterable, Mapping, MutableMapping, NamedTuple, Sequence
+from typing import Any, Callable, Iterable, Mapping, MutableMapping, NamedTuple, Sequence
 
 import pandas as pd
 
@@ -74,6 +75,7 @@ __all__ = [
     "build_optional_sheet_frame",
     "ensure_template_workbook",
     "write_import_to_sabt_excel",
+    "build_header_signature",
     "ImportToSabtExportError",
 ]
 
@@ -84,6 +86,15 @@ class ExporterConfigError(ValueError):
 
 class ImportToSabtExportError(ValueError):
     """خطای اعتبارسنجی داده برای خروجی ImportToSabt."""
+
+
+class HeaderMismatchLog(NamedTuple):
+    """ثبت ساختاریافتهٔ مغایرت هدر Template با ستون‌های انتظاری."""
+
+    sheet_name: str
+    template_headers: tuple[str, ...]
+    expected_headers: tuple[str, ...]
+    expected_signature: str
 
 
 def _describe_frame_source(frame: pd.DataFrame, *, default_label: str) -> str:
@@ -1072,21 +1083,28 @@ def build_summary_frame(
     columns = list(sheet_cfg.get("columns", []))
     if len(columns) < 2:
         return pd.DataFrame(columns=columns)
-    data = [
-        {columns[0]: "تعداد کل دانش‌آموز", columns[1]: total_students},
-        {columns[0]: "تخصیص موفق", columns[1]: allocated_count},
-        {columns[0]: "تخصیص ناموفق", columns[1]: error_count},
-    ]
+    data: list[dict[str, Any]] = []
+
+    def _base_row(label: str, value: Any) -> dict[str, Any]:
+        row = {columns[0]: label, columns[1]: value}
+        for extra in columns[2:]:
+            row[extra] = ""
+        return row
+
+    data.extend(
+        [
+            _base_row("تعداد کل دانش‌آموز", total_students),
+            _base_row("تخصیص موفق", allocated_count),
+            _base_row("تخصیص ناموفق", error_count),
+        ]
+    )
     if dedupe_logs:
         for entry in dedupe_logs:
             context = str(entry.get("context", "")).strip() or "dedupe"
             removed_columns = entry.get("columns") or []
             removed_text = ", ".join(str(col) for col in removed_columns)
             description = f"{context}: {removed_text}" if removed_text else context
-            row = {columns[0]: "پاکسازی ستون‌های تکراری", columns[1]: description}
-            for extra in columns[2:]:
-                row[extra] = ""
-            data.append(row)
+            data.append(_base_row("پاکسازی ستون‌های تکراری", description))
     return pd.DataFrame(data, columns=columns)
 
 
@@ -1207,7 +1225,12 @@ def _rewrite_sheet_headers(ws, expected: Sequence[str]) -> None:
         ws.delete_cols(len(expected) + 1, extra_cols)
 
 
-def _verify_headers(ws, expected: Sequence[str]) -> None:
+def _verify_headers(
+    ws,
+    expected: Sequence[str],
+    *,
+    on_mismatch: Callable[[str, Sequence[str], Sequence[str]], None] | None = None,
+) -> None:
     header_cells = next(ws.iter_rows(min_row=1, max_row=1))
     headers = [cell.value if cell.value is not None else "" for cell in header_cells]
     expected_list = list(expected)
@@ -1219,8 +1242,50 @@ def _verify_headers(ws, expected: Sequence[str]) -> None:
     template_headers = headers[: len(expected_list)]
     if _headers_equivalent(template_headers, expected_list):
         return
+    if on_mismatch is not None:
+        on_mismatch(ws.title, template_headers, expected_list)
     print(f"⚠️  Rewriting headers in sheet '{ws.title}' to match config exactly")
     _rewrite_sheet_headers(ws, expected_list)
+
+
+def build_header_signature(
+    headers: Sequence[str], exporter_cfg: Mapping[str, Any] | None
+) -> str:
+    """محاسبهٔ امضای هدر بر پایه نسخه و لیست ستون‌ها.
+
+    مثال
+    ------
+    >>> build_header_signature(["A", "B"], {"version": "1.1"})
+    'v1.1-01ba4719c80b'
+    """
+
+    version = ""
+    if isinstance(exporter_cfg, Mapping):
+        version = str(exporter_cfg.get("version") or "").strip()
+    version = version or "0"
+    normalized = [_normalize_header_label(value) for value in headers]
+    payload = "\n".join(normalized).encode("utf-8")
+    digest = hashlib.sha256(payload).hexdigest()[:12]
+    return f"v{version}-{digest}"
+
+
+def _append_header_mismatch_row(summary_df: pd.DataFrame, log: HeaderMismatchLog) -> None:
+    if not isinstance(summary_df, pd.DataFrame):
+        return
+    columns = list(summary_df.columns)
+    if not columns:
+        return
+    row = {column: "" for column in columns}
+    row[columns[0]] = "هشدار ناسازگاری هدر"
+    if len(columns) > 1:
+        row[columns[1]] = log.sheet_name
+    detail_parts = [f"expected={log.expected_signature}"]
+    if log.template_headers:
+        template_text = " | ".join(log.template_headers)
+        detail_parts.append(f"template={template_text}")
+    target_column = columns[2] if len(columns) > 2 else columns[-1]
+    row[target_column] = "؛ ".join(detail_parts)
+    summary_df.loc[len(summary_df)] = row
 
 
 def write_import_to_sabt_excel(
@@ -1242,14 +1307,31 @@ def write_import_to_sabt_excel(
     sheets_cfg = exporter_cfg.get("sheets", {}) if isinstance(exporter_cfg, Mapping) else {}
     if "Sheet2" not in workbook.sheetnames:
         raise ValueError("Template is missing sheet 'Sheet2'")
-    sheets = {
-        "Sheet2": df_sheet2,
-        "Summary": df_summary,
-        "Errors": df_errors,
-        "Sheet5": df_sheet5,
-        "9394": df_9394,
-    }
-    for name, df in sheets.items():
+    header_logs = df_summary.attrs.get("header_mismatch_logs")
+    if not isinstance(header_logs, list):
+        header_logs = []
+        df_summary.attrs["header_mismatch_logs"] = header_logs
+
+    def _record_header_mismatch(
+        sheet_name: str, template_headers: Sequence[str], expected_headers: Sequence[str]
+    ) -> None:
+        log = HeaderMismatchLog(
+            sheet_name=sheet_name,
+            template_headers=tuple(str(value or "") for value in template_headers),
+            expected_headers=tuple(str(value or "") for value in expected_headers),
+            expected_signature=build_header_signature(expected_headers, exporter_cfg),
+        )
+        header_logs.append(log)
+        _append_header_mismatch_row(df_summary, log)
+
+    sheets = [
+        ("Sheet2", df_sheet2),
+        ("Errors", df_errors),
+        ("Sheet5", df_sheet5),
+        ("9394", df_9394),
+        ("Summary", df_summary),
+    ]
+    for name, df in sheets:
         if df is None:
             continue
         if name not in sheets_cfg and name not in workbook.sheetnames:
@@ -1258,6 +1340,6 @@ def write_import_to_sabt_excel(
             ws = workbook.create_sheet(title=name)
         else:
             ws = workbook[name]
-        _verify_headers(ws, df.columns)
+        _verify_headers(ws, df.columns, on_mismatch=_record_header_mismatch)
         _write_dataframe_to_sheet(ws, df)
     workbook.save(Path(output_path))

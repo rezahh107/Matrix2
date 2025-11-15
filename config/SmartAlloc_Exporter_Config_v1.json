@@ -107,7 +107,7 @@
         "columns": ["کد رهگیری حکمت", "نوع بسته حکمت"]
       }
     },
-    "Summary": {"columns": ["شاخص", "مقدار"]},
+    "Summary": {"columns": ["شاخص", "مقدار", "هشدار قالب"]},
     "Errors": {"columns": ["student_id", "error_type", "detail"]},
     "Sheet5": {"columns": ["ستون ۱", "ستون ۲"]},
     "9394": {"columns": ["ستون الف", "ستون ب"]}
