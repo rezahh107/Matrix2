@@ -497,6 +497,38 @@ def _resolve_student_center_info(
     )
 
 
+def _extract_and_validate_center(
+    student: Mapping[str, object], policy: PolicyConfig
+) -> tuple[int | None, bool]:
+    """استخراج مقدار مرکز دانش‌آموز و تشخیص معتبر بودن آن."""
+
+    column = policy.stage_column("center")
+    fallback_center = getattr(policy, "default_center_for_invalid", None)
+    try:
+        value = _student_value(student, column)
+    except KeyError:
+        return fallback_center, False
+    try:
+        if value is None or value == "":
+            return fallback_center, False
+        if isinstance(value, str):
+            text_value = value.strip()
+            if not text_value:
+                return fallback_center, False
+            value = text_value
+        if pd.isna(value):  # type: ignore[arg-type]
+            return fallback_center, False
+    except Exception:
+        return fallback_center, False
+    try:
+        return int(value), True
+    except (TypeError, ValueError):
+        numeric_value = _maybe_int_from_text(value)
+        if numeric_value is None:
+            return fallback_center, False
+        return numeric_value, True
+
+
 def _collect_join_key_map(
     student: Mapping[str, object], policy: PolicyConfig
 ) -> tuple[Dict[str, int], Tuple[str, ...]]:
@@ -636,11 +668,11 @@ def _build_center_manager_index(
     pool: pd.DataFrame,
     policy: PolicyConfig,
     manager_map: Mapping[int, Sequence[str]] | None,
-) -> dict[int, pd.Index]:
-    """ساخت نگاشت مرکز → ایندکس منتورها برای اعمال فیلتر مدیر."""
+) -> tuple[dict[int, pd.Index], list[int]]:
+    """ساخت نگاشت مرکز → ایندکس منتورها با گزارش مراکز بدون مدیر."""
 
     if not manager_map:
-        return {}
+        return {}, []
     center_candidates = (
         policy.stage_column("center"),
         policy.stage_column("center").replace(" ", "_"),
@@ -654,11 +686,12 @@ def _build_center_manager_index(
     )
     manager_column = next((name for name in manager_candidates if name in pool.columns), None)
     if center_column is None or manager_column is None:
-        return {}
+        return {}, []
     center_series = pd.to_numeric(ensure_series(pool[center_column]), errors="coerce").fillna(-1)
     center_series = center_series.astype(int)
     manager_series = ensure_series(pool[manager_column]).astype("string").str.strip()
     result: dict[int, pd.Index] = {}
+    missing_centers: list[int] = []
     for center_value, names in manager_map.items():
         normalized_names = [str(name).strip() for name in names if str(name).strip()]
         if not normalized_names:
@@ -666,20 +699,23 @@ def _build_center_manager_index(
         mask = center_series.eq(int(center_value)) & manager_series.isin(normalized_names)
         if mask.any():
             result[int(center_value)] = pool.index[mask]
-    missing_centers: list[int] = []
-    for center_value, names in manager_map.items():
-        if int(center_value) not in result:
+        else:
             missing_centers.append(int(center_value))
-            manager_list = ", ".join(str(name) for name in names)
+            manager_list = ", ".join(str(name) for name in normalized_names)
             warnings.warn(
-                f"⚠️ مرکز {center_value}: هیچ پشتیبانی با مدیران {manager_list} پیدا نشد",
+                (
+                    f"هیچ منتوری با نام‌های {manager_list or 'نامشخص'} برای مرکز "
+                    f"{center_value} یافت نشد. دانش‌آموزان این مرکز بدون محدودیت مدیر "
+                    "تخصیص خواهند یافت."
+                ),
+                UserWarning,
                 stacklevel=2,
             )
     if missing_centers and policy.center_management.strict_manager_validation:
         raise ValueError(
-            f"مدیران مورد نظر برای مراکز {missing_centers} در استخر یافت نشدند"
+            f"مدیران مورد نیاز برای مراکز {missing_centers} در استخر یافت نشدند"
         )
-    return result
+    return result, missing_centers
 
 
 def _normalize_rule_details(payload: object) -> Mapping[str, object] | None:
@@ -785,32 +821,71 @@ def _derive_failure_alerts(
 
 
 def _append_invalid_center_alert(
-    log: AllocationLogRecord, info: StudentCenterInfo, fallback_center: int | None
+    log: AllocationLogRecord,
+    student_info: Mapping[str, object] | None,
+    fallback_center: int | None,
 ) -> None:
-    """ثبت هشدار برای مقادیر نامعتبر ستون مرکز."""
+    """ثبت هشدار ساخت‌یافته برای مقادیر نامعتبر ستون مرکز."""
 
-    if not info.is_invalid:
+    if not student_info:
         return
-    context: Dict[str, Any] = {"column": info.column, "raw_value": info.raw_value}
-    if fallback_center is not None:
-        context["fallback_center"] = fallback_center
-        message = (
-            f"مقدار ستون {info.column} نامعتبر بود؛ مرکز {fallback_center} به‌عنوان "
-            "fallback استفاده شد."
-        )
-    else:
-        message = f"مقدار ستون {info.column} نامعتبر بود و فیلتر مرکز اعمال نشد."
+    original_center = student_info.get("original_center")
+    student_id = student_info.get("student_id")
+    column = student_info.get("center_column", "center")
+    duplicate = False
+    existing_invalid = log.get("invalid_center_alerts")
+    if isinstance(existing_invalid, list):
+        for entry in existing_invalid:
+            if (
+                entry.get("student_id") == student_id
+                and entry.get("original_center") == original_center
+            ):
+                duplicate = True
+                break
+    if duplicate:
+        return
+    fallback_text = (
+        "بدون محدودیت"
+        if fallback_center is None
+        else str(fallback_center)
+    )
+    original_text = "" if original_center is None else str(original_center)
+    message = f"مرکز نامعتبر '{original_text or 'نامشخص'}' به {fallback_text} تغییر یافت"
+    context: Dict[str, Any] = {
+        "column": column,
+        "raw_value": original_center,
+        "fallback_center": fallback_center,
+    }
     alert: AllocationAlertRecord = {
         "code": "INVALID_CENTER",
         "stage": "center",
         "message": message,
         "context": context,
     }
-    existing = log.get("alerts")
-    if isinstance(existing, list):
-        existing.append(alert)
+    existing_alerts = log.get("alerts")
+    if isinstance(existing_alerts, list):
+        existing_alerts.append(alert)
     else:
         log["alerts"] = [alert]
+    invalid_entries = log.get("invalid_center_alerts")
+    if isinstance(invalid_entries, list):
+        invalid_entries.append(
+            {
+                "student_id": student_id,
+                "original_center": original_center,
+                "fallback_center": fallback_center,
+                "message": message,
+            }
+        )
+    else:
+        log["invalid_center_alerts"] = [
+            {
+                "student_id": student_id,
+                "original_center": original_center,
+                "fallback_center": fallback_center,
+                "message": message,
+            }
+        ]
     warnings.warn(message, stacklevel=2)
 
 
@@ -958,6 +1033,13 @@ def allocate_student(
     center_fallback = None
     if center_info.is_invalid and center_info.normalized_value is None:
         center_fallback = policy.default_center_for_invalid
+    center_alert_payload: Dict[str, object] | None = None
+    if center_info.is_invalid:
+        center_alert_payload = {
+            "student_id": student.get("student_id"),
+            "original_center": center_info.raw_value,
+            "center_column": center_info.column,
+        }
 
     join_map, missing_columns = _collect_join_key_map(student, policy)
 
@@ -1014,7 +1096,9 @@ def allocate_student(
                 ],
             }
         )
-        _append_invalid_center_alert(log, center_info, center_fallback)
+        if center_alert_payload is not None and not center_alert_payload.get("student_id"):
+            center_alert_payload["student_id"] = log.get("student_id")
+        _append_invalid_center_alert(log, center_alert_payload, center_fallback)
         return AllocationResult(None, trace, log)
 
     def _fail_allocation(
@@ -1051,7 +1135,9 @@ def allocate_student(
     log["rule_reason_code"] = rule_reason_code
     log["rule_reason_text"] = rule_reason_text
     log["rule_reason_details"] = rule_details
-    _append_invalid_center_alert(log, center_info, center_fallback)
+    if center_alert_payload is not None and not center_alert_payload.get("student_id"):
+        center_alert_payload["student_id"] = log.get("student_id")
+    _append_invalid_center_alert(log, center_alert_payload, center_fallback)
 
     if eligible.empty:
         return _fail_allocation(
@@ -1379,9 +1465,10 @@ def allocate_batch(
         pool_internal, capacity_column=capacity_internal, policy=policy
     )
 
-    center_manager_index = _build_center_manager_index(
+    center_manager_index, _ = _build_center_manager_index(
         pool_with_ids, policy, center_manager_map
     )
+    center_column_name = policy.stage_column("center")
 
     allocations: List[Mapping[str, object]] = []
     logs: List[AllocationLogRecord] = []
@@ -1395,10 +1482,16 @@ def allocate_batch(
     for idx, (_, student_row) in enumerate(students_norm.iterrows(), start=1):
         student_dict = student_row.to_dict()
         progress(int(idx * 100 / total), f"allocating {idx}/{total}")
-        center_info = _resolve_student_center_info(student_dict, policy)
-        student_center = center_info.normalized_value
-        if student_center is None and center_info.is_invalid:
-            student_center = policy.default_center_for_invalid
+        student_center, center_is_valid = _extract_and_validate_center(
+            student_dict, policy
+        )
+        invalid_center_payload: Dict[str, object] | None = None
+        if not center_is_valid:
+            invalid_center_payload = {
+                "student_id": student_dict.get("student_id", idx),
+                "original_center": student_dict.get(center_column_name),
+                "center_column": center_column_name,
+            }
         pool_view = pool_with_ids
         if student_center is not None:
             center_key = int(student_center)
@@ -1417,6 +1510,8 @@ def allocate_batch(
             pool_state_view=pool_internal,
             alert_progress=progress,
         )
+        if invalid_center_payload is not None:
+            _append_invalid_center_alert(result.log, invalid_center_payload, student_center)
         logs.append(result.log)
         for stage in result.trace:
             trace_rows.append({"student_id": result.log["student_id"], **stage})

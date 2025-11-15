@@ -315,7 +315,7 @@ class MainWindow(QMainWindow):
         self._picker_pool = FilePicker(page, placeholder="استخر منتورها (*.xlsx)")
         self._picker_pool.setObjectName("editPool")
         self._picker_pool.setToolTip("فهرست منتورها یا پشتیبان‌ها برای تخصیص")
-        self._picker_pool.line_edit().textChanged.connect(self._refresh_manager_choices)
+        self._picker_pool.line_edit().textChanged.connect(self._refresh_manager_lists)
         inputs_layout.addRow("استخر منتورها", self._picker_pool)
 
         outer.addWidget(inputs_group)
@@ -495,7 +495,7 @@ class MainWindow(QMainWindow):
         outer.addLayout(action_layout)
         outer.addStretch(1)
 
-        QTimer.singleShot(0, self._refresh_manager_choices)
+        QTimer.singleShot(0, self._refresh_manager_lists)
 
         return page
 
@@ -1138,35 +1138,63 @@ class MainWindow(QMainWindow):
             else:
                 self._prefs.clear_center_manager(center_id)
 
-    def _refresh_manager_choices(self) -> None:
-        """بارگذاری لیست مدیران از فایل استخر و به‌روز رسانی ComboBoxها."""
+    def _refresh_manager_lists(self) -> None:
+        """بارگذاری لیست مدیران با نمایش هشدارهای تعاملی."""
 
         if not self._center_manager_combos:
             return
         path_text = self._picker_pool.text().strip()
         if not path_text:
+            self._append_log("⚠️ فایل استخر انتخاب نشده یا وجود ندارد")
             return
         path = Path(path_text)
+        if not path.exists():
+            QMessageBox.warning(
+                self,
+                "فایل استخر",
+                "فایل استخر انتخاب نشده یا وجود ندارد",
+                QMessageBox.Ok,
+            )
+            self._append_log("⚠️ فایل استخر انتخاب نشده یا وجود ندارد")
+            return
+        default_names = self._default_manager_names()
         try:
             names = self._load_manager_names_from_pool(path)
         except ValueError as exc:
-            QMessageBox.warning(self, "بارگذاری مدیران", str(exc))
-            self._append_log(f"⚠️ بارگذاری مدیران: {exc}")
-            return
-        if not names:
             QMessageBox.warning(
                 self,
-                "لیست مدیران",
-                "هیچ نام مدیری در فایل استخر یافت نشد. ستون 'مدیر' را بررسی کنید.",
+                "ستون مدیر یافت نشد",
+                "ستون 'manager_name' در فایل استخر وجود ندارد.\n\n"
+                "لطفاً فایل را بررسی کرده یا از مقادیر پیش‌فرض استفاده کنید.",
+                QMessageBox.Ok,
             )
-            self._append_log("⚠️ ستونی برای مدیر در فایل استخر یافت نشد")
-            return
-        for center_id, combo in self._center_manager_combos.items():
-            preferred = self._prefs.get_center_manager(
-                center_id, self._center_default_manager(center_id)
+            self._append_log(f"⚠️ بارگذاری مدیران: {exc}")
+            names = default_names
+        except Exception as exc:  # pragma: no cover - خطای فایل غیرمنتظره
+            QMessageBox.critical(
+                self,
+                "خطا در بارگذاری مدیران",
+                f"خطا در بارگذاری لیست مدیران:\n{exc}\n\n"
+                "برنامه از مقادیر پیش‌فرض استفاده می‌کند.",
+                QMessageBox.Ok,
             )
-            self._populate_manager_combo(center_id, combo, names, preferred)
-        self._append_log("✅ لیست مدیران به‌روزرسانی شد")
+            self._append_log(f"❌ خطا در بارگذاری مدیران: {exc}")
+            names = default_names
+        else:
+            if not names:
+                response = QMessageBox.warning(
+                    self,
+                    "مدیری یافت نشد",
+                    "هیچ مدیری در ستون 'manager_name' فایل استخر پیدا نشد.\n\n"
+                    "آیا می‌خواهید از مقادیر پیش‌فرض استفاده کنید؟",
+                    QMessageBox.Yes | QMessageBox.No,
+                )
+                if response == QMessageBox.No:
+                    self._append_log("⚠️ هیچ مدیر پیش‌فرضی اعمال نشد")
+                    return
+                names = default_names
+        self._populate_manager_combos(names)
+        self._append_log(f"✅ {len(names)} مدیر بارگذاری شد")
 
     def _populate_manager_combo(
         self, center_id: int, combo: QComboBox | None, names: list[str], preferred: str
@@ -1183,6 +1211,31 @@ class MainWindow(QMainWindow):
         if target:
             combo.setEditText(target)
         combo.blockSignals(False)
+
+    def _populate_manager_combos(self, names: Sequence[str]) -> None:
+        """اعمال یک‌جای لیست مدیران روی همهٔ مراکز."""
+
+        for center_id, combo in self._center_manager_combos.items():
+            preferred = self._prefs.get_center_manager(
+                center_id, self._center_default_manager(center_id)
+            )
+            self._populate_manager_combo(center_id, combo, list(names), preferred)
+
+    def _default_manager_names(self) -> list[str]:
+        """تولید fallback پیش‌فرض در صورت نبود دادهٔ استخر."""
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for center in self._center_definitions:
+            for name in center.get("defaults", ()):
+                text = str(name or "").strip()
+                if not text or text in seen:
+                    continue
+                ordered.append(text)
+                seen.add(text)
+        if not ordered:
+            ordered = ["شهدخت کشاورز", "آیناز هوشمند"]
+        return ordered
 
     def _load_manager_names_from_pool(self, path: Path) -> list[str]:
         """خواندن ستون مدیر از فایل استخر برای ساخت فهرست کشویی."""
