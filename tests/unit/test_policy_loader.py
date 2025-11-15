@@ -39,6 +39,7 @@ def _valid_payload() -> dict[str, object]:
         "prefer_major_code": True,
         "coverage_threshold": 0.95,
         "dedup_removed_ratio_threshold": 0.05,
+        "school_lookup_mismatch_threshold": 0.0,
         "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
             "کدرشته",

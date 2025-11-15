@@ -30,6 +30,7 @@ def policy_file(tmp_path: Path) -> Path:
         "prefer_major_code": True,
         "coverage_threshold": 0.95,
         "dedup_removed_ratio_threshold": 0.05,
+        "school_lookup_mismatch_threshold": 0.0,
         "join_key_duplicate_threshold": 0,
         "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
@@ -202,6 +203,37 @@ def test_cli_reports_duplicate_threshold_error(
     captured = capsys.readouterr()
     assert exit_code == 2
     assert "کلید" in captured.err
+    assert captured.out == ""
+
+
+def test_cli_reports_school_lookup_threshold_error(
+    policy_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fake_runner(args, policy, progress):  # type: ignore[no-untyped-def]
+        error = ValueError("کد/نام مدرسه ناشناخته")
+        setattr(error, "is_school_lookup_threshold_error", True)
+        raise error
+
+    exit_code = cli.main(
+        [
+            "build-matrix",
+            "--inspactor",
+            "insp.xlsx",
+            "--schools",
+            "schools.xlsx",
+            "--crosswalk",
+            "cross.xlsx",
+            "--output",
+            "out.xlsx",
+            "--policy",
+            str(policy_file),
+        ],
+        build_runner=fake_runner,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "مدرسه" in captured.err
     assert captured.out == ""
 
 

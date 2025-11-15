@@ -31,6 +31,7 @@ _DEFAULT_VIRTUAL_NAME_PATTERNS: tuple[str, ...] = (
 )
 _DEFAULT_COVERAGE_THRESHOLD = 0.95
 _DEFAULT_DEDUP_REMOVED_RATIO_THRESHOLD = 0.05
+_DEFAULT_SCHOOL_LOOKUP_MISMATCH_THRESHOLD = 0.0
 _DEFAULT_JOIN_KEY_DUPLICATE_THRESHOLD = 0
 _DEFAULT_EXCEL_OPTIONS: Mapping[str, object] = {
     "rtl": True,
@@ -202,6 +203,7 @@ class PolicyConfig:
     prefer_major_code: bool
     coverage_threshold: float
     dedup_removed_ratio_threshold: float
+    school_lookup_mismatch_threshold: float
     join_key_duplicate_threshold: int
     alias_rule: PolicyAliasRule
     columns: PolicyColumns
@@ -310,6 +312,13 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
             _DEFAULT_DEDUP_REMOVED_RATIO_THRESHOLD,
         ),
     )
+    school_lookup_mismatch_threshold = _normalize_ratio_value(
+        "school_lookup_mismatch_threshold",
+        data.get(
+            "school_lookup_mismatch_threshold",
+            _DEFAULT_SCHOOL_LOOKUP_MISMATCH_THRESHOLD,
+        ),
+    )
     join_key_duplicate_threshold = _normalize_join_key_duplicate_threshold(
         data.get(
             "join_key_duplicate_threshold",
@@ -344,6 +353,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "prefer_major_code": prefer_major_code,
         "coverage_threshold": coverage_threshold,
         "dedup_removed_ratio_threshold": dedup_removed_ratio_threshold,
+        "school_lookup_mismatch_threshold": school_lookup_mismatch_threshold,
         "join_key_duplicate_threshold": join_key_duplicate_threshold,
         "alias_rule": alias_rule,
         "gender_codes": gender_codes,
@@ -746,6 +756,9 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         coverage_threshold=float(data["coverage_threshold"]),
         dedup_removed_ratio_threshold=float(
             data["dedup_removed_ratio_threshold"]
+        ),
+        school_lookup_mismatch_threshold=float(
+            data["school_lookup_mismatch_threshold"]
         ),
         join_key_duplicate_threshold=int(data["join_key_duplicate_threshold"]),
         alias_rule=PolicyAliasRule(
