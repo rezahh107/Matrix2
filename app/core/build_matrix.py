@@ -200,6 +200,7 @@ class Finance(IntEnum):
 class BuildConfig:
     version: str = __version__
     policy: PolicyConfig = field(default_factory=load_policy)
+    expected_policy_version: str | None = None
     finance_variants: tuple[int, ...] | None = None
     default_status: int = Status.STUDENT
     enable_capacity_gate: bool = True
@@ -220,10 +221,20 @@ class BuildConfig:
     dedup_removed_ratio_threshold: float | None = None
     join_key_duplicate_threshold: int | None = None
     school_lookup_mismatch_threshold: float | None = None
+    policy_version: str = field(init=False, repr=False, default="")
 
     def __post_init__(self) -> None:
         policy = self.policy
         columns = policy.columns
+
+        resolved_policy_version = str(getattr(policy, "version", ""))
+        if not resolved_policy_version:
+            raise ValueError("policy configuration missing version identifier")
+        self.policy_version = resolved_policy_version
+
+        if self.expected_policy_version is not None:
+            cleaned = str(self.expected_policy_version).strip()
+            self.expected_policy_version = cleaned or None
 
         if self.finance_variants is None:
             self.finance_variants = tuple(policy.finance_variants)
@@ -331,7 +342,7 @@ def _as_domain_config(cfg: BuildConfig) -> DomainBuildConfig:
     """Create :class:`DomainBuildConfig` from :class:`BuildConfig`."""
 
     return DomainBuildConfig(
-        version=cfg.policy.version,
+        version=cfg.policy_version,
         postal_valid_range=tuple(cfg.postal_valid_range or (1000, 9999)),
         finance_variants=tuple(cfg.finance_variants or (Finance.NORMAL, Finance.BONYAD, Finance.HEKMAT)),
         center_map=dict(cfg.center_manager_map or {}),
@@ -2036,6 +2047,8 @@ def build_matrix(
 
     duplicate_threshold = int(cfg.join_key_duplicate_threshold or 0)
     base_row = {
+        "policy_version": cfg.policy_version,
+        "policy_version_expected": cfg.expected_policy_version or pd.NA,
         "total_rows": total_rows,
         "distinct_supporters": matrix["پشتیبان"].nunique() if not matrix.empty else 0,
         "school_based_rows": int((matrix["عادی مدرسه"] == "مدرسه‌ای").sum()) if not matrix.empty else 0,

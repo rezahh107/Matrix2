@@ -316,6 +316,40 @@ def test_run_build_matrix_raises_on_duplicate_threshold_exceeded(
     assert getattr(excinfo.value, "is_join_key_duplicate_threshold_error", False)
 
 
+def test_run_build_matrix_verifies_policy_version(
+    tmp_path: Path,
+    policy_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = load_policy(policy_file)
+    insp = tmp_path / "insp.xlsx"
+    schools = tmp_path / "schools.xlsx"
+    crosswalk = tmp_path / "cross.xlsx"
+    output = tmp_path / "out.xlsx"
+    for path in (insp, schools, crosswalk):
+        path.write_text("placeholder", encoding="utf-8")
+
+    args = argparse.Namespace(
+        inspactor=str(insp),
+        schools=str(schools),
+        crosswalk=str(crosswalk),
+        output=str(output),
+        min_coverage=None,
+        policy_version="sha256:deadbeef",
+    )
+
+    monkeypatch.setattr(cli, "read_excel_first_sheet", lambda *_: pd.DataFrame())
+    monkeypatch.setattr(
+        cli,
+        "read_crosswalk_workbook",
+        lambda _path: (pd.DataFrame(), pd.DataFrame()),
+    )
+    monkeypatch.setattr(cli, "build_matrix", lambda *_args, **_kwargs: pytest.fail("should not build"))
+
+    with pytest.raises(ValueError, match="policy version mismatch"):
+        cli._run_build_matrix(args, policy, lambda *_args: None)
+
+
 def test_allocate_command_passes_through(policy_file: Path) -> None:
     observed: dict[str, object] = {}
 
