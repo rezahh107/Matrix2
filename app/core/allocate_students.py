@@ -650,18 +650,37 @@ def _sort_students_by_center_priority(
 
 
 def _separate_school_students(
-    students: pd.DataFrame, policy: PolicyConfig
+    students: pd.DataFrame,
+    policy: PolicyConfig,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """جداسازی دانش‌آموزان مدرسه‌ای از مرکزی براساس ستون تنظیم‌شده."""
+    """جداسازی دانش‌آموزان مدرسه‌ای از مرکزی بر اساس ستون مشخص در Policy.
+
+    این تابع دانش‌آموزان را به دو گروه مدرسه‌ای و مرکزی تقسیم می‌کند تا در الگوریتم
+    تخصیص، دانش‌آموزان مدرسه‌ای اولویت بالاتری داشته باشند.
+
+    Args:
+        students: DataFrame شامل اطلاعات دانش‌آموزان (فرمت canonical)
+        policy: پیکربندی Policy برای شناسایی ستون تشخیص دانش‌آموز مدرسه‌ای
+
+    Returns:
+        tuple: شامل دو DataFrame:
+            - school_students: دانش‌آموزان مدرسه‌ای
+            - center_students: دانش‌آموزان مرکزی
+
+    Raises:
+        KeyError: اگر ستون تشخیص دانش‌آموز مدرسه‌ای در DataFrame وجود نداشته باشد
+
+    Note:
+        ستون تشخیص دانش‌آموز مدرسه‌ای از policy.center_management.school_student_column
+        خوانده می‌شود. مقدار True/1 در این ستون نشان‌دهنده دانش‌آموز مدرسه‌ای است.
+    """
 
     column_candidates = [policy.center_management.school_student_column]
     if "school_status_resolved" not in column_candidates:
         column_candidates.append("school_status_resolved")
     column = next((col for col in column_candidates if col in students.columns), None)
     if column is None:
-        raise ValueError(
-            "students dataframe missing school student indicator column"
-        )
+        raise KeyError("students dataframe missing school student indicator column")
     series = students[column]
     if pd_types.is_bool_dtype(series):
         school_mask = series.fillna(False).astype(bool)
@@ -1432,9 +1451,18 @@ def allocate_batch(
     sorted_students = _sort_students_by_center_priority(
         students_norm, policy, final_priority
     )
-    school_students, center_students = _separate_school_students(
-        sorted_students, policy
-    )
+    try:
+        school_students, center_students = _separate_school_students(
+            sorted_students, policy
+        )
+    except KeyError as exc:
+        warnings.warn(
+            f"ستون تشخیص دانش‌آموز مدرسه‌ای یافت نشد: {exc}",
+            UserWarning,
+            stacklevel=2,
+        )
+        school_students = sorted_students.iloc[0:0].copy()
+        center_students = sorted_students.copy()
     students_norm = pd.concat([school_students, center_students], axis=0)
     pool_stats = pool_norm.attrs.get("pool_canonicalization_stats")
     alias_autofill = int(getattr(pool_stats, "alias_autofill", 0) or 0) if pool_stats else 0

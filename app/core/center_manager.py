@@ -13,20 +13,25 @@ __all__ = [
 
 
 def _normalize_manager_mapping(
-    mapping: Mapping[object, object] | None,
+    managers: Optional[Mapping[object, object]],
 ) -> Dict[int, List[str]]:
-    """نرمال‌سازی نگاشت ورودی به ساختار پایدار «مرکز → لیست مدیران».
+    """نرمال‌سازی نگاشت مدیران.
 
-    مثال::
+    Args:
+        managers: نگاشت ورودی «مرکز → نام‌ها» که ممکن است None باشد
 
+    Returns:
+        Dict[int, List[str]]: نگاشت مرتب‌شده و پاک‌سازی‌شدهٔ مرکز به لیست مدیران
+
+    Example:
         >>> _normalize_manager_mapping({"1": "مدیر"})
         {1: ["مدیر"]}
     """
 
-    if mapping is None:
+    if managers is None:
         return {}
     normalized: Dict[int, List[str]] = {}
-    for raw_center, raw_names in mapping.items():
+    for raw_center, raw_names in managers.items():
         try:
             center_id = int(raw_center)
         except (TypeError, ValueError):
@@ -50,14 +55,23 @@ def _normalize_manager_mapping(
 
 
 def _normalize_priority_sequence(
-    policy: PolicyConfig, priority: Sequence[int] | None
+    policy: PolicyConfig,
+    cli_priority: Optional[Sequence[int]],
 ) -> List[int]:
-    """ترتیب مراکز را با تضمین پوشش همهٔ مراکز و fallback تکمیل می‌کند."""
+    """نرمال‌سازی ترتیب اولویت مراکز.
+
+    Args:
+        policy: پیکربندی Policy
+        cli_priority: ترتیب اولویت ارسالی از CLI
+
+    Returns:
+        List[int]: لیست نهایی اولویت مراکز با تضمین پوشش همهٔ مراکز تعریف‌شده
+    """
 
     normalized: List[int] = []
     seen: set[int] = set()
-    if priority:
-        for item in priority:
+    if cli_priority:
+        for item in cli_priority:
             try:
                 center_id = int(item)
             except (TypeError, ValueError):
@@ -89,16 +103,34 @@ def resolve_center_manager_config(
     cli_priority: Optional[Sequence[int]] = None,
     cli_strict_validation: bool = False,
 ) -> tuple[Dict[int, List[str]], List[int]]:
-    """ادغام تنظیمات مراکز با اولویت: Policy < UI < CLI.
+    """ادغام تنظیمات مدیر مراکز از Policy، UI و CLI با اولویت‌بندی مشخص.
 
-    مثال::
+    این تابع تنظیمات مدیران مراکز را از سه منبع مختلف دریافت کرده و با اولویت
+    CLI > UI > Policy ادغام می‌کند. همچنین اعتبارسنجی لازم را انجام می‌دهد.
 
+    Args:
+        policy: پیکربندی Policy که شامل تنظیمات پیش‌فرض مراکز است
+        ui_managers: تنظیمات مدیران از رابط کاربری (اختیاری)
+        cli_managers: تنظیمات مدیران از خط فرمان (اختیاری)
+        cli_priority: ترتیب اولویت مراکز از خط فرمان (اختیاری)
+        cli_strict_validation: فعال‌سازی اعتبارسنجی سخت‌گیرانه از CLI
+
+    Returns:
+        tuple: شامل دو عنصر:
+            - Dict[int, Sequence[str]]: نگاشت نهایی مرکز به لیست مدیران
+            - List[int]: لیست نهایی اولویت مراکز
+
+    Raises:
+        ValueError: در صورت فعال بودن strict validation و نبود مدیر برای مراکز غیرصفر
+
+    Example:
         >>> resolve_center_manager_config(
         ...     policy=policy,
-        ...     ui_managers={1: ["UI"]},
-        ...     cli_managers={1: ["CLI"]},
+        ...     ui_managers={1: ["مدیر UI"]},
+        ...     cli_managers={2: ["مدیر CLI"]},
+        ...     cli_priority=[1, 2, 0]
         ... )
-        ({1: ["CLI"]}, [...])
+        ({1: ['مدیر UI'], 2: ['مدیر CLI']}, [1, 2, 0])
     """
 
     final_map: Dict[int, List[str]] = {}
