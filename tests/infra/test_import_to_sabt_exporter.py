@@ -286,6 +286,28 @@ def test_prepare_allocation_export_frame_preserves_length_and_index() -> None:
     assert list(merged.index) == list(alloc.index)
 
 
+def test_prepare_allocation_export_frame_reports_missing_student_identifier(tmp_path: Path) -> None:
+    alloc = pd.DataFrame([
+        {"student_id": "STD-1", "mentor_id": "EMP-1"},
+    ])
+    students = pd.DataFrame([
+        {"GF_FirstName": "سارا"},
+    ])
+    students.attrs["sheet_name"] = "Students"
+    students.attrs["source_path"] = tmp_path / "students.xlsx"
+    mentors = pd.DataFrame([
+        {"mentor_id": "EMP-1", "mentor_name": "پشتیبان"},
+    ])
+
+    with pytest.raises(ImportToSabtExportError) as excinfo:
+        prepare_allocation_export_frame(alloc, students, mentors)
+
+    message = str(excinfo.value)
+    assert "sheet 'Students'" in message
+    assert "students.xlsx" in message
+    assert "student identifier" in message
+
+
 def test_prepare_allocation_export_frame_rejects_duplicate_students() -> None:
     alloc = pd.DataFrame([
         {"student_id": "STD-1", "mentor_id": "EMP-1"},

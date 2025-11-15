@@ -86,6 +86,58 @@ class ImportToSabtExportError(ValueError):
     """خطای اعتبارسنجی داده برای خروجی ImportToSabt."""
 
 
+def _describe_frame_source(frame: pd.DataFrame, *, default_label: str) -> str:
+    """تولید توضیح خوانا از منبع دیتافریم برای گزارش خطا."""
+
+    attrs = getattr(frame, "attrs", {}) or {}
+    sheet = attrs.get("sheet_name") or attrs.get("sheet_label") or attrs.get("source_sheet")
+    source_label = attrs.get("source_label") or attrs.get("source") or attrs.get("origin")
+    path = attrs.get("source_path") or attrs.get("path") or attrs.get("filepath")
+
+    label_parts: list[str] = []
+    if sheet:
+        label_parts.append(f"sheet '{sheet}'")
+    if source_label and source_label not in label_parts:
+        label_parts.append(str(source_label))
+    if path:
+        label_parts.append(str(path))
+
+    if label_parts:
+        if len(label_parts) == 1:
+            return label_parts[0]
+        if len(label_parts) == 2 and label_parts[0].startswith("sheet"):
+            return f"{label_parts[0]} from {label_parts[1]}"
+        return " | ".join(label_parts)
+
+    return default_label
+
+
+def _validate_export_identifier_columns(
+    frame: pd.DataFrame,
+    *,
+    required_column: str,
+    entity_name: str,
+    source_label: str,
+    alternate_column: str | None = None,
+) -> None:
+    """بررسی وجود ستون شناسه پیش از نرمال‌سازی و تولید پیام راهنما."""
+
+    candidates = [required_column]
+    if alternate_column is not None:
+        candidates.append(alternate_column)
+
+    for column in candidates:
+        if column in frame.columns:
+            return
+
+    column_hint = " یا ".join(f"'{col}'" for col in candidates)
+    raise ImportToSabtExportError(
+        "ImportToSabt export failed: missing required "
+        f"{entity_name} identifier column ({column_hint}) in {source_label}. "
+        "Please add the column to the source sheet/file and rerun the exporter."
+    )
+
+
 def load_exporter_config(path: str | Path) -> dict:
     """بارگذاری config با حفظ ترتیب ستون‌ها و اعتبارسنجی حداقلی."""
 
@@ -120,6 +172,23 @@ def prepare_allocation_export_frame(
 ) -> pd.DataFrame:
     """ادغام ستون‌های دانش‌آموز و پشتیبان روی دیتافریم تخصیص."""
 
+    student_source = _describe_frame_source(students_df, default_label="students_df")
+    mentor_source = _describe_frame_source(mentors_df, default_label="mentors_df")
+
+    _validate_export_identifier_columns(
+        students_df,
+        required_column="student_id",
+        entity_name="student",
+        source_label=student_source,
+    )
+    _validate_export_identifier_columns(
+        mentors_df,
+        required_column="mentor_id",
+        entity_name="mentor",
+        source_label=mentor_source,
+        alternate_column="alias",
+    )
+
     alloc = canonicalize_headers(allocations_df, header_mode="en").copy()
     students = canonicalize_headers(students_df, header_mode="en").copy()
     mentors = canonicalize_headers(mentors_df, header_mode="en").copy()
@@ -131,15 +200,11 @@ def prepare_allocation_export_frame(
     if student_ids is not None:
         aligned_ids = student_ids.reindex(students.index)
         students.loc[:, "student_id"] = aligned_ids.astype("string")
-    elif "student_id" not in students.columns:
-        raise ValueError("students_df must include 'student_id' column for export")
 
     if "mentor_id" not in mentors.columns:
         alias_series = mentors.get("alias")
         if alias_series is not None:
             mentors.loc[:, "mentor_id"] = alias_series
-        else:
-            raise ValueError("mentors_df must include 'mentor_id' column for export")
 
     def _prefix(frame: pd.DataFrame, prefix: str, preserve: Iterable[str]) -> pd.DataFrame:
         renamed: dict[str, str] = {}
