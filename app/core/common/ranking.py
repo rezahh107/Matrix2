@@ -78,6 +78,20 @@ def build_mentor_state(
         policy = load_policy()
 
     canonical = canonicalize_headers(pool_df, header_mode="en")
+    if "mentor_sort_key" not in canonical.columns and "mentor_id" in canonical.columns:
+        canonical = canonical.copy()
+        canonical["mentor_sort_key"] = canonical["mentor_id"].map(natural_key)
+    sort_candidates = [
+        column
+        for column in ("occupancy_ratio", "allocations_new", "mentor_sort_key")
+        if column in canonical.columns
+    ]
+    if sort_candidates:
+        canonical = canonical.sort_values(
+            by=sort_candidates,
+            ascending=[True] * len(sort_candidates),
+            kind="stable",
+        ).reset_index(drop=True)
     if "mentor_id" not in canonical.columns:
         return {}
 
