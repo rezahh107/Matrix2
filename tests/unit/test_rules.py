@@ -1,5 +1,12 @@
 from app.core.common.reasons import ReasonCode
-from app.core.common.rules import CandidateStageRule, RuleContext, default_stage_rule_map
+from app.core.common.rules import (
+    CandidateStageRule,
+    CenterPriorityRule,
+    RuleContext,
+    RuleEngine,
+    SchoolStudentPriorityGuard,
+    default_stage_rule_map,
+)
 
 
 def _stage_record(stage: str, *, after: int, extras: dict | None = None) -> dict:
@@ -87,3 +94,45 @@ def test_stage_guard_rejects_missing_totals_before_candidate_rule() -> None:
     assert not result.passed
     assert result.details["issue"] == "missing_totals"
     assert result.details["record_stage"] == "center"
+
+
+def test_center_priority_rule_enforces_allowed_centers() -> None:
+    rule = CenterPriorityRule((1, 2, 0), center_column="center")
+    student = {"center": 1, "is_school_student": False}
+    mentor = {"allowed_centers": [1, 2]}
+    assert rule.evaluate(student, mentor) is None
+    mentor_mismatch = {"allowed_centers": [2]}
+    assert rule.evaluate(student, mentor_mismatch) is ReasonCode.CENTER_MISMATCH
+    assert rule.evaluate({"center": None, "is_school_student": False}, mentor) is ReasonCode.INVALID_CENTER_VALUE
+    assert rule.evaluate(student, None) is ReasonCode.NO_MANAGER_FOR_CENTER
+    school_student = {"center": 5, "is_school_student": True}
+    assert rule.evaluate(school_student, mentor_mismatch) is None
+
+
+def test_school_student_priority_guard_counts_students() -> None:
+    guard = SchoolStudentPriorityGuard("is_school_student")
+    payload = [True, False, 1, 0, "1"]
+    result = guard.before_stage("school_phase_start", payload)
+    assert result["school_student_count"] == 3
+    assert result["center_student_count"] == 2
+    assert "مدرسه‌ای" in result["message"]
+
+
+def test_rule_engine_records_stage_entries_and_pair_reasons() -> None:
+    guard = SchoolStudentPriorityGuard("is_school_student")
+    rule = CenterPriorityRule((1, 2), center_column="center")
+    engine = RuleEngine(stage_guards=(guard,), pair_rules=(rule,))
+    students = [
+        {"is_school_student": True},
+        {"is_school_student": False},
+    ]
+    entries = engine.run_stage("school_phase_start", students, extras={"message": "شروع"})
+    assert entries[0]["school_student_count"] == 1
+    trace: list[dict[str, object]] = []
+    engine.apply_stage_rules("school_phase_start", students, trace)
+    assert trace
+    reason = engine.evaluate_pair(
+        {"center": 2, "is_school_student": False},
+        {"allowed_centers": [1]},
+    )
+    assert reason is ReasonCode.CENTER_MISMATCH

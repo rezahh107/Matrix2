@@ -35,6 +35,9 @@ class ReasonCode(StrEnum):
     FILTERED_OUT = "FILTERED_OUT"
     FAIRNESS_ORDER = "FAIRNESS_ORDER"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+    SCHOOL_STUDENT_PRIORITY = "SCHOOL_STUDENT_PRIORITY"
+    INVALID_CENTER_VALUE = "INVALID_CENTER_VALUE"
+    NO_MANAGER_FOR_CENTER = "NO_MANAGER_FOR_CENTER"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +62,9 @@ _REASON_MESSAGES_FA: Mapping[ReasonCode, str] = {
     ReasonCode.FILTERED_OUT: "دانش‌آموز در این مرحله از فیلتر Policy حذف شد.",
     ReasonCode.FAIRNESS_ORDER: "بازچینش عدالت‌محور طبق Policy انجام شد.",
     ReasonCode.INTERNAL_ERROR: "سیستم Trace دادهٔ نامعتبر تولید کرد؛ لطفاً تنظیمات Policy/Data را بررسی کنید.",
+    ReasonCode.SCHOOL_STUDENT_PRIORITY: "دانش‌آموز مدرسه‌ای بدون محدودیت مرکز در اولویت قرار گرفت.",
+    ReasonCode.INVALID_CENTER_VALUE: "مقدار ستون مرکز دانش‌آموز نامعتبر بود و از مقدار پیش‌فرض استفاده شد.",
+    ReasonCode.NO_MANAGER_FOR_CENTER: "برای این مرکز هیچ مدیری/منتوری تعریف نشده است.",
 }
 
 

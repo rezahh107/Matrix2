@@ -199,6 +199,7 @@ class AllocationLogRecord(TypedDict, total=False):
     alerts: List[AllocationAlertRecord]
     alias_autofill: int
     alias_unmatched: int
+    phase_rule_trace: List[Mapping[str, Any]]
 
 
 TraceStageLiteral = Literal[

@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from numbers import Integral, Real
-from typing import Any, Mapping, Protocol
+from collections.abc import Iterable, Sequence
+from typing import Any, Mapping, MutableSequence, Protocol
 
 from .reasons import LocalizedReason, ReasonCode, build_reason
 from .types import CANONICAL_TRACE_ORDER, TraceStageLiteral, TraceStageRecord
@@ -24,6 +25,9 @@ __all__ = [
     "apply_rule",
     "compose_rules",
     "default_stage_rule_map",
+    "RuleEngine",
+    "SchoolStudentPriorityGuard",
+    "CenterPriorityRule",
 ]
 
 
@@ -285,3 +289,283 @@ def default_stage_rule_map() -> Mapping[TraceStageLiteral, Rule]:
         )
         rules[stage] = compose_rules(guard, candidate_rule)
     return rules
+
+
+class StagePhaseGuard(Protocol):
+    """رابط عمومی نگهبان فاز برای شمارش قبل از اجرای Ruleهای تخصیص."""
+
+    def before_stage(self, stage: str, students: Sequence[object]) -> Mapping[str, Any] | None:
+        ...
+
+
+class StudentMentorRule(Protocol):
+    """رابط عمومی Ruleهایی که رابطهٔ دانش‌آموز/پشتیبان را بررسی می‌کنند."""
+
+    def evaluate(
+        self,
+        student: Mapping[str, Any],
+        mentor: Mapping[str, Any] | None,
+    ) -> ReasonCode | None:
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class RuleEngine:
+    """موتور سادهٔ تجمیع Stage Guard و Ruleهای زوج دانش‌آموز/پشتیبان.
+
+    مثال::
+
+        >>> engine = RuleEngine(stage_guards=(SchoolStudentPriorityGuard("is_school_student"),))
+        >>> stage_entries = engine.run_stage("school_phase_start", [{"is_school_student": True}])
+        >>> stage_entries[0]["school_student_count"]
+        1
+    """
+
+    stage_guards: tuple[StagePhaseGuard, ...] = ()
+    pair_rules: tuple[StudentMentorRule, ...] = ()
+
+    def run_stage(
+        self,
+        stage: str,
+        students: Iterable[object] | Sequence[object] | None,
+        *,
+        extras: Mapping[str, Any] | None = None,
+    ) -> list[Mapping[str, Any]]:
+        """اجرای همهٔ Stage Guardها و تولید ورودی Trace مرحله."""
+
+        prepared = self._materialize_students(students)
+        entries: list[Mapping[str, Any]] = []
+        if self.stage_guards:
+            for guard in self.stage_guards:
+                payload = guard.before_stage(stage, prepared)
+                if payload is None:
+                    continue
+                entry = {"stage": stage, **payload}
+                if extras:
+                    entry.update(extras)
+                entries.append(entry)
+        elif extras:
+            entries.append({"stage": stage, **extras})
+        return entries
+
+    def apply_stage_rules(
+        self,
+        stage: str,
+        students: Iterable[object] | Sequence[object] | None,
+        trace: MutableSequence[Mapping[str, Any]] | None = None,
+        *,
+        extras: Mapping[str, Any] | None = None,
+    ) -> list[Mapping[str, Any]]:
+        """اجرای Stage Guardها و ضمیمه کردن نتیجه به Trace موجود."""
+
+        entries = self.run_stage(stage, students, extras=extras)
+        if trace is not None and entries:
+            trace.extend(entries)
+        return entries
+
+    def evaluate_pair(
+        self,
+        student: Mapping[str, Any],
+        mentor: Mapping[str, Any] | None,
+    ) -> ReasonCode | None:
+        """اجرای Ruleهای زوج دانش‌آموز/پشتیبان تا اولین خطا."""
+
+        for rule in self.pair_rules:
+            reason = rule.evaluate(student, mentor)
+            if reason is not None:
+                return reason
+        return None
+
+    @staticmethod
+    def _materialize_students(
+        students: Iterable[object] | Sequence[object] | None,
+    ) -> Sequence[object]:
+        if students is None:
+            return tuple()
+        if isinstance(students, Sequence):
+            return students
+        return tuple(students)
+
+
+@dataclass(frozen=True, slots=True)
+class SchoolStudentPriorityGuard:
+    """Guard شمارندهٔ دانش‌آموزان مدرسه‌ای برای Trace فازها.
+
+    مثال::
+
+        >>> guard = SchoolStudentPriorityGuard("is_school_student")
+        >>> guard.before_stage("school_phase_start", [True, False])["school_student_count"]
+        1
+    """
+
+    school_student_column: str
+
+    def before_stage(self, stage: str, students: Sequence[object]) -> Mapping[str, Any]:
+        school_count = 0
+        total = 0
+        for record in students:
+            total += 1
+            if self._is_school_student(record):
+                school_count += 1
+        center_count = max(total - school_count, 0)
+        message = f"تخصیص مرحله {stage}: {school_count} مدرسه‌ای, {center_count} مرکزی"
+        return {
+            "school_student_count": school_count,
+            "center_student_count": center_count,
+            "message": message,
+        }
+
+    def _candidate_keys(self) -> tuple[str, ...]:
+        normalized = self.school_student_column.replace(" ", "_")
+        return (
+            self.school_student_column,
+            normalized,
+            "is_school_student",
+            "school_status_resolved",
+        )
+
+    def _is_school_student(self, record: object) -> bool:
+        value: object | None = None
+        if isinstance(record, Mapping):
+            for key in self._candidate_keys():
+                if key in record:
+                    value = record.get(key)
+                    if value is not None:
+                        break
+        else:
+            for key in self._candidate_keys():
+                if hasattr(record, key):
+                    value = getattr(record, key)
+                    break
+        if value is None:
+            value = record if not isinstance(record, Mapping) else None
+        return self._normalize_flag(value)
+
+    @staticmethod
+    def _normalize_flag(value: object | None) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return bool(value)
+        if isinstance(value, (int, float)):
+            try:
+                return int(value) != 0
+            except (TypeError, ValueError):
+                return False
+        text = str(value).strip()
+        if not text:
+            return False
+        lowered = text.lower()
+        if lowered in {"true", "yes", "y", "مدرسه"}:
+            return True
+        if lowered in {"false", "no", "n"}:
+            return False
+        try:
+            return int(float(text)) != 0
+        except (TypeError, ValueError):
+            return False
+
+
+@dataclass(frozen=True, slots=True)
+class CenterPriorityRule:
+    """Rule صحت مرکز دانش‌آموز نسبت به مراکز مجاز پشتیبان.
+
+    مثال::
+
+        >>> rule = CenterPriorityRule((1, 2, 0), center_column="center")
+        >>> student = {"center": 1, "is_school_student": False}
+        >>> mentor = {"allowed_centers": [1, 2]}
+        >>> rule.evaluate(student, mentor) is None
+        True
+    """
+
+    center_priority: tuple[int, ...]
+    center_column: str
+    allowed_centers_field: str = "allowed_centers"
+
+    def evaluate(
+        self,
+        student: Mapping[str, Any],
+        mentor: Mapping[str, Any] | None,
+    ) -> ReasonCode | None:
+        if self._is_school_student(student):
+            return None
+        student_center = self._normalize_center_value(
+            student.get(self.center_column)
+            or student.get(self.center_column.replace(" ", "_"))
+        )
+        if student_center is None:
+            return ReasonCode.INVALID_CENTER_VALUE
+        mentor_centers = self._extract_mentor_centers(mentor)
+        if not mentor_centers:
+            return ReasonCode.NO_MANAGER_FOR_CENTER
+        if student_center not in mentor_centers:
+            return ReasonCode.CENTER_MISMATCH
+        return None
+
+    @staticmethod
+    def _is_school_student(student: Mapping[str, Any]) -> bool:
+        value = student.get("is_school_student")
+        if value is None:
+            value = student.get("school_status_resolved")
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return bool(value)
+        try:
+            return int(value) != 0  # type: ignore[arg-type]
+        except Exception:
+            return False
+
+    def _extract_mentor_centers(
+        self, mentor: Mapping[str, Any] | None
+    ) -> tuple[int, ...]:
+        if mentor is None:
+            return tuple()
+        centers: list[int] = []
+        payload = mentor.get(self.allowed_centers_field)
+        centers.extend(self._normalize_iterable(payload))
+        fallback = mentor.get(self.center_column)
+        if fallback is None:
+            fallback = mentor.get(self.center_column.replace(" ", "_"))
+        centers.extend(self._normalize_iterable(fallback))
+        unique: list[int] = []
+        seen: set[int] = set()
+        for center_id in centers:
+            if center_id in seen:
+                continue
+            unique.append(center_id)
+            seen.add(center_id)
+        return tuple(unique)
+
+    def _normalize_iterable(self, payload: object) -> list[int]:
+        if payload is None:
+            return []
+        if isinstance(payload, (list, tuple, set)):
+            normalized: list[int] = []
+            for item in payload:
+                value = self._normalize_center_value(item)
+                if value is not None:
+                    normalized.append(value)
+            return normalized
+        value = self._normalize_center_value(payload)
+        return [value] if value is not None else []
+
+    @staticmethod
+    def _normalize_center_value(value: object) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return int(float(text))
+        except (TypeError, ValueError):
+            return None
