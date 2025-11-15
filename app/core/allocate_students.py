@@ -37,6 +37,7 @@ from .common.types import (
     TraceStageLiteral,
     TraceStageRecord,
 )
+from .counter import normalize_digits, strip_hidden_chars
 from .policy_loader import PolicyConfig, load_policy
 from .reason.selection_reason import build_selection_reason_rows as _build_selection_reason_rows
 
@@ -49,6 +50,71 @@ __all__ = [
     "allocate_batch",
     "build_selection_reason_rows",
 ]
+
+_STUDENT_NATIONAL_KEYS: Tuple[str, ...] = (
+    "student_national_code",
+    "student_national_id",
+    "national_id",
+    "کدملی دانش‌آموز",
+    "کدملی",
+    "کد ملی",
+)
+_MENTOR_ALIAS_KEYS: Tuple[str, ...] = (
+    "mentor_alias_code",
+    "mentor_alias_postal_code",
+    "mentor_postal_code",
+    "کد جایگزین پشتیبان",
+    "کدپستی",
+    "کد پستی",
+)
+
+
+def _normalize_digit_code(value: object, *, length: int | None = None, pad: bool = False) -> str:
+    """نرمال‌سازی ورودی‌های عددی به رشتهٔ digits پایدار برای خروجی اکسل."""
+
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):  # type: ignore[arg-type]
+            return ""
+    except TypeError:
+        pass
+    text = strip_hidden_chars(normalize_digits(str(value).strip()))
+    if not text:
+        return ""
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if not digits:
+        return ""
+    if length is not None:
+        if len(digits) > length:
+            digits = digits[-length:]
+        if pad:
+            digits = digits.zfill(length)
+        elif len(digits) < length:
+            return ""
+    return digits
+
+
+def _extract_student_national_code(student: Mapping[str, object]) -> str:
+    """بازیابی امن کد ملی دانش‌آموز از کلیدهای چندزبانهٔ ورودی."""
+
+    for key in _STUDENT_NATIONAL_KEYS:
+        value = student.get(key)
+        normalized = _normalize_digit_code(value, length=10, pad=True)
+        if normalized:
+            return normalized
+    return ""
+
+
+def _extract_mentor_alias_code(mentor_row: Mapping[str, object] | pd.Series) -> str:
+    """دریافت کد جایگزین/پستی پشتیبان با حذف نویز ورودی."""
+
+    for key in _MENTOR_ALIAS_KEYS:
+        value = mentor_row.get(key)
+        normalized = _normalize_digit_code(value, length=10, pad=True)
+        if normalized:
+            return normalized
+    return ""
 
 
 def _normalize_mentor_identifier(value: object) -> object | None:
@@ -825,11 +891,15 @@ def allocate_batch(
             mentor_id_display = result.log.get("mentor_id")
             if mentor_id_display is None:
                 mentor_id_display = resolved_identifier
+            student_national_code = _extract_student_national_code(student_dict)
+            mentor_alias_code = _extract_mentor_alias_code(result.mentor_row)
             allocations.append(
                 {
                     "student_id": student_dict.get("student_id", ""),
+                    "student_national_code": student_national_code,
                     "mentor": result.mentor_row.get("پشتیبان", ""),
                     "mentor_id": "" if mentor_id_display is None else str(mentor_id_display),
+                    "mentor_alias_code": mentor_alias_code,
                 }
             )
 
