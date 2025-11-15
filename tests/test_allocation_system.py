@@ -195,3 +195,55 @@ def test_allocate_batch_includes_identity_columns():
     row = allocations.iloc[0]
     assert row["student_national_code"] == "0123456789"
     assert row["mentor_alias_code"] == "0098765432"
+
+
+def test_allocate_batch_handles_float_identity_columns():
+    policy_config = policy_adapter.config
+    capacity_column = policy_adapter.stage_column("capacity_gate")
+    assert capacity_column is not None
+
+    students = pd.DataFrame(
+        [
+            {
+                "student_id": "STD-2",
+                "کدرشته": 101,
+                "گروه آزمایشی": "تجربی",
+                "جنسیت": 1,
+                "دانش آموز فارغ": 0,
+                "مرکز گلستان صدرا": 0,
+                "مالی حکمت بنیاد": 0,
+                "کد مدرسه": 2020,
+                "کد ملی": float(1234567890),
+            }
+        ]
+    )
+
+    candidate_pool = pd.DataFrame(
+        [
+            {
+                "پشتیبان": "Mentor Y",
+                "کد کارمندی پشتیبان": "EMP-10",
+                "کدرشته": 101,
+                "گروه آزمایشی": "تجربی",
+                "جنسیت": 1,
+                "دانش آموز فارغ": 0,
+                "مرکز گلستان صدرا": 0,
+                "مالی حکمت بنیاد": 0,
+                "کد مدرسه": 2020,
+                capacity_column: 1,
+                "occupancy_ratio": 0.0,
+                "allocations_new": 0,
+                "mentor_sort_key": 1,
+                "کدپستی": float(987654321),
+            }
+        ]
+    )
+
+    allocations, _, _, _ = allocate_batch(
+        students,
+        candidate_pool,
+        policy=policy_config,
+    )
+
+    assert allocations.iloc[0]["student_national_code"] == "1234567890"
+    assert allocations.iloc[0]["mentor_alias_code"] == "0987654321"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from numbers import Number
 from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
 
@@ -69,6 +70,23 @@ _MENTOR_ALIAS_KEYS: Tuple[str, ...] = (
 )
 
 
+def _coerce_integral_numeric_text(value: Number) -> str | None:
+    """تبدیل امن مقادیر عددی به رشته بدون اعشار برای جلوگیری از شیفت digits."""
+
+    if isinstance(value, bool):
+        return None
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    if not decimal_value.is_finite():
+        return None
+    integral_value = decimal_value.to_integral_value()
+    if integral_value != decimal_value:
+        return None
+    return format(integral_value, "f")
+
+
 def _normalize_digit_code(value: object, *, length: int | None = None, pad: bool = False) -> str:
     """نرمال‌سازی ورودی‌های عددی به رشتهٔ digits پایدار برای خروجی اکسل."""
 
@@ -79,7 +97,16 @@ def _normalize_digit_code(value: object, *, length: int | None = None, pad: bool
             return ""
     except TypeError:
         pass
-    text = strip_hidden_chars(normalize_digits(str(value).strip()))
+
+    if isinstance(value, Number):
+        numeric_text = _coerce_integral_numeric_text(value)
+        if numeric_text is None:
+            return ""
+        text_source = numeric_text
+    else:
+        text_source = str(value).strip()
+
+    text = strip_hidden_chars(normalize_digits(text_source))
     if not text:
         return ""
     digits = "".join(ch for ch in text if ch.isdigit())
