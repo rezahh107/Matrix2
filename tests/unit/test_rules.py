@@ -75,3 +75,15 @@ def test_sensitive_stage_failure_reports_join_differences() -> None:
     assert result.details["student_value"] == 2
     assert result.details["mentor_value"] == 1
     assert result.details["normalize_diff"] == 1
+
+
+def test_stage_guard_rejects_missing_totals_before_candidate_rule() -> None:
+    mapping = default_stage_rule_map()
+    record = _stage_record("center", after=1)
+    record["total_after"] = None
+    context = RuleContext(stage_record=record)
+    result = mapping["center"](context)
+    assert result.reason.code is ReasonCode.INTERNAL_ERROR
+    assert not result.passed
+    assert result.details["issue"] == "missing_totals"
+    assert result.details["record_stage"] == "center"
