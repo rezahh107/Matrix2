@@ -147,6 +147,36 @@ class GenderCodes:
 
 
 @dataclass(frozen=True)
+class CenterDefinition:
+    """تعریف یک مرکز ثبت‌نام همراه با مدیران پیش‌فرض."""
+
+    id: int
+    name: str
+    default_managers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CenterManagementConfig:
+    """تنظیمات جامع مدیریت مراکز برای تخصیص."""
+
+    enabled: bool
+    centers: tuple[CenterDefinition, ...]
+    priority_order: tuple[int, ...]
+    strict_manager_validation: bool
+    default_center_for_invalid: int | None
+
+    def center_ids(self) -> tuple[int, ...]:
+        """لیست پایدار شناسه‌های مراکز تعریف‌شده."""
+
+        return tuple(center.id for center in self.centers)
+
+    def get_center(self, center_id: int) -> CenterDefinition | None:
+        """یافتن تعریف مرکز براساس شناسه (در صورت وجود)."""
+
+        return next((center for center in self.centers if center.id == center_id), None)
+
+
+@dataclass(frozen=True)
 class ExcelOptions:
     """تنظیمات خروجی Excel (جهت، فونت و حالت هدر)."""
 
@@ -213,6 +243,7 @@ class PolicyConfig:
     virtual_name_patterns: Tuple[str, ...]
     emission: EmissionOptions
     fairness_strategy: str
+    center_management: CenterManagementConfig
 
     @property
     def ranking(self) -> List[str]:
@@ -239,6 +270,12 @@ class PolicyConfig:
         """ستون ظرفیت را از روی تعریف مرحلهٔ capacity_gate استخراج می‌کند."""
 
         return self.stage_column("capacity_gate")
+
+    @property
+    def default_center_for_invalid(self) -> int | None:
+        """شناسهٔ مرکز fallback برای مقادیر نامعتبر ستون مرکز."""
+
+        return self.center_management.default_center_for_invalid
 
     @property
     def join_stage_columns(self) -> List[str]:
@@ -300,6 +337,9 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     postal_valid_range = _normalize_postal_valid_range(data["postal_valid_range"])
     finance_variants = _normalize_finance_variants(data["finance_variants"])
     center_map = _normalize_center_map(data["center_map"])
+    center_management = _normalize_center_management(
+        data.get("center_management"), center_map
+    )
     school_code_empty_as_zero = _ensure_bool("school_code_empty_as_zero", data["school_code_empty_as_zero"])
     prefer_major_code = _ensure_bool("prefer_major_code", data["prefer_major_code"])
     coverage_threshold = _normalize_coverage_threshold(
@@ -349,6 +389,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "postal_valid_range": postal_valid_range,
         "finance_variants": finance_variants,
         "center_map": center_map,
+        "center_management": center_management,
         "school_code_empty_as_zero": school_code_empty_as_zero,
         "prefer_major_code": prefer_major_code,
         "coverage_threshold": coverage_threshold,
@@ -459,6 +500,132 @@ def _normalize_center_map(value: object) -> Mapping[str, int]:
     if "*" not in normalized:
         normalized["*"] = 0
     return normalized
+
+
+def _normalize_center_management(
+    value: object, center_map: Mapping[str, int]
+) -> Mapping[str, object]:
+    if value is None:
+        value = {}
+    if not isinstance(value, Mapping):
+        raise TypeError("center_management must be a mapping of options")
+    enabled = bool(value.get("enabled", True))
+    strict_validation = bool(value.get("strict_manager_validation", False))
+    default_invalid = value.get("default_center_for_invalid")
+    if default_invalid is None or default_invalid == "":
+        fallback_center = center_map.get("*")
+    else:
+        try:
+            fallback_center = int(default_invalid)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("default_center_for_invalid must be an integer or null") from exc
+
+    centers_payload = value.get("centers")
+    if centers_payload is None:
+        centers_payload = _infer_centers_from_map(center_map)
+    elif not isinstance(centers_payload, Sequence):
+        raise TypeError("center_management.centers must be a list of definitions")
+
+    centers: list[Mapping[str, object]] = []
+    seen_ids: set[int] = set()
+    for entry in centers_payload:
+        if not isinstance(entry, Mapping):
+            raise TypeError("center definition must be a mapping")
+        if "id" not in entry:
+            raise ValueError("center definition missing 'id'")
+        try:
+            center_id = int(entry["id"])
+        except (TypeError, ValueError) as exc:
+            raise TypeError("center id must be an integer") from exc
+        if center_id in seen_ids:
+            raise ValueError(f"duplicate center id detected: {center_id}")
+        seen_ids.add(center_id)
+        name_raw = entry.get("name")
+        name = str(name_raw).strip() if name_raw is not None else f"مرکز {center_id}"
+        if not name:
+            name = f"مرکز {center_id}"
+        managers_raw = entry.get("default_managers")
+        if managers_raw is None:
+            managers_raw = entry.get("default_manager")
+        defaults: list[str] = []
+        if managers_raw is None:
+            defaults = []
+        elif isinstance(managers_raw, (list, tuple)):
+            defaults = [str(item).strip() for item in managers_raw if str(item).strip()]
+        else:
+            text = str(managers_raw).strip()
+            defaults = [text] if text else []
+        deduped: list[str] = []
+        seen_names: set[str] = set()
+        for manager_name in defaults:
+            key = manager_name
+            if key in seen_names:
+                continue
+            deduped.append(manager_name)
+            seen_names.add(key)
+        centers.append({
+            "id": center_id,
+            "name": name,
+            "default_managers": deduped,
+        })
+
+    priority_payload = value.get("priority_order")
+    if priority_payload is None:
+        priority = [center["id"] for center in centers]
+    elif not isinstance(priority_payload, Sequence):
+        raise TypeError("center_management.priority_order must be a list")
+    else:
+        priority = []
+        seen_priority: set[int] = set()
+        for item in priority_payload:
+            try:
+                center_id = int(item)
+            except (TypeError, ValueError) as exc:
+                raise TypeError("center priority items must be integers") from exc
+            if center_id in seen_priority:
+                continue
+            priority.append(center_id)
+            seen_priority.add(center_id)
+        for center in centers:
+            if center["id"] not in seen_priority:
+                priority.append(center["id"])
+                seen_priority.add(center["id"])
+
+    return {
+        "enabled": enabled,
+        "strict_manager_validation": strict_validation,
+        "default_center_for_invalid": fallback_center,
+        "priority_order": priority,
+        "centers": centers,
+    }
+
+
+def _infer_centers_from_map(center_map: Mapping[str, int]) -> list[Mapping[str, object]]:
+    inferred: list[Mapping[str, object]] = []
+    seen_ids: set[int] = set()
+    for manager_name, center_id in center_map.items():
+        if manager_name == "*":
+            continue
+        if center_id in seen_ids:
+            continue
+        seen_ids.add(center_id)
+        inferred.append(
+            {
+                "id": int(center_id),
+                "name": f"مرکز {center_id}",
+                "default_managers": [str(manager_name).strip()],
+            }
+        )
+    wildcard = center_map.get("*")
+    if wildcard is not None and wildcard not in seen_ids:
+        inferred.append(
+            {
+                "id": int(wildcard),
+                "name": f"مرکز {wildcard}",
+                "default_managers": [],
+            }
+        )
+    return inferred
 
 
 def _ensure_bool(name: str, value: object) -> bool:
@@ -782,6 +949,7 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         virtual_name_patterns=tuple(str(item) for item in data["virtual_name_patterns"]),
         emission=_to_emission_options(data.get("emission", {})),
         fairness_strategy=str(data.get("fairness_strategy", "none")),
+        center_management=_to_center_management_config(data["center_management"]),
     )
 
 
@@ -795,6 +963,30 @@ def _to_ranking_rule(item: Mapping[str, object]) -> RankingRule:
 
 def _to_trace_stage(item: Mapping[str, object]) -> TraceStageDefinition:
     return TraceStageDefinition(stage=str(item["stage"]), column=str(item["column"]))
+
+
+def _to_center_management_config(data: Mapping[str, object]) -> CenterManagementConfig:
+    centers_payload = data.get("centers") or []
+    centers: list[CenterDefinition] = []
+    for entry in centers_payload:
+        managers = tuple(str(name) for name in entry.get("default_managers", []))
+        centers.append(
+            CenterDefinition(
+                id=int(entry["id"]),
+                name=str(entry["name"]),
+                default_managers=managers,
+            )
+        )
+    priority_order = tuple(int(item) for item in data.get("priority_order", []))
+    default_invalid = data.get("default_center_for_invalid")
+    fallback = None if default_invalid is None else int(default_invalid)
+    return CenterManagementConfig(
+        enabled=bool(data.get("enabled", True)),
+        centers=tuple(centers),
+        priority_order=priority_order,
+        strict_manager_validation=bool(data.get("strict_manager_validation", False)),
+        default_center_for_invalid=fallback,
+    )
 
 
 def _to_gender_codes(payload: Mapping[str, Mapping[str, object]]) -> GenderCodes:

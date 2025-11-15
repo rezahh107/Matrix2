@@ -280,6 +280,87 @@ def test_allocate_batch_filters_by_center_manager() -> None:
     assert logs.loc[0, "mentor_selected"].strip() == "هدف"
 
 
+def test_school_students_processed_first() -> None:
+    policy = load_policy()
+    school_student = _single_student(student_id="S-school")
+    central_student = _single_student(student_id="S-center", **{"کد_مدرسه": 0})
+    mixed = pd.concat([central_student, school_student, central_student], ignore_index=True)
+    pool = pd.DataFrame(
+        {
+            "پشتیبان": ["A", "B"],
+            "کد کارمندی پشتیبان": ["EMP-1", "EMP-2"],
+            "کدرشته": [1201, 1201],
+            "کدرشته | group_code": [1201, 1201],
+            "گروه آزمایشی": ["تجربی", "تجربی"],
+            "جنسیت": [1, 1],
+            "دانش آموز فارغ": [0, 0],
+            "مرکز گلستان صدرا": [1, 0],
+            "مرکز گلستان صدرا | center": [1, 0],
+            "مالی حکمت بنیاد": [0, 0],
+            "کد مدرسه": [3581, 0],
+            "کد مدرسه | school_code": [3581, 0],
+            "remaining_capacity": [5, 5],
+            "occupancy_ratio": [0.2, 0.1],
+            "allocations_new": [0, 0],
+        }
+    )
+
+    _, _, logs, _ = allocate_batch(mixed, pool, policy=policy)
+
+    assert logs["student_id"].tolist()[0] == "S-school"
+
+
+def test_invalid_center_value_adds_alert(_base_pool: pd.DataFrame) -> None:
+    policy = load_policy()
+    students = _single_student(student_id="S-1", مرکز_گلستان_صدرا="نامعتبر")
+
+    _, _, logs, _ = allocate_batch(students, _base_pool, policy=policy)
+
+    alerts = logs.iloc[0]["alerts"]
+    assert isinstance(alerts, list)
+    assert any(alert.get("code") == "INVALID_CENTER" for alert in alerts)
+
+
+def test_missing_manager_validation_strict() -> None:
+    policy = load_policy()
+    strict_policy = replace(
+        policy,
+        center_management=replace(
+            policy.center_management,
+            strict_manager_validation=True,
+        ),
+    )
+    students = _single_student(student_id="S-1")
+    pool = pd.DataFrame(
+        {
+            "پشتیبان": ["X"],
+            "کد کارمندی پشتیبان": ["EMP-10"],
+            "کدرشته": [1201],
+            "کدرشته | group_code": [1201],
+            "گروه آزمایشی": ["تجربی"],
+            "جنسیت": [1],
+            "دانش آموز فارغ": [0],
+            "مرکز گلستان صدرا": [1],
+            "مرکز گلستان صدرا | center": [1],
+            "مالی حکمت بنیاد": [0],
+            "کد مدرسه": [3581],
+            "کد مدرسه | school_code": [3581],
+            "remaining_capacity": [2],
+            "allocations_new": [0],
+            "occupancy_ratio": [0.0],
+            "مدیر": ["دیگری"],
+        }
+    )
+
+    with pytest.raises(ValueError):
+        allocate_batch(
+            students,
+            pool,
+            policy=strict_policy,
+            center_manager_map={1: ("ناموجود",)},
+        )
+
+
 def test_canonicalize_pool_frame_reports_join_key_duplicates(
     _base_pool: pd.DataFrame,
 ) -> None:
