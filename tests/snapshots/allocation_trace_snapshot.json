@@ -1,0 +1,506 @@
+{
+  "pass": [
+    {
+      "stage": "type",
+      "column": "کدرشته",
+      "expected_value": 1201,
+      "total_before": 3,
+      "total_after": 2,
+      "matched": true,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 1201,
+        "join_value_raw": 1201,
+        "rule_details": {
+          "column": "کدرشته",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 1201,
+          "join_value_norm": 1201,
+          "join_value_raw": 1201,
+          "stage": "type",
+          "total_after": 2,
+          "total_before": 3
+        },
+        "rule_passed": true,
+        "rule_reason_code": "OK",
+        "rule_reason_text": "انتخاب موفق."
+      }
+    },
+    {
+      "stage": "group",
+      "column": "کدرشته",
+      "expected_value": 1201,
+      "total_before": 2,
+      "total_after": 2,
+      "matched": true,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 1201,
+        "join_value_raw": 1201,
+        "rule_details": {
+          "column": "کدرشته",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 1201,
+          "join_value_norm": 1201,
+          "join_value_raw": 1201,
+          "stage": "group",
+          "total_after": 2,
+          "total_before": 2
+        },
+        "rule_passed": true,
+        "rule_reason_code": "OK",
+        "rule_reason_text": "انتخاب موفق."
+      }
+    },
+    {
+      "stage": "gender",
+      "column": "جنسیت",
+      "expected_value": 0,
+      "total_before": 2,
+      "total_after": 2,
+      "matched": true,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 0,
+        "join_value_raw": 0,
+        "rule_details": {
+          "column": "جنسیت",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 0,
+          "join_value_norm": 0,
+          "join_value_raw": 0,
+          "stage": "gender",
+          "total_after": 2,
+          "total_before": 2
+        },
+        "rule_passed": true,
+        "rule_reason_code": "OK",
+        "rule_reason_text": "انتخاب موفق."
+      }
+    },
+    {
+      "stage": "graduation_status",
+      "column": "دانش آموز فارغ",
+      "expected_value": 0,
+      "total_before": 2,
+      "total_after": 2,
+      "matched": true,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 0,
+        "join_value_raw": 0,
+        "rule_details": {
+          "column": "دانش آموز فارغ",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 0,
+          "join_value_norm": 0,
+          "join_value_raw": 0,
+          "stage": "graduation_status",
+          "total_after": 2,
+          "total_before": 2
+        },
+        "rule_passed": true,
+        "rule_reason_code": "OK",
+        "rule_reason_text": "انتخاب موفق."
+      }
+    },
+    {
+      "stage": "center",
+      "column": "مرکز گلستان صدرا",
+      "expected_value": 1,
+      "total_before": 2,
+      "total_after": 1,
+      "matched": true,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 1,
+        "join_value_raw": 1,
+        "rule_details": {
+          "column": "مرکز گلستان صدرا",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 1,
+          "join_value_norm": 1,
+          "join_value_raw": 1,
+          "stage": "center",
+          "total_after": 1,
+          "total_before": 2
+        },
+        "rule_passed": true,
+        "rule_reason_code": "OK",
+        "rule_reason_text": "انتخاب موفق."
+      }
+    },
+    {
+      "stage": "finance",
+      "column": "مالی حکمت بنیاد",
+      "expected_value": 0,
+      "total_before": 1,
+      "total_after": 1,
+      "matched": true,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 0,
+        "join_value_raw": 0,
+        "rule_details": {
+          "column": "مالی حکمت بنیاد",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 0,
+          "join_value_norm": 0,
+          "join_value_raw": 0,
+          "stage": "finance",
+          "total_after": 1,
+          "total_before": 1
+        },
+        "rule_passed": true,
+        "rule_reason_code": "OK",
+        "rule_reason_text": "انتخاب موفق."
+      }
+    },
+    {
+      "stage": "school",
+      "column": "کد مدرسه",
+      "expected_value": 2001,
+      "total_before": 1,
+      "total_after": 1,
+      "matched": true,
+      "expected_op": ">",
+      "expected_threshold": 0,
+      "extras": {
+        "expected_op": ">",
+        "expected_threshold": 0,
+        "join_value_norm": 2001,
+        "join_value_raw": "2001",
+        "rule_details": {
+          "column": "کد مدرسه",
+          "expected_op": ">",
+          "expected_threshold": 0,
+          "expected_value": 2001,
+          "join_value_norm": 2001,
+          "join_value_raw": "2001",
+          "school_code_norm": 2001,
+          "school_code_raw": "2001",
+          "school_filter_applied": true,
+          "school_status_resolved": true,
+          "stage": "school",
+          "total_after": 1,
+          "total_before": 1
+        },
+        "rule_passed": true,
+        "rule_reason_code": "OK",
+        "rule_reason_text": "انتخاب موفق.",
+        "school_code_norm": 2001,
+        "school_code_raw": "2001",
+        "school_filter_applied": true,
+        "school_status_resolved": true
+      }
+    },
+    {
+      "stage": "capacity_gate",
+      "column": "remaining_capacity",
+      "expected_value": ">0",
+      "total_before": 1,
+      "total_after": 1,
+      "matched": true,
+      "expected_op": ">",
+      "expected_threshold": 0,
+      "extras": {
+        "capacity_after": 1,
+        "capacity_before": 1,
+        "expected_op": ">",
+        "expected_threshold": 0,
+        "join_value_norm": null,
+        "join_value_raw": null,
+        "rule_details": {
+          "capacity_after": 1,
+          "capacity_before": 1,
+          "column": "remaining_capacity",
+          "expected_op": ">",
+          "expected_threshold": 0,
+          "expected_value": ">0",
+          "stage": "capacity_gate",
+          "total_after": 1,
+          "total_before": 1
+        },
+        "rule_passed": true,
+        "rule_reason_code": "OK",
+        "rule_reason_text": "انتخاب موفق."
+      }
+    }
+  ],
+  "fail": [
+    {
+      "stage": "type",
+      "column": "کدرشته",
+      "expected_value": 9999,
+      "total_before": 3,
+      "total_after": 0,
+      "matched": false,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 9999,
+        "join_value_raw": 9999,
+        "rule_details": {
+          "column": "کدرشته",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 9999,
+          "join_value_norm": 9999,
+          "join_value_raw": 9999,
+          "stage": "type",
+          "total_after": 0,
+          "total_before": 3
+        },
+        "rule_passed": false,
+        "rule_reason_code": "TYPE_MISMATCH",
+        "rule_reason_text": "گروه یا نوع درخواستی دانش‌آموز با استخر فعلی هم‌خوان نبود."
+      }
+    },
+    {
+      "stage": "group",
+      "column": "کدرشته",
+      "expected_value": 9999,
+      "total_before": 0,
+      "total_after": 0,
+      "matched": false,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 9999,
+        "join_value_raw": 9999,
+        "rule_details": {
+          "column": "کدرشته",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 9999,
+          "join_value_norm": 9999,
+          "join_value_raw": 9999,
+          "stage": "group",
+          "total_after": 0,
+          "total_before": 0
+        },
+        "rule_passed": false,
+        "rule_reason_code": "GROUP_MISMATCH",
+        "rule_reason_text": "گروه آزمایشی با معیارهای Policy تطابق نداشت."
+      }
+    },
+    {
+      "stage": "gender",
+      "column": "جنسیت",
+      "expected_value": 1,
+      "total_before": 0,
+      "total_after": 0,
+      "matched": false,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 1,
+        "join_value_raw": 1,
+        "rule_details": {
+          "column": "جنسیت",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 1,
+          "join_value_norm": 1,
+          "join_value_raw": 1,
+          "stage": "gender",
+          "total_after": 0,
+          "total_before": 0
+        },
+        "rule_passed": false,
+        "rule_reason_code": "GENDER_MISMATCH",
+        "rule_reason_text": "عدم تطابق جنسیت دانش‌آموز و پشتیبان."
+      }
+    },
+    {
+      "stage": "graduation_status",
+      "column": "دانش آموز فارغ",
+      "expected_value": 1,
+      "total_before": 0,
+      "total_after": 0,
+      "matched": false,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 1,
+        "join_value_raw": 1,
+        "rule_details": {
+          "column": "دانش آموز فارغ",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 1,
+          "join_value_norm": 1,
+          "join_value_raw": 1,
+          "stage": "graduation_status",
+          "total_after": 0,
+          "total_before": 0
+        },
+        "rule_passed": false,
+        "rule_reason_code": "GRADUATION_STATUS_MISMATCH",
+        "rule_reason_text": "وضعیت فارغ‌التحصیلی با سیاست تخصیص ناسازگار است."
+      }
+    },
+    {
+      "stage": "center",
+      "column": "مرکز گلستان صدرا",
+      "expected_value": 3,
+      "total_before": 0,
+      "total_after": 0,
+      "matched": false,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 3,
+        "join_value_raw": 3,
+        "rule_details": {
+          "column": "مرکز گلستان صدرا",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 3,
+          "join_value_norm": 3,
+          "join_value_raw": 3,
+          "stage": "center",
+          "total_after": 0,
+          "total_before": 0
+        },
+        "rule_passed": false,
+        "rule_reason_code": "CENTER_MISMATCH",
+        "rule_reason_text": "مرکز گلستان صدرا با ورودی دانش‌آموز یا Policy متفاوت است."
+      }
+    },
+    {
+      "stage": "finance",
+      "column": "مالی حکمت بنیاد",
+      "expected_value": 3,
+      "total_before": 0,
+      "total_after": 0,
+      "matched": false,
+      "expected_op": "=",
+      "expected_threshold": null,
+      "extras": {
+        "expected_op": "=",
+        "expected_threshold": null,
+        "join_value_norm": 3,
+        "join_value_raw": 3,
+        "rule_details": {
+          "column": "مالی حکمت بنیاد",
+          "expected_op": "=",
+          "expected_threshold": null,
+          "expected_value": 3,
+          "join_value_norm": 3,
+          "join_value_raw": 3,
+          "stage": "finance",
+          "total_after": 0,
+          "total_before": 0
+        },
+        "rule_passed": false,
+        "rule_reason_code": "FINANCE_MISMATCH",
+        "rule_reason_text": "وضعیت مالی حکمت‌بنیاد با سیاست فعلی انطباق ندارد."
+      }
+    },
+    {
+      "stage": "school",
+      "column": "کد مدرسه",
+      "expected_value": 9999,
+      "total_before": 0,
+      "total_after": 0,
+      "matched": false,
+      "expected_op": ">",
+      "expected_threshold": 0,
+      "extras": {
+        "expected_op": ">",
+        "expected_threshold": 0,
+        "join_value_norm": 9999,
+        "join_value_raw": "9999",
+        "rule_details": {
+          "column": "کد مدرسه",
+          "expected_op": ">",
+          "expected_threshold": 0,
+          "expected_value": 9999,
+          "join_value_norm": 9999,
+          "join_value_raw": "9999",
+          "school_code_norm": 9999,
+          "school_code_raw": "9999",
+          "school_filter_applied": false,
+          "school_status_resolved": true,
+          "stage": "school",
+          "total_after": 0,
+          "total_before": 0
+        },
+        "rule_passed": false,
+        "rule_reason_code": "SCHOOL_STATUS_MISMATCH",
+        "rule_reason_text": "مدرسه یا وضعیت پسامدرسه‌ای دانش‌آموز اجازهٔ ادامه مسیر نداد.",
+        "school_code_norm": 9999,
+        "school_code_raw": "9999",
+        "school_filter_applied": false,
+        "school_status_resolved": true
+      }
+    },
+    {
+      "stage": "capacity_gate",
+      "column": "remaining_capacity",
+      "expected_value": ">0",
+      "total_before": 0,
+      "total_after": 0,
+      "matched": false,
+      "expected_op": ">",
+      "expected_threshold": 0,
+      "extras": {
+        "capacity_after": 0,
+        "capacity_before": 0,
+        "expected_op": ">",
+        "expected_threshold": 0,
+        "join_value_norm": null,
+        "join_value_raw": null,
+        "rule_details": {
+          "capacity_after": 0,
+          "capacity_before": 0,
+          "column": "remaining_capacity",
+          "expected_op": ">",
+          "expected_threshold": 0,
+          "expected_value": ">0",
+          "stage": "capacity_gate",
+          "total_after": 0,
+          "total_before": 0
+        },
+        "rule_passed": false,
+        "rule_reason_code": "CAPACITY_FULL",
+        "rule_reason_text": "هیچ ظرفیت فعالی در پشتیبان‌های واجد شرایط باقی نمانده است."
+      }
+    }
+  ]
+}
