@@ -497,7 +497,20 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
     }
 
     min_coverage = _normalize_min_coverage_arg(getattr(args, "min_coverage", None))
-    cfg = BuildConfig(policy=policy, min_coverage_ratio=min_coverage)
+    expected_policy_version = getattr(args, "policy_version", None)
+    if isinstance(expected_policy_version, str):
+        expected_policy_version = expected_policy_version.strip() or None
+    cfg = BuildConfig(
+        policy=policy,
+        min_coverage_ratio=min_coverage,
+        expected_policy_version=expected_policy_version,
+    )
+
+    if cfg.expected_policy_version and cfg.policy_version != cfg.expected_policy_version:
+        raise ValueError(
+            "policy version mismatch: "
+            f"loaded='{cfg.policy_version}' expected='{cfg.expected_policy_version}'"
+        )
 
     (
         matrix,
@@ -884,6 +897,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="حداقل نسبت پوشش (0-1 یا درصد؛ پیش‌فرض از policy)",
+    )
+    build_cmd.add_argument(
+        "--policy-version",
+        default=None,
+        help="نسخه یا هش policy مورد انتظار برای تطبیق قبل از ساخت",
     )
 
     alloc_cmd = sub.add_parser("allocate", help="تخصیص دانش‌آموزان به منتورها")

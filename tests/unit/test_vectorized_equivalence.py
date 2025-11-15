@@ -332,6 +332,22 @@ def test_validation_reports_dedup_metrics() -> None:
     assert dedup_row["dedup_removed_rows"] == 0
 
 
+def test_validation_includes_policy_version_metadata() -> None:
+    insp_df, schools_df, crosswalk_df = _create_sample_inputs()
+
+    cfg = BuildConfig(expected_policy_version="1.0.3")
+    _, validation, *_ = build_matrix(
+        insp_df,
+        schools_df,
+        crosswalk_df,
+        cfg=cfg,
+    )
+
+    assert "policy_version" in validation.columns
+    assert validation["policy_version"].iat[0] == cfg.policy_version
+    assert validation["policy_version_expected"].iat[0] == cfg.expected_policy_version
+
+
 def test_progress_log_captures_normalization_alias_diffs() -> None:
     insp_df, schools_df, crosswalk_df = _create_sample_inputs()
 
