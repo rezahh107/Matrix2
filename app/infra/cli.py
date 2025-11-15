@@ -505,6 +505,7 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         unseen_groups,
         invalid_mentors,
         join_key_duplicates,
+        progress_log,
     ) = build_matrix(
         insp_df,
         schools_df,
@@ -535,6 +536,7 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         "unseen_groups": unseen_groups,
         "invalid_mentors": invalid_mentors,
         "join_key_duplicates": join_key_duplicates,
+        "progress_log": progress_log,
         "meta": pd.json_normalize([meta]),
     }
     header_internal = policy.excel.header_mode_internal
@@ -1009,7 +1011,11 @@ def main(
 
         raise RuntimeError(f"Unsupported command: {args.command}")
     except ValueError as exc:
-        if ui_overrides is not None or not getattr(exc, "is_coverage_threshold_error", False):
+        if ui_overrides is not None:
+            raise
+        is_coverage_error = getattr(exc, "is_coverage_threshold_error", False)
+        is_dedup_error = getattr(exc, "is_dedup_removed_threshold_error", False)
+        if not (is_coverage_error or is_dedup_error):
             raise
         print(f"❌ {exc}", file=sys.stderr)
         return 2

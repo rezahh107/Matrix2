@@ -38,6 +38,7 @@ def _valid_payload() -> dict[str, object]:
         "school_code_empty_as_zero": True,
         "prefer_major_code": True,
         "coverage_threshold": 0.95,
+        "dedup_removed_ratio_threshold": 0.05,
         "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
             "کدرشته",
@@ -162,6 +163,20 @@ def test_coverage_threshold_invalid_range_raises() -> None:
     payload = _valid_payload()
     payload["coverage_threshold"] = -1
     with pytest.raises(ValueError, match="coverage_threshold"):
+        parse_policy_dict(payload)
+
+
+def test_dedup_threshold_accepts_percent_input() -> None:
+    payload = _valid_payload()
+    payload["dedup_removed_ratio_threshold"] = 12
+    policy = parse_policy_dict(payload)
+    assert policy.dedup_removed_ratio_threshold == pytest.approx(0.12)
+
+
+def test_dedup_threshold_invalid_range_raises() -> None:
+    payload = _valid_payload()
+    payload["dedup_removed_ratio_threshold"] = 200
+    with pytest.raises(ValueError, match="dedup_removed_ratio_threshold"):
         parse_policy_dict(payload)
 
 

@@ -142,6 +142,35 @@ def test_cli_reports_coverage_threshold_error(policy_file: Path, capsys: pytest.
     assert captured.out == ""
 
 
+def test_cli_reports_dedup_threshold_error(policy_file: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def fake_runner(args, policy, progress):  # type: ignore[no-untyped-def]
+        error = ValueError("حذف رکوردهای تکراری زیاد است")
+        setattr(error, "is_dedup_removed_threshold_error", True)
+        raise error
+
+    exit_code = cli.main(
+        [
+            "build-matrix",
+            "--inspactor",
+            "insp.xlsx",
+            "--schools",
+            "schools.xlsx",
+            "--crosswalk",
+            "cross.xlsx",
+            "--output",
+            "out.xlsx",
+            "--policy",
+            str(policy_file),
+        ],
+        build_runner=fake_runner,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "حذف رکوردهای تکراری" in captured.err
+    assert captured.out == ""
+
+
 def test_cli_propagates_coverage_error_for_ui(policy_file: Path) -> None:
     def fake_runner(args, policy, progress):  # type: ignore[no-untyped-def]
         error = ValueError("fail")
