@@ -25,7 +25,10 @@ from typing import Any, Callable, Collection, Dict, Iterable, List, Tuple, TypeV
 import numpy as np
 import pandas as pd
 
-from app.core.canonical_frames import canonicalize_pool_frame
+from app.core.canonical_frames import (
+    POOL_JOIN_KEY_DUPLICATES_ATTR,
+    canonicalize_pool_frame,
+)
 from app.core.common.columns import (
     coerce_semantics,
     ensure_required_columns,
@@ -1429,7 +1432,15 @@ def build_matrix(
     crosswalk_synonyms_df: pd.DataFrame | None = None,
     cfg: BuildConfig = BuildConfig(),
     progress: ProgressFn = noop_progress,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+]:
     """ساخت ماتریس اهلیت بر مبنای دیتافریم‌های ورودی.
 
     مثال ساده::
@@ -1445,7 +1456,7 @@ def build_matrix(
         progress: تابع پیشرفت تزریق‌شده از لایهٔ زیرساخت.
 
     Returns:
-        شش‌تایی دیتافریم شامل ماتریس و جداول کنترلی.
+        هفت‌تایی دیتافریم شامل ماتریس، گزارش QA و جداول کنترلی.
     """
     try:
         insp_df = assert_inspactor_schema(insp_df, cfg.policy)
@@ -1475,6 +1486,10 @@ def build_matrix(
         require_join_keys=False,
         preserve_columns=school_name_columns,
     )
+    duplicate_join_keys_df = insp_df.attrs.get(POOL_JOIN_KEY_DUPLICATES_ATTR)
+    if duplicate_join_keys_df is None:
+        columns = list(cfg.policy.join_keys) + [COL_MENTOR_ID, "duplicate_group_size"]
+        duplicate_join_keys_df = pd.DataFrame(columns=columns)
     schools_df = resolve_aliases(schools_df, "school")
     schools_df = coerce_semantics(schools_df, "school")
     schools_df = ensure_required_columns(schools_df, REQUIRED_SCHOOL_COLUMNS, "school")
@@ -1706,6 +1721,7 @@ def build_matrix(
                 "r0_skipped": 1 if r0_skipped else 0,
                 "unmatched_school_count": unmatched_school_count,
                 "unseen_group_count": unseen_group_count,
+                "join_key_duplicate_rows": int(len(duplicate_join_keys_df)),
             }
         ]
     )
@@ -1723,7 +1739,15 @@ def build_matrix(
             f", unseen_groups={unseen_group_count})"
         ),
     )
-    return matrix, validation, removed_df, unmatched_schools_df, unseen_groups_df, invalid_mentors_df
+    return (
+        matrix,
+        validation,
+        removed_df,
+        unmatched_schools_df,
+        unseen_groups_df,
+        invalid_mentors_df,
+        duplicate_join_keys_df,
+    )
 
 
 # =============================================================================

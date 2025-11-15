@@ -19,6 +19,7 @@ from app.core.allocate_students import (
     build_selection_reason_rows,
 )
 from app.core.canonical_frames import (
+    POOL_JOIN_KEY_DUPLICATES_ATTR,
     canonicalize_allocation_frames,
     canonicalize_pool_frame,
     canonicalize_students_frame,
@@ -167,6 +168,20 @@ def test_canonicalize_pool_frame_handles_duplicate_mentor_columns(
 
     assert normalized["mentor_id"].tolist() == ["EMP-001", "EMP-002"]
     assert normalized["کد کارمندی پشتیبان"].tolist() == ["EMP-001", "EMP-002"]
+
+
+def test_canonicalize_pool_frame_reports_join_key_duplicates(
+    _base_pool: pd.DataFrame,
+) -> None:
+    policy = load_policy()
+
+    normalized = canonicalize_pool_frame(_base_pool, policy=policy, sanitize_pool=False)
+    duplicate_report = normalized.attrs[POOL_JOIN_KEY_DUPLICATES_ATTR]
+    stats = normalized.attrs["pool_canonicalization_stats"]
+
+    assert not duplicate_report.empty
+    assert duplicate_report["کد کارمندی پشتیبان"].tolist() == ["EMP-001", "EMP-002"]
+    assert stats.join_key_duplicates == len(duplicate_report)
 
 
 def test_sanitize_pool_records_virtual_and_capacity_stats() -> None:

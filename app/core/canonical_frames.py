@@ -25,6 +25,7 @@ from .policy_loader import PolicyConfig
 
 __all__ = [
     "PoolCanonicalizationStats",
+    "POOL_JOIN_KEY_DUPLICATES_ATTR",
     "canonicalize_students_frame",
     "canonicalize_pool_frame",
     "canonicalize_allocation_frames",
@@ -32,6 +33,7 @@ __all__ = [
 ]
 
 _POOL_STATS_ATTR = "pool_canonicalization_stats"
+POOL_JOIN_KEY_DUPLICATES_ATTR = "pool_join_key_duplicates"
 
 
 @dataclass(slots=True)
@@ -51,6 +53,7 @@ class PoolCanonicalizationStats:
     capacity_coerced: int = 0
     columns_renamed: int = 0
     default_columns_injected: int = 0
+    join_key_duplicates: int = 0
 
     def as_dict(self) -> dict[str, int]:
         """برگرداندن کپی دیکشنری برای درج در گزارش QA."""
@@ -61,6 +64,7 @@ class PoolCanonicalizationStats:
             "capacity_coerced": self.capacity_coerced,
             "columns_renamed": self.columns_renamed,
             "default_columns_injected": self.default_columns_injected,
+            "join_key_duplicates": self.join_key_duplicates,
         }
 
 
@@ -99,6 +103,72 @@ def _make_unique_columns(columns: Sequence[str]) -> list[str]:
         seen[name] = 1
         result.append(name)
     return result
+
+
+def _empty_join_key_report(
+    join_keys: Sequence[str], mentor_column: str
+) -> pd.DataFrame:
+    """ساخت دیتافریم تهی با ستون‌های کلید شش‌تایی و شناسهٔ پشتیبان."""
+
+    data: dict[str, pd.Series] = {
+        column: pd.Series(dtype="Int64") for column in join_keys
+    }
+    data[mentor_column] = pd.Series(dtype="string")
+    data["duplicate_group_size"] = pd.Series(dtype="Int64")
+    return pd.DataFrame(data)
+
+
+def _build_join_key_duplicate_report(
+    frame: pd.DataFrame, join_keys: Sequence[str], mentor_column: str
+) -> pd.DataFrame:
+    """گزارش ردیف‌های تکراری بر اساس کلید شش‌تایی Policy.
+
+    مثال::
+
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({
+        ...     "کدرشته": [1201, 1201],
+        ...     "جنسیت": [1, 1],
+        ...     "دانش آموز فارغ": [0, 0],
+        ...     "مرکز گلستان صدرا": [1, 1],
+        ...     "مالی حکمت بنیاد": [0, 0],
+        ...     "کد مدرسه": [3581, 3581],
+        ...     "کد کارمندی پشتیبان": ["EMP-1", "EMP-2"],
+        ... })
+        >>> report = _build_join_key_duplicate_report(
+        ...     df,
+        ...     [
+        ...         "کدرشته",
+        ...         "جنسیت",
+        ...         "دانش آموز فارغ",
+        ...         "مرکز گلستان صدرا",
+        ...         "مالی حکمت بنیاد",
+        ...         "کد مدرسه",
+        ...     ],
+        ...     "کد کارمندی پشتیبان",
+        ... )
+        >>> int(report["duplicate_group_size"].iat[0])
+        2
+
+    """
+
+    if any(column not in frame.columns for column in join_keys):
+        return _empty_join_key_report(join_keys, mentor_column)
+    if mentor_column not in frame.columns:
+        return _empty_join_key_report(join_keys, mentor_column)
+    mask_duplicates = frame.duplicated(subset=list(join_keys), keep=False)
+    if not bool(mask_duplicates.any()):
+        return _empty_join_key_report(join_keys, mentor_column)
+    subset_columns = list(join_keys) + [mentor_column]
+    report = frame.loc[mask_duplicates, subset_columns].copy()
+    report = report.sort_values(subset_columns, kind="stable")
+    group_sizes = (
+        report.groupby(list(join_keys), sort=False)[mentor_column]
+        .transform("size")
+        .astype("Int64")
+    )
+    report["duplicate_group_size"] = group_sizes
+    return report.reset_index(drop=True)
 
 
 def sanitize_pool_for_allocation(
@@ -408,6 +478,11 @@ def canonicalize_pool_frame(
     present_join_keys = [column for column in policy.join_keys if column in pool.columns]
     if present_join_keys:
         pool = enforce_join_key_types(pool, present_join_keys)
+    duplicate_report = _build_join_key_duplicate_report(
+        pool, policy.join_keys, mentor_column
+    )
+    stats.join_key_duplicates = int(len(duplicate_report))
+    pool.attrs[POOL_JOIN_KEY_DUPLICATES_ATTR] = duplicate_report
     pool = _append_bilingual_alias_columns(pool, policy)
     if preserved:
         for column, original in preserved.items():

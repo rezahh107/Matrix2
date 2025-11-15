@@ -117,7 +117,7 @@ def test_vectorized_matrix_matches_reference() -> None:
     insp_df, schools_df, crosswalk_df = _create_sample_inputs()
     cfg = BuildConfig()
 
-    matrix, _, _, unmatched_df, unseen_df, invalid_df = build_matrix(
+    matrix, _, _, unmatched_df, unseen_df, invalid_df, _ = build_matrix(
         insp_df,
         schools_df,
         crosswalk_df,
@@ -182,7 +182,7 @@ def test_duplicate_mentors_are_filtered_before_row_generation() -> None:
     duplicate_row.loc[:, "نام پشتیبان"] = ["زهرا تکراری"]
     insp_with_duplicate = pd.concat([insp_df, duplicate_row], ignore_index=True)
 
-    matrix, _, _, _, _, invalid_df = build_matrix(
+    matrix, _, _, _, _, invalid_df, _ = build_matrix(
         insp_with_duplicate,
         schools_df,
         crosswalk_df,
@@ -214,7 +214,7 @@ def test_validation_captures_unmatched_school_counts() -> None:
     insp_df, schools_df, crosswalk_df = _create_sample_inputs()
     insp_df.loc[0, "نام مدرسه 1"] = "123456"
 
-    _, validation, _, unmatched_df, _, _ = build_matrix(
+    _, validation, _, unmatched_df, _, _, _ = build_matrix(
         insp_df,
         schools_df,
         crosswalk_df,
@@ -223,3 +223,26 @@ def test_validation_captures_unmatched_school_counts() -> None:
 
     assert len(unmatched_df) == 1
     assert validation["unmatched_school_count"].iat[0] == 1
+    assert validation["join_key_duplicate_rows"].iat[0] == 0
+
+
+def test_build_matrix_reports_join_key_duplicates() -> None:
+    insp_df, schools_df, crosswalk_df = _create_sample_inputs()
+    first_row = insp_df.iloc[[0]].copy()
+    first_row.loc[:, "کدرشته"] = [1201]
+    first_row.loc[:, "کد مدرسه"] = [0]
+    duplicate = first_row.copy()
+    duplicate.loc[:, "نام پشتیبان"] = ["زهرا دوم"]
+    duplicate.loc[:, "کد کارمندی پشتیبان"] = ["EMP-99"]
+    insp_df = pd.concat([first_row, duplicate], ignore_index=True)
+
+    _, validation, _, _, _, _, duplicate_join_keys = build_matrix(
+        insp_df,
+        schools_df,
+        crosswalk_df,
+        cfg=BuildConfig(),
+    )
+
+    assert len(duplicate_join_keys) == 2
+    assert duplicate_join_keys["کد کارمندی پشتیبان"].tolist() == ["EMP-1", "EMP-99"]
+    assert validation["join_key_duplicate_rows"].iat[0] == 2
