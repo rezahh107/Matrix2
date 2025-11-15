@@ -27,6 +27,7 @@ def policy_file(tmp_path: Path) -> Path:
         "center_map": {"شهدخت کشاورز": 1, "آیناز هوشمند": 2, "*": 0},
         "school_code_empty_as_zero": True,
         "prefer_major_code": True,
+        "coverage_threshold": 0.95,
         "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
             "کدرشته",
@@ -110,6 +111,61 @@ def test_build_matrix_command_uses_progress(policy_file: Path, capsys: pytest.Ca
     assert "100% | done" in captured.out
     assert exit_code == 0
     assert called["policy_version"] == "1.0.3"
+
+
+def test_cli_reports_coverage_threshold_error(policy_file: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def fake_runner(args, policy, progress):  # type: ignore[no-untyped-def]
+        error = ValueError("نسبت پوشش پایین است")
+        setattr(error, "is_coverage_threshold_error", True)
+        raise error
+
+    exit_code = cli.main(
+        [
+            "build-matrix",
+            "--inspactor",
+            "insp.xlsx",
+            "--schools",
+            "schools.xlsx",
+            "--crosswalk",
+            "cross.xlsx",
+            "--output",
+            "out.xlsx",
+            "--policy",
+            str(policy_file),
+        ],
+        build_runner=fake_runner,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "نسبت پوشش" in captured.err
+    assert captured.out == ""
+
+
+def test_cli_propagates_coverage_error_for_ui(policy_file: Path) -> None:
+    def fake_runner(args, policy, progress):  # type: ignore[no-untyped-def]
+        error = ValueError("fail")
+        setattr(error, "is_coverage_threshold_error", True)
+        raise error
+
+    with pytest.raises(ValueError):
+        cli.main(
+            [
+                "build-matrix",
+                "--inspactor",
+                "insp.xlsx",
+                "--schools",
+                "schools.xlsx",
+                "--crosswalk",
+                "cross.xlsx",
+                "--output",
+                "out.xlsx",
+                "--policy",
+                str(policy_file),
+            ],
+            build_runner=fake_runner,
+            ui_overrides={},
+        )
 
 
 def test_allocate_command_passes_through(policy_file: Path) -> None:

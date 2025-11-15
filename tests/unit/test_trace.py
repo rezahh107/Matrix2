@@ -34,6 +34,7 @@ def _policy_payload() -> dict[str, object]:
         "center_map": {"شهدخت کشاورز": 1, "آیناز هوشمند": 2, "*": 0},
         "school_code_empty_as_zero": True,
         "prefer_major_code": True,
+        "coverage_threshold": 0.95,
         "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
             "کدرشته",
@@ -170,10 +171,11 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
         school_statuses=[1],
         postal_valid_range=(1000, 9999),
         finance_variants=(0, 1, 3),
-            center_map={"شهدخت کشاورز": 1, "آیناز هوشمند": 2, "*": 0},
-            school_code_empty_as_zero=True,
-            prefer_major_code=True,
-            alias_rule=PolicyAliasRule(normal="postal_or_fallback_mentor_id", school="mentor_id"),
+        center_map={"شهدخت کشاورز": 1, "آیناز هوشمند": 2, "*": 0},
+        school_code_empty_as_zero=True,
+        prefer_major_code=True,
+        coverage_threshold=0.95,
+        alias_rule=PolicyAliasRule(normal="postal_or_fallback_mentor_id", school="mentor_id"),
         columns=PolicyColumns(
             postal_code="کدپستی",
             school_count="تعداد مدارس تحت پوشش",

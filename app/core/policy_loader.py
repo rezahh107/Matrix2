@@ -29,6 +29,7 @@ _DEFAULT_VIRTUAL_NAME_PATTERNS: tuple[str, ...] = (
     r"در\s+انتظار\s+تخصیص",
     "فراگیر",
 )
+_DEFAULT_COVERAGE_THRESHOLD = 0.95
 _DEFAULT_EXCEL_OPTIONS: Mapping[str, object] = {
     "rtl": True,
     "font_name": "Tahoma",
@@ -197,6 +198,7 @@ class PolicyConfig:
     center_map: Mapping[str, int]
     school_code_empty_as_zero: bool
     prefer_major_code: bool
+    coverage_threshold: float
     alias_rule: PolicyAliasRule
     columns: PolicyColumns
     column_aliases: Mapping[str, Dict[str, str]]
@@ -294,6 +296,9 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     center_map = _normalize_center_map(data["center_map"])
     school_code_empty_as_zero = _ensure_bool("school_code_empty_as_zero", data["school_code_empty_as_zero"])
     prefer_major_code = _ensure_bool("prefer_major_code", data["prefer_major_code"])
+    coverage_threshold = _normalize_coverage_threshold(
+        data.get("coverage_threshold", _DEFAULT_COVERAGE_THRESHOLD)
+    )
     alias_rule = _normalize_alias_rule(data["alias_rule"])
     gender_codes = data["gender_codes"]
     if not isinstance(gender_codes, Mapping):
@@ -320,6 +325,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "center_map": center_map,
         "school_code_empty_as_zero": school_code_empty_as_zero,
         "prefer_major_code": prefer_major_code,
+        "coverage_threshold": coverage_threshold,
         "alias_rule": alias_rule,
         "gender_codes": gender_codes,
         "columns": columns,
@@ -367,6 +373,18 @@ def _normalize_finance_variants(value: object) -> tuple[int, ...]:
         missing = sorted(required.difference(seen))
         raise ValueError(f"finance_variants missing required codes: {missing}")
     return tuple(unique)
+
+
+def _normalize_coverage_threshold(value: object) -> float:
+    try:
+        numeric = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise TypeError("coverage_threshold must be a number") from exc
+    if numeric > 1:
+        numeric /= 100.0
+    if not 0.0 <= numeric <= 1.0:
+        raise ValueError("coverage_threshold must be between 0 and 1 (inclusive)")
+    return float(numeric)
 
 
 def _normalize_fairness_strategy(value: object) -> str:
@@ -692,6 +710,7 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         center_map={str(k): int(v) for k, v in data["center_map"].items()},
         school_code_empty_as_zero=bool(data["school_code_empty_as_zero"]),
         prefer_major_code=bool(data["prefer_major_code"]),
+        coverage_threshold=float(data["coverage_threshold"]),
         alias_rule=PolicyAliasRule(
             normal=str(data["alias_rule"]["normal"]),
             school=str(data["alias_rule"]["school"]),

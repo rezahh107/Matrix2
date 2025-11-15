@@ -37,6 +37,7 @@ def _valid_payload() -> dict[str, object]:
         "center_map": {"شهدخت کشاورز": 1, "آیناز هوشمند": 2, "*": 0},
         "school_code_empty_as_zero": True,
         "prefer_major_code": True,
+        "coverage_threshold": 0.95,
         "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
             "کدرشته",
@@ -140,6 +141,27 @@ def test_trace_stage_extra_stage_raises() -> None:
     payload = _valid_payload()
     payload["trace_stages"].append({"stage": "extra", "column": "x"})
     with pytest.raises(ValueError, match="exactly eight stages"):
+        parse_policy_dict(payload)
+
+
+def test_coverage_threshold_accepts_percent_input() -> None:
+    payload = _valid_payload()
+    payload["coverage_threshold"] = 97
+    policy = parse_policy_dict(payload)
+    assert policy.coverage_threshold == pytest.approx(0.97)
+
+
+def test_coverage_threshold_defaults_when_missing() -> None:
+    payload = _valid_payload()
+    payload.pop("coverage_threshold")
+    policy = parse_policy_dict(payload)
+    assert policy.coverage_threshold == pytest.approx(0.95)
+
+
+def test_coverage_threshold_invalid_range_raises() -> None:
+    payload = _valid_payload()
+    payload["coverage_threshold"] = -1
+    with pytest.raises(ValueError, match="coverage_threshold"):
         parse_policy_dict(payload)
 
 

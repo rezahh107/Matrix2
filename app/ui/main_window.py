@@ -1130,11 +1130,13 @@ class MainWindow(QMainWindow):
     ) -> None:
         """اجرای فرمان CLI با Worker و رعایت قرارداد progress."""
 
+        override_payload = overrides or {}
+
         def _task(*, progress: ProgressFn) -> None:
             exit_code = cli.main(
                 argv,
                 progress_factory=lambda: progress,
-                ui_overrides=overrides,
+                ui_overrides=override_payload,
             )
             if exit_code != 0:
                 raise RuntimeError(f"کد خروج غیرصفر: {exit_code}")

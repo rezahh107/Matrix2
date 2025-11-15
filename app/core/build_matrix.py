@@ -211,6 +211,7 @@ class BuildConfig:
     capacity_special_column: str | None = None
     remaining_capacity_column: str | None = None
     prefer_major_code: bool | None = None
+    min_coverage_ratio: float | None = None
 
     def __post_init__(self) -> None:
         policy = self.policy
@@ -268,6 +269,16 @@ class BuildConfig:
             self.prefer_major_code = bool(getattr(policy, "prefer_major_code", True))
         else:
             self.prefer_major_code = bool(self.prefer_major_code)
+
+        if self.min_coverage_ratio is None:
+            self.min_coverage_ratio = float(getattr(policy, "coverage_threshold", 0.95))
+        else:
+            ratio = float(self.min_coverage_ratio)
+            if ratio > 1:
+                ratio /= 100.0
+            if ratio < 0 or ratio > 1:
+                raise ValueError("min_coverage_ratio must be between 0 and 1 (inclusive)")
+            self.min_coverage_ratio = ratio
 
 
 def _as_domain_config(cfg: BuildConfig) -> DomainBuildConfig:
@@ -1705,6 +1716,10 @@ def build_matrix(
     if len(matrix) != len(nodup):
         raise AssertionError("Duplicate rows before counter!")
 
+    total_candidates = total_rows + unmatched_school_count + unseen_group_count
+    coverage_ratio = total_rows / total_candidates if total_candidates else 1.0
+    min_coverage_ratio = float(cfg.min_coverage_ratio or 0.0)
+
     validation = pd.DataFrame(
         [
             {
@@ -1722,13 +1737,14 @@ def build_matrix(
                 "unmatched_school_count": unmatched_school_count,
                 "unseen_group_count": unseen_group_count,
                 "join_key_duplicate_rows": int(len(duplicate_join_keys_df)),
+                "coverage_ratio": coverage_ratio,
+                "coverage_threshold": min_coverage_ratio,
+                "total_candidates": total_candidates,
             }
         ]
     )
 
     removed_df = removed_mentors
-    total_candidates = total_rows + unmatched_school_count + unseen_group_count
-    coverage_ratio = total_rows / total_candidates if total_candidates else 1.0
     progress(90, "matrix assembly complete")
     progress(
         95,
@@ -1739,6 +1755,21 @@ def build_matrix(
             f", unseen_groups={unseen_group_count})"
         ),
     )
+
+    if total_candidates and coverage_ratio < min_coverage_ratio:
+        message = (
+            "نسبت پوشش خروجی {coverage:.1%} کمتر از حداقل مجاز {minimum:.1%} است؛ "
+            "unmatched_schools={unmatched}، unseen_groups={unseen}."
+        ).format(
+            coverage=coverage_ratio,
+            minimum=min_coverage_ratio,
+            unmatched=unmatched_school_count,
+            unseen=unseen_group_count,
+        )
+        error = ValueError(message)
+        setattr(error, "is_coverage_threshold_error", True)
+        raise error
+
     return (
         matrix,
         validation,

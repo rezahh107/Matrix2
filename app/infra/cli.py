@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import platform
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Sequence
@@ -29,7 +30,7 @@ from app.core.canonical_frames import (
     canonicalize_allocation_frames,
     sanitize_pool_for_allocation as _sanitize_pool_for_allocation,
 )
-from app.core.build_matrix import build_matrix
+from app.core.build_matrix import BuildConfig, build_matrix
 from app.core.policy_loader import PolicyConfig, load_policy
 from app.infra.excel_writer import write_selection_reasons_sheet
 from app.infra.excel.import_to_sabt import (
@@ -108,6 +109,20 @@ def _detect_reader(path: Path) -> Callable[[Path], pd.DataFrame]:
                 return xls.parse(sheet, dtype=dtype_map)
         return _read_xlsx
     return lambda p: pd.read_csv(p, dtype=dtype_map)
+
+
+# --- توابع کمکی برای پارامترهای خط فرمان ---
+def _normalize_min_coverage_arg(value: float | None) -> float | None:
+    if value is None:
+        return None
+    ratio = float(value)
+    if ratio > 1:
+        ratio /= 100.0
+    if ratio < 0 or ratio > 1:
+        raise ValueError(
+            "حداقل نسبت پوشش باید عددی بین 0 و 1 باشد یا به‌صورت درصد معتبر وارد شود."
+        )
+    return ratio
 
 
 # --- توابع کمکی برای پاک‌سازی خروجی (کاملاً ایمن و جامع) ---
@@ -479,6 +494,9 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         "crosswalk": crosswalk.stat().st_mtime,
     }
 
+    min_coverage = _normalize_min_coverage_arg(getattr(args, "min_coverage", None))
+    cfg = BuildConfig(policy=policy, min_coverage_ratio=min_coverage)
+
     (
         matrix,
         validation,
@@ -492,6 +510,7 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         schools_df,
         crosswalk_groups_df,
         crosswalk_synonyms_df=crosswalk_synonyms_df,
+        cfg=cfg,
         progress=progress,
     )
 
@@ -820,6 +839,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=str(_DEFAULT_POLICY_PATH),
         help="مسیر فایل policy.json",
     )
+    build_cmd.add_argument(
+        "--min-coverage",
+        type=float,
+        default=None,
+        help="حداقل نسبت پوشش (0-1 یا درصد؛ پیش‌فرض از policy)",
+    )
 
     alloc_cmd = sub.add_parser("allocate", help="تخصیص دانش‌آموزان به منتورها")
     alloc_cmd.add_argument("--students", required=True, help="مسیر فایل دانش‌آموزان")
@@ -969,19 +994,25 @@ def main(
 
     progress = progress_factory() if progress_factory is not None else _default_progress
 
-    if args.command == "build-matrix":
-        runner = build_runner or _run_build_matrix
-        return runner(args, policy, progress)
+    try:
+        if args.command == "build-matrix":
+            runner = build_runner or _run_build_matrix
+            return runner(args, policy, progress)
 
-    if args.command == "allocate":
-        runner = allocate_runner or _run_allocate
-        return runner(args, policy, progress)
+        if args.command == "allocate":
+            runner = allocate_runner or _run_allocate
+            return runner(args, policy, progress)
 
-    if args.command == "rule-engine":
-        runner = rule_engine_runner or _run_rule_engine
-        return runner(args, policy, progress)
+        if args.command == "rule-engine":
+            runner = rule_engine_runner or _run_rule_engine
+            return runner(args, policy, progress)
 
-    raise RuntimeError(f"Unsupported command: {args.command}")
+        raise RuntimeError(f"Unsupported command: {args.command}")
+    except ValueError as exc:
+        if ui_overrides is not None or not getattr(exc, "is_coverage_threshold_error", False):
+            raise
+        print(f"❌ {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
