@@ -695,6 +695,7 @@ def _build_center_manager_index(
     for center_value, names in manager_map.items():
         normalized_names = [str(name).strip() for name in names if str(name).strip()]
         if not normalized_names:
+            missing_centers.append(int(center_value))
             continue
         mask = center_series.eq(int(center_value)) & manager_series.isin(normalized_names)
         if mask.any():
