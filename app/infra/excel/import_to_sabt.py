@@ -172,26 +172,12 @@ def prepare_allocation_export_frame(
 ) -> pd.DataFrame:
     """ادغام ستون‌های دانش‌آموز و پشتیبان روی دیتافریم تخصیص."""
 
-    student_source = _describe_frame_source(students_df, default_label="students_df")
-    mentor_source = _describe_frame_source(mentors_df, default_label="mentors_df")
-
-    validate_export_identifiers(
-        students_df,
-        required_column="student_id",
-        entity_name="student",
-        source_label=student_source,
-    )
-    validate_export_identifiers(
-        mentors_df,
-        required_column="mentor_id",
-        entity_name="mentor",
-        source_label=mentor_source,
-        alternate_column="alias",
-    )
-
     alloc = canonicalize_headers(allocations_df, header_mode="en").copy()
     students = canonicalize_headers(students_df, header_mode="en").copy()
     mentors = canonicalize_headers(mentors_df, header_mode="en").copy()
+
+    student_source = _describe_frame_source(students_df, default_label="students_df")
+    mentor_source = _describe_frame_source(mentors_df, default_label="mentors_df")
 
     alloc = _deduplicate_columns(alloc, context="allocations")
     students = _deduplicate_columns(students, context="students")
@@ -200,6 +186,20 @@ def prepare_allocation_export_frame(
     if student_ids is not None:
         aligned_ids = student_ids.reindex(students.index)
         students.loc[:, "student_id"] = aligned_ids.astype("string")
+
+    validate_export_identifiers(
+        students,
+        required_column="student_id",
+        entity_name="student",
+        source_label=student_source,
+    )
+    validate_export_identifiers(
+        mentors,
+        required_column="mentor_id",
+        entity_name="mentor",
+        source_label=mentor_source,
+        alternate_column="alias",
+    )
 
     if "mentor_id" not in mentors.columns:
         alias_series = mentors.get("alias")
