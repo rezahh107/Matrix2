@@ -64,6 +64,9 @@ def test_trace_records_raw_and_normalized_school_code() -> None:
     }
     for key, value in expected.items():
         assert extras[key] == value
+    assert extras["join_value_norm"] == 663
+    assert extras["expected_op"] == ">"
+    assert extras["rule_details"]["school_code_norm"] == 663
     assert extras["rule_reason_code"] == ReasonCode.OK
 
 
@@ -88,4 +91,7 @@ def test_trace_for_normal_student_marks_false() -> None:
     }
     for key, value in expected.items():
         assert extras[key] == value
+    assert extras["join_value_norm"] == 0
+    assert extras["expected_op"] == ">"
+    assert extras["rule_details"]["school_code_norm"] == 0
     assert extras["rule_reason_code"] == ReasonCode.OK

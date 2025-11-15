@@ -111,6 +111,24 @@ def _format_capacity_text(
     return "، ".join(segments)
 
 
+def _format_rule_details(payload: object) -> str:
+    if not isinstance(payload, Mapping):
+        return ""
+    segments: list[str] = []
+    for key in sorted(payload.keys()):
+        value = payload[key]
+        if isinstance(value, Mapping):
+            value_text = _format_rule_details(value)
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            nested = [str(item).strip() for item in value if str(item).strip()]
+            value_text = f"[{', '.join(nested)}]" if nested else ""
+        else:
+            value_text = str(value).strip()
+        if value_text:
+            segments.append(f"{key}={value_text}")
+    return "، ".join(segments)
+
+
 def _normalize_reason_payload(
     code_value: object | None, message_value: object | None
 ) -> tuple[str | None, str | None]:
@@ -439,6 +457,7 @@ def build_selection_reason_rows(
         )
         rule_code_raw = log_data.get("rule_reason_code")
         rule_message_raw = log_data.get("rule_reason_text")
+        rule_detail_text = _format_rule_details(log_data.get("rule_reason_details"))
         rule_code, rule_message = _normalize_reason_payload(rule_code_raw, rule_message_raw)
         fairness_text = _resolve_fairness_text(log_data)
         reason_segments = [reason_text]
@@ -446,6 +465,12 @@ def build_selection_reason_rows(
             reason_segments.append(
                 fa_digitize(
                     sanitize_bidi(f"دلیل Policy: [{rule_code}] {rule_message}")
+                )
+            )
+        if rule_detail_text:
+            reason_segments.append(
+                fa_digitize(
+                    sanitize_bidi(f"جزئیات Policy: {rule_detail_text}")
                 )
             )
         if fairness_text:

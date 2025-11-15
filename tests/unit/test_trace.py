@@ -145,6 +145,11 @@ def test_build_allocation_trace_counts_down(policy_config: PolicyConfig) -> None
     counts = [step["total_after"] for step in trace]
     assert counts == [3, 2, 2, 2, 1, 1, 1, 1]
     assert trace[-1]["matched"] is True
+    first_stage = trace[0]
+    assert first_stage["extras"]["join_value_raw"] == student["کدرشته"]
+    assert first_stage["extras"]["expected_op"] == "="
+    capacity_extras = trace[-1]["extras"]
+    assert capacity_extras["capacity_before"] == 1
 
 
 def test_capacity_gate_handles_no_capacity(policy_config: PolicyConfig) -> None:

@@ -398,6 +398,7 @@ def _build_log_from_join_map(
         "capacity_after": None,
         "rule_reason_code": None,
         "rule_reason_text": None,
+        "rule_reason_details": None,
         "fairness_reason_code": None,
         "fairness_reason_text": None,
         "alerts": [],
@@ -405,25 +406,35 @@ def _build_log_from_join_map(
     return log
 
 
-def _derive_rule_reason(trace: Sequence[TraceStageRecord]) -> tuple[str, str]:
+def _normalize_rule_details(payload: object) -> Mapping[str, object] | None:
+    if isinstance(payload, Mapping):
+        return dict(payload)
+    return None
+
+
+def _derive_rule_reason(
+    trace: Sequence[TraceStageRecord],
+) -> tuple[str, str, Mapping[str, object] | None]:
     """تعیین کد/متن دلیل بر اساس اولین مرحلهٔ رد."""
 
     fallback = build_reason(ReasonCode.OK)
     if not trace:
-        return fallback.code, fallback.message_fa
+        return fallback.code, fallback.message_fa, None
     for record in trace:
         extras = record.get("extras") or {}
         code = extras.get("rule_reason_code")
         message = extras.get("rule_reason_text")
+        details = _normalize_rule_details(extras.get("rule_details"))
         after = int(record.get("total_after", 0))
         if code and (not record.get("matched") or after == 0):
-            return str(code), str(message or fallback.message_fa)
+            return str(code), str(message or fallback.message_fa), details
     tail_extras = trace[-1].get("extras") or {}
     code = tail_extras.get("rule_reason_code")
     message = tail_extras.get("rule_reason_text")
+    details = _normalize_rule_details(tail_extras.get("rule_details"))
     if code:
-        return str(code), str(message or fallback.message_fa)
-    return fallback.code, fallback.message_fa
+        return (str(code), str(message or fallback.message_fa), details)
+    return fallback.code, fallback.message_fa, None
 
 
 def _display_expected_value(value: object) -> str:
@@ -661,7 +672,7 @@ def allocate_student(
         capacity_column=resolved_capacity_column,
         stage_rules=stage_rules,
     )
-    rule_reason_code, rule_reason_text = _derive_rule_reason(trace)
+    rule_reason_code, rule_reason_text, rule_details = _derive_rule_reason(trace)
 
     try:
         log = _build_log_base(
@@ -676,6 +687,7 @@ def allocate_student(
             {
                 "rule_reason_code": rule_reason_code,
                 "rule_reason_text": rule_reason_text,
+                "rule_reason_details": rule_details,
             }
         )
         log["candidate_count"] = int(eligible.shape[0])
@@ -726,6 +738,7 @@ def allocate_student(
     log["stage_candidate_counts"] = dict(stage_candidate_counts)
     log["rule_reason_code"] = rule_reason_code
     log["rule_reason_text"] = rule_reason_text
+    log["rule_reason_details"] = rule_details
 
     if eligible.empty:
         return _fail_allocation(

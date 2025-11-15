@@ -159,6 +159,7 @@ class AllocationLogRecord(TypedDict, total=False):
     stage_candidate_counts: Dict[str, int]
     rule_reason_code: Optional[str]
     rule_reason_text: Optional[str]
+    rule_reason_details: Optional[Mapping[str, Any]]
     fairness_reason_code: Optional[str]
     fairness_reason_text: Optional[str]
     alerts: List[AllocationAlertRecord]

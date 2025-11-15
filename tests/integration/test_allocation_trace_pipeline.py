@@ -31,5 +31,7 @@ def test_trace_records_include_reason_codes() -> None:
     trace = build_allocation_trace(student, candidate_pool, policy=policy)
     gender_stage = next(stage for stage in trace if stage["stage"] == "gender")
     assert gender_stage["extras"]["rule_reason_code"] == ReasonCode.GENDER_MISMATCH
+    assert gender_stage["extras"]["rule_details"]["expected_op"] == "="
     capacity_stage = trace[-1]
     assert capacity_stage["extras"]["rule_reason_code"] == ReasonCode.CAPACITY_FULL
+    assert capacity_stage["extras"]["rule_details"]["capacity_before"] == 0
