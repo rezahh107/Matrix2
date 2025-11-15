@@ -194,7 +194,7 @@ def test_allocate_batch_includes_identity_columns():
     assert "mentor_alias_code" in allocations.columns
     row = allocations.iloc[0]
     assert row["student_national_code"] == "0123456789"
-    assert row["mentor_alias_code"] == "0098765432"
+    assert row["mentor_alias_code"] == "98765432"
 
 
 def test_allocate_batch_uses_alias_column_from_pool():
