@@ -1253,7 +1253,11 @@ class MainWindow(QMainWindow):
                 )
                 return self._get_default_managers()
 
-            managers = canonical_pool["manager_name"].dropna().unique().tolist()
+            manager_data = canonical_pool["manager_name"]
+            if isinstance(manager_data, pd.DataFrame):
+                manager_data = manager_data.iloc[:, 0]
+
+            managers = manager_data.dropna().unique().tolist()
             if not managers:
                 self._append_log("⚠️ هیچ مدیری در فایل استخر یافت نشد")
                 QMessageBox.information(
