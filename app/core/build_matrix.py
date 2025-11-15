@@ -748,24 +748,57 @@ def normalize_capacity_values(current: Any, special: Any, *, default: int = 0) -
 # =============================================================================
 # CAPACITY GATE (R0)
 # =============================================================================
+
+
+@dataclass(frozen=True)
+class CapacityGateMetrics:
+    """معیارهای خلاصهٔ مرحلهٔ R0 با مثال ساده.
+
+    مثال::
+
+        >>> CapacityGateMetrics(total_removed=2, total_special_capacity_lost=7, percent_pool_kept=0.5)
+        CapacityGateMetrics(total_removed=2, total_special_capacity_lost=7, percent_pool_kept=0.5)
+    """
+
+    total_removed: int = 0
+    total_special_capacity_lost: int = 0
+    percent_pool_kept: float = 1.0
+
+    @classmethod
+    def empty(cls) -> "CapacityGateMetrics":
+        """ساخت نمونهٔ تهی برای زمانی که R0 اجرا نشده است."""
+
+        return cls()
+
+
 def capacity_gate(
     insp: pd.DataFrame,
     *,
     cfg: BuildConfig,
     progress: ProgressFn = noop_progress,
-) -> tuple[pd.DataFrame, pd.DataFrame, bool]:
+) -> tuple[pd.DataFrame, pd.DataFrame, CapacityGateMetrics, bool]:
     current_col = cfg.capacity_current_column or CAPACITY_CURRENT_COL
     special_col = cfg.capacity_special_column or CAPACITY_SPECIAL_COL
 
     if current_col not in insp.columns or special_col not in insp.columns:
         progress(10, "capacity columns missing; skipping capacity gate")
-        return insp.copy(), pd.DataFrame(), True
+        return insp.copy(), pd.DataFrame(), CapacityGateMetrics.empty(), True
 
     df = insp.copy()
     df["_cap_cur"] = safe_int_column(df, current_col, default=0)
     df["_cap_spec"] = safe_int_column(df, special_col, default=0)
 
     removed_mask = ~(df["_cap_cur"] < df["_cap_spec"])
+    total_pool = len(df.index)
+    removed_count = int(removed_mask.sum())
+    special_capacity_lost = int(df.loc[removed_mask, "_cap_spec"].sum())
+    kept_count = total_pool - removed_count
+    percent_pool_kept = (kept_count / total_pool) if total_pool else 1.0
+    metrics = CapacityGateMetrics(
+        total_removed=removed_count,
+        total_special_capacity_lost=special_capacity_lost,
+        percent_pool_kept=percent_pool_kept,
+    )
 
     keep_cols = [COL_MENTOR_NAME, COL_MANAGER_NAME, current_col, special_col]
     if COL_SCHOOL1 in df.columns:
@@ -791,8 +824,14 @@ def capacity_gate(
     kept = kept.drop(columns=drop_cols, errors="ignore")
     removed = removed.drop(columns=drop_cols, errors="ignore")
 
-    progress(20, f"capacity gate kept={len(kept)} removed={len(removed)}")
-    return kept, removed, False
+    progress(
+        20,
+        (
+            "capacity gate kept="
+            f"{len(kept)} removed={len(removed)} kept_pct={metrics.percent_pool_kept:.1%}"
+        ),
+    )
+    return kept, removed, metrics, False
 
 # =============================================================================
 # SCHOOL CODE EXTRACTION
@@ -1452,9 +1491,12 @@ def build_matrix(
     domain_cfg = _as_domain_config(cfg)
 
     if cfg.enable_capacity_gate:
-        insp, removed_mentors, r0_skipped = capacity_gate(insp, cfg=cfg, progress=progress)
+        insp, removed_mentors, capacity_metrics, r0_skipped = capacity_gate(
+            insp, cfg=cfg, progress=progress
+        )
     else:
         removed_mentors = pd.DataFrame()
+        capacity_metrics = CapacityGateMetrics.empty()
         r0_skipped = True
         progress(15, "capacity gate disabled by config")
 
@@ -1658,6 +1700,9 @@ def build_matrix(
                 "finance_1_rows": int((matrix[finance_col] == Finance.BONYAD).sum()) if not matrix.empty else 0,
                 "finance_3_rows": int((matrix[finance_col] == Finance.HEKMAT).sum()) if not matrix.empty else 0,
                 "removed_mentors": 0 if removed_mentors is None else len(removed_mentors),
+                "capacity_removed_total": capacity_metrics.total_removed,
+                "capacity_special_capacity_lost": capacity_metrics.total_special_capacity_lost,
+                "capacity_percent_pool_kept": capacity_metrics.percent_pool_kept,
                 "r0_skipped": 1 if r0_skipped else 0,
                 "unmatched_school_count": unmatched_school_count,
                 "unseen_group_count": unseen_group_count,
