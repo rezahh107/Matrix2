@@ -1557,10 +1557,14 @@ def build_matrix(
             ]
         )
 
-    unseen_groups_df = pd.DataFrame(unseen_groups).drop_duplicates() if unseen_groups else pd.DataFrame()
+    unseen_groups_df = (
+        pd.DataFrame(unseen_groups).drop_duplicates() if unseen_groups else pd.DataFrame()
+    )
     unmatched_schools_df = (
         pd.DataFrame(unmatched_schools).drop_duplicates() if unmatched_schools else pd.DataFrame()
     )
+    unseen_group_count = len(unseen_groups_df)
+    unmatched_school_count = len(unmatched_schools_df)
 
     if not matrix.empty:
         matrix = matrix.copy()
@@ -1637,7 +1641,8 @@ def build_matrix(
         _validate_alias_contract(matrix, cfg=cfg)
         _validate_school_code_contract(matrix, school_code_col=school_code_col)
 
-    matrix.insert(0, "counter", range(1, len(matrix) + 1))
+    total_rows = len(matrix)
+    matrix.insert(0, "counter", range(1, total_rows + 1))
 
     nodup = matrix.drop(columns=["counter"]).drop_duplicates()
     if len(matrix) != len(nodup):
@@ -1646,7 +1651,7 @@ def build_matrix(
     validation = pd.DataFrame(
         [
             {
-                "total_rows": len(matrix),
+                "total_rows": total_rows,
                 "distinct_supporters": matrix["پشتیبان"].nunique() if not matrix.empty else 0,
                 "school_based_rows": int((matrix["عادی مدرسه"] == "مدرسه‌ای").sum()) if not matrix.empty else 0,
                 "finance_0_rows": int((matrix[finance_col] == Finance.NORMAL).sum()) if not matrix.empty else 0,
@@ -1654,12 +1659,25 @@ def build_matrix(
                 "finance_3_rows": int((matrix[finance_col] == Finance.HEKMAT).sum()) if not matrix.empty else 0,
                 "removed_mentors": 0 if removed_mentors is None else len(removed_mentors),
                 "r0_skipped": 1 if r0_skipped else 0,
+                "unmatched_school_count": unmatched_school_count,
+                "unseen_group_count": unseen_group_count,
             }
         ]
     )
 
     removed_df = removed_mentors
+    total_candidates = total_rows + unmatched_school_count + unseen_group_count
+    coverage_ratio = total_rows / total_candidates if total_candidates else 1.0
     progress(90, "matrix assembly complete")
+    progress(
+        95,
+        (
+            "coverage ratio "
+            f"{coverage_ratio:.1%} (rows={total_rows}"
+            f", unmatched_schools={unmatched_school_count}"
+            f", unseen_groups={unseen_group_count})"
+        ),
+    )
     return matrix, validation, removed_df, unmatched_schools_df, unseen_groups_df, invalid_mentors_df
 
 
