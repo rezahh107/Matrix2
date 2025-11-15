@@ -420,10 +420,14 @@ def _build_log_base(
 
 
 def _normalize_students(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
+    """نرمال‌سازی قاب دانش‌آموز برای ورودی تابع allocate_batch."""
+
     return canonicalize_students_frame(df, policy=policy)
 
 
 def _normalize_pool(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
+    """تبدیل قاب استخر به نمای canonical بدون پاک‌سازی تهاجمی."""
+
     return canonicalize_pool_frame(
         df,
         policy=policy,
@@ -457,6 +461,12 @@ def _ensure_pool_canonical(
     policy: PolicyConfig,
     capacity_column: str,
 ) -> pd.DataFrame:
+    """اعتبارسنجی قاب استخر canonical و تضمین ستون‌های حیاتی.
+
+    Raises:
+        ValueError: اگر هر یک از ستون‌های join یا ظرفیت در دیتافریم موجود نباشد.
+    """
+
     pool = df.copy(deep=True)
     required = set(policy.join_keys) | {
         "کد کارمندی پشتیبان",
@@ -787,7 +797,12 @@ def allocate_batch(
     capacity_column: str | None = None,
     frames_already_canonical: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """تخصیص دسته‌ای دانش‌آموزان و بازگشت خروجی‌های چهارتایی."""
+    """تخصیص دسته‌ای دانش‌آموزان و بازگشت خروجی‌های چهارتایی.
+
+    Raises:
+        ValueError: زمانی که قاب‌های canonical قرارداد ستون‌ها را رعایت نکرده باشند.
+        ValueError("DATA_MISSING"): نسخهٔ سازگار با CLI برای خطاهای داده‌ای.
+    """
     if policy is None:
         policy = load_policy()
 
@@ -797,14 +812,22 @@ def allocate_batch(
         header_mode=policy.excel.header_mode_internal,
     ).columns[0]
 
+    def _validate_pool(frame: pd.DataFrame) -> pd.DataFrame:
+        try:
+            return _ensure_pool_canonical(
+                frame, policy, resolved_capacity_column
+            )
+        except ValueError as exc:
+            if frames_already_canonical:
+                raise ValueError("DATA_MISSING") from exc
+            raise
+
     if frames_already_canonical:
         students_norm = _ensure_students_canonical(students, policy)
-        pool_norm = _ensure_pool_canonical(
-            candidate_pool, policy, resolved_capacity_column
-        )
+        pool_norm = _validate_pool(candidate_pool)
     else:
         students_norm = _normalize_students(students, policy)
-        pool_norm = _normalize_pool(candidate_pool, policy)
+        pool_norm = _validate_pool(_normalize_pool(candidate_pool, policy))
     extra_columns = [
         column for column in pool_norm.columns if column not in candidate_pool.columns
     ]

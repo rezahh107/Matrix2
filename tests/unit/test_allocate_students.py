@@ -555,6 +555,43 @@ def test_allocate_batch_handles_missing_state(monkeypatch: pytest.MonkeyPatch, _
     assert "missing" in str(record["detailed_reason"]).lower()
 
 
+def test_allocate_batch_missing_capacity_column_fails_contract(
+    monkeypatch: pytest.MonkeyPatch, _base_pool: pd.DataFrame
+) -> None:
+    students = _single_student()
+    pool = _base_pool.drop(columns=["remaining_capacity"])
+
+    def _identity_pool(df: pd.DataFrame, _: object) -> pd.DataFrame:
+        return df
+
+    monkeypatch.setattr(
+        "app.core.allocate_students._normalize_pool",
+        _identity_pool,
+        raising=True,
+    )
+
+    with pytest.raises(ValueError, match="Canonical pool frame missing columns"):
+        allocate_batch(students, pool)
+
+
+def test_allocate_batch_cli_wraps_contract_error(_base_pool: pd.DataFrame) -> None:
+    policy = load_policy()
+    students_norm, pool_norm = canonicalize_allocation_frames(
+        _single_student(),
+        _base_pool,
+        policy=policy,
+    )
+    pool_missing = pool_norm.drop(columns=["remaining_capacity"])
+
+    with pytest.raises(ValueError, match="DATA_MISSING"):
+        allocate_batch(
+            students_norm,
+            pool_missing,
+            policy=policy,
+            frames_already_canonical=True,
+        )
+
+
 def test_allocate_batch_invalid_join_value_sets_error(_base_pool: pd.DataFrame) -> None:
     students = _single_student(**{"کدرشته": ""})
 
