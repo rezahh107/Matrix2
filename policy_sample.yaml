@@ -1,0 +1,44 @@
+# نمونه فایل پیکربندی Policy برای مدیریت مراکز
+# این فایل را کپی کرده و به عنوان policy.yaml ذخیره کنید
+
+# بخش مدیریت مراکز
+center_management:
+  # فعال/غیرفعال کردن سیستم مراکز
+  enabled: true
+  
+  # مرکز پیش‌فرض برای مقادیر نامعتبر
+  default_center_for_invalid: 0
+  
+  # validation سخت‌گیرانه - اگر true باشد، در صورت نبود مدیر خطا می‌دهد
+  strict_manager_validation: false
+  
+  # نام ستونی که دانش‌آموزان مدرسه‌ای را مشخص می‌کند
+  school_student_column: "is_school_student"
+  
+  # تعریف مراکز
+  centers:
+    # مرکز گلستان
+    - id: 1
+      name: "گلستان"
+      default_manager: "شهدخت کشاورز"
+      description: "مرکز گلستان"
+    
+    # مرکز صدرا  
+    - id: 2
+      name: "صدرا"
+      default_manager: "آیناز هوشمند"
+      description: "مرکز صدرا"
+    
+    # مرکز اصلی - برای دانش‌آموزان بدون مرکز مشخص
+    - id: 0
+      name: "مرکزی"
+      default_manager: null  # بدون مدیر خاص
+      description: "مرکز اصلی"
+  
+  # ترتیب اولویت پردازش مراکز
+  priority_order: [1, 2, 0]
+
+# سایر تنظیمات Policy...
+# stage_columns:
+#   center: "center_column_name"
+#   student_id: "student_id_column_name" 
