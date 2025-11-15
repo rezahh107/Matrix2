@@ -208,3 +208,18 @@ def test_duplicate_mentors_are_filtered_before_row_generation() -> None:
         check_dtype=False,
     )
     assert matrix["کد کارمندی پشتیبان"].eq("EMP-1").sum() == 0
+
+
+def test_validation_captures_unmatched_school_counts() -> None:
+    insp_df, schools_df, crosswalk_df = _create_sample_inputs()
+    insp_df.loc[0, "نام مدرسه 1"] = "123456"
+
+    _, validation, _, unmatched_df, _, _ = build_matrix(
+        insp_df,
+        schools_df,
+        crosswalk_df,
+        cfg=BuildConfig(),
+    )
+
+    assert len(unmatched_df) == 1
+    assert validation["unmatched_school_count"].iat[0] == 1
