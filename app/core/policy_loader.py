@@ -147,12 +147,20 @@ class GenderCodes:
 
 
 @dataclass(frozen=True)
-class CenterDefinition:
-    """تعریف یک مرکز ثبت‌نام همراه با مدیران پیش‌فرض."""
+class CenterConfig:
+    """تعریف یک مرکز ثبت‌نام با متادیتای کامل."""
 
     id: int
     name: str
-    default_managers: tuple[str, ...]
+    default_manager: str | None = None
+    description: str = ""
+
+    def manager_list(self) -> tuple[str, ...]:
+        """لیست پایدار مدیران پیش‌فرض (صفر یا یک نفر)."""
+
+        if self.default_manager:
+            return (self.default_manager,)
+        return tuple()
 
 
 @dataclass(frozen=True)
@@ -160,20 +168,35 @@ class CenterManagementConfig:
     """تنظیمات جامع مدیریت مراکز برای تخصیص."""
 
     enabled: bool
-    centers: tuple[CenterDefinition, ...]
+    centers: tuple[CenterConfig, ...]
     priority_order: tuple[int, ...]
     strict_manager_validation: bool
     default_center_for_invalid: int | None
+    school_student_column: str
 
     def center_ids(self) -> tuple[int, ...]:
         """لیست پایدار شناسه‌های مراکز تعریف‌شده."""
 
         return tuple(center.id for center in self.centers)
 
-    def get_center(self, center_id: int) -> CenterDefinition | None:
+    def get_center(self, center_id: int) -> CenterConfig | None:
         """یافتن تعریف مرکز براساس شناسه (در صورت وجود)."""
 
         return next((center for center in self.centers if center.id == center_id), None)
+
+    def get_center_name(self, center_id: int) -> str:
+        """بازیابی نام مرکز برای نمایش در UI/Logs."""
+
+        center = self.get_center(center_id)
+        return center.name if center else f"مرکز {center_id}"
+
+    def validate_priority_order(self) -> bool:
+        """صحت ترتیب اولویت را نسبت به مراکز تعریف‌شده بررسی می‌کند."""
+
+        if not self.priority_order:
+            return False
+        defined = {center.id for center in self.centers}
+        return all(center_id in defined for center_id in self.priority_order)
 
 
 @dataclass(frozen=True)
@@ -547,27 +570,45 @@ def _normalize_center_management(
         managers_raw = entry.get("default_managers")
         if managers_raw is None:
             managers_raw = entry.get("default_manager")
-        defaults: list[str] = []
-        if managers_raw is None:
-            defaults = []
-        elif isinstance(managers_raw, (list, tuple)):
-            defaults = [str(item).strip() for item in managers_raw if str(item).strip()]
-        else:
+        default_manager: str | None = None
+        if isinstance(managers_raw, (list, tuple)):
+            for candidate in managers_raw:
+                text = str(candidate).strip()
+                if text:
+                    default_manager = text
+                    break
+        elif managers_raw is not None:
             text = str(managers_raw).strip()
-            defaults = [text] if text else []
-        deduped: list[str] = []
-        seen_names: set[str] = set()
-        for manager_name in defaults:
-            key = manager_name
-            if key in seen_names:
-                continue
-            deduped.append(manager_name)
-            seen_names.add(key)
+            if text:
+                default_manager = text
         centers.append({
             "id": center_id,
             "name": name,
-            "default_managers": deduped,
+            "default_manager": default_manager,
+            "description": str(entry.get("description", "")),
         })
+
+    if not centers:
+        centers = [
+            {
+                "id": 1,
+                "name": "گلستان",
+                "default_manager": "شهدخت کشاورز",
+                "description": "مرکز گلستان",
+            },
+            {
+                "id": 2,
+                "name": "صدرا",
+                "default_manager": "آیناز هوشمند",
+                "description": "مرکز صدرا",
+            },
+            {
+                "id": 0,
+                "name": "مرکزی",
+                "default_manager": None,
+                "description": "مرکز اصلی",
+            },
+        ]
 
     priority_payload = value.get("priority_order")
     if priority_payload is None:
@@ -591,12 +632,15 @@ def _normalize_center_management(
                 priority.append(center["id"])
                 seen_priority.add(center["id"])
 
+    school_student_column = str(value.get("school_student_column", "is_school_student"))
+
     return {
         "enabled": enabled,
         "strict_manager_validation": strict_validation,
         "default_center_for_invalid": fallback_center,
         "priority_order": priority,
         "centers": centers,
+        "school_student_column": school_student_column,
     }
 
 
@@ -613,7 +657,8 @@ def _infer_centers_from_map(center_map: Mapping[str, int]) -> list[Mapping[str, 
             {
                 "id": int(center_id),
                 "name": f"مرکز {center_id}",
-                "default_managers": [str(manager_name).strip()],
+                "default_manager": str(manager_name).strip(),
+                "description": f"مرکز {center_id}",
             }
         )
     wildcard = center_map.get("*")
@@ -622,7 +667,8 @@ def _infer_centers_from_map(center_map: Mapping[str, int]) -> list[Mapping[str, 
             {
                 "id": int(wildcard),
                 "name": f"مرکز {wildcard}",
-                "default_managers": [],
+                "default_manager": None,
+                "description": f"مرکز {wildcard}",
             }
         )
     return inferred
@@ -967,14 +1013,18 @@ def _to_trace_stage(item: Mapping[str, object]) -> TraceStageDefinition:
 
 def _to_center_management_config(data: Mapping[str, object]) -> CenterManagementConfig:
     centers_payload = data.get("centers") or []
-    centers: list[CenterDefinition] = []
+    centers: list[CenterConfig] = []
     for entry in centers_payload:
-        managers = tuple(str(name) for name in entry.get("default_managers", []))
         centers.append(
-            CenterDefinition(
+            CenterConfig(
                 id=int(entry["id"]),
                 name=str(entry["name"]),
-                default_managers=managers,
+                default_manager=(
+                    None
+                    if entry.get("default_manager") in (None, "")
+                    else str(entry.get("default_manager"))
+                ),
+                description=str(entry.get("description", "")),
             )
         )
     priority_order = tuple(int(item) for item in data.get("priority_order", []))
@@ -986,6 +1036,7 @@ def _to_center_management_config(data: Mapping[str, object]) -> CenterManagement
         priority_order=priority_order,
         strict_manager_validation=bool(data.get("strict_manager_validation", False)),
         default_center_for_invalid=fallback,
+        school_student_column=str(data.get("school_student_column", "is_school_student")),
     )
 
 

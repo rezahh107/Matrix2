@@ -31,7 +31,6 @@ from app.core.canonical_frames import (
     sanitize_pool_for_allocation as _sanitize_pool_for_allocation,
 )
 from app.core.build_matrix import BuildConfig, build_matrix
-from app.core.center_preferences import normalize_center_priority, parse_center_manager_config
 from app.core.policy_loader import PolicyConfig, load_policy
 from app.infra.excel_writer import write_selection_reasons_sheet
 from app.infra.excel.import_to_sabt import (
@@ -332,97 +331,176 @@ def _resolve_optional_override(
     return None
 
 
-def _parse_center_priority_arg(value: object) -> tuple[int, ...]:
-    """تبدیل ورودی دلخواه به توالی پایدار از مقادیر عددی مرکز."""
+def _add_center_management_args(parser: argparse.ArgumentParser) -> None:
+    """افزودن گروه آرگومان‌های مرتبط با مدیریت مراکز."""
 
-    if value is None:
-        return ()
-    if isinstance(value, (list, tuple, set)):
-        items = list(value)
-    else:
-        text = str(value).replace("،", ",").strip()
-        if not text:
-            return ()
-        items = [token.strip() for token in text.split(",") if token.strip()]
-    priority: list[int] = []
-    for token in items:
-        try:
-            priority.append(int(token))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("center priority must be a comma-separated list of integers") from exc
-    return tuple(priority)
-
-
-def _parse_center_manager_assignment(value: str) -> tuple[int, str]:
-    """استخراج شناسه مرکز و نام مدیر از ورودی CLI."""
-
-    if "=" not in value:
-        raise ValueError("center-manager must use format CENTER_ID=NAME")
-    center_text, manager_text = value.split("=", 1)
-    try:
-        center_id = int(center_text.strip())
-    except ValueError as exc:
-        raise ValueError("center id must be an integer") from exc
-    manager = manager_text.strip()
-    if not manager:
-        raise ValueError("manager name cannot be empty")
-    return center_id, manager
+    center_group = parser.add_argument_group("مدیریت مراکز")
+    center_group.add_argument(
+        "--center-manager",
+        action="append",
+        dest="center_manager",
+        metavar="CENTER_ID=MANAGER_NAME",
+        help="Override مدیر یک مرکز (قابل تکرار)",
+    )
+    center_group.add_argument(
+        "--center-priority",
+        type=str,
+        help="ترتیب دلخواه مراکز (لیست جداشده با ویرگول)",
+    )
+    center_group.add_argument(
+        "--strict-manager-validation",
+        action="store_true",
+        help="در صورت نبود مدیر برای مراکز خطا بده",
+    )
 
 
-def _collect_cli_center_manager_overrides(args: argparse.Namespace) -> dict[int, tuple[str, ...]]:
-    """خواندن override های CLI (آرگومان جدید و legacy)."""
+def _parse_center_managers(cli_managers: list[str] | None) -> dict[int, list[str]]:
+    """تجزیهٔ آرگومان‌های --center-manager به نگاشت پایدار."""
 
     mapping: dict[int, list[str]] = {}
-    raw_assignments = getattr(args, "center_manager", None) or []
-    for assignment in raw_assignments:
-        center_id, manager = _parse_center_manager_assignment(str(assignment))
+    if not cli_managers:
+        return mapping
+    for item in cli_managers:
+        if "=" not in item:
+            raise ValueError(
+                f"center-manager value '{item}' must use format CENTER_ID=MANAGER_NAME"
+            )
+        center_text, manager_text = item.split("=", 1)
+        try:
+            center_id = int(center_text.strip())
+        except ValueError as exc:
+            raise ValueError("center id must be an integer") from exc
+        manager = manager_text.strip().strip("\"'")
+        if not manager:
+            raise ValueError("manager name cannot be empty")
         mapping.setdefault(center_id, []).append(manager)
+    return mapping
+
+
+def _parse_center_priority(priority_str: str | None) -> list[int] | None:
+    """تبدیل رشتهٔ اولویت مراکز به لیست اعداد."""
+
+    if not priority_str:
+        return None
+    tokens = priority_str.replace("،", ",").split(",")
+    result: list[int] = []
+    for token in tokens:
+        text = token.strip()
+        if not text:
+            continue
+        try:
+            result.append(int(text))
+        except ValueError as exc:
+            raise ValueError(
+                f"فرمت نامعتبر برای اولویت مراکز: {priority_str}"
+            ) from exc
+    return result or None
+
+
+def _normalize_center_override_map(source: object) -> dict[int, list[str]]:
+    """تبدیل ورودی دلخواه (Mapping یا JSON) به ساختار استاندارد."""
+
+    if not isinstance(source, Mapping):
+        return {}
+    normalized: dict[int, list[str]] = {}
+    for key, value in source.items():
+        try:
+            center_id = int(key)
+        except (TypeError, ValueError):
+            continue
+        names = value if isinstance(value, (list, tuple)) else [value]
+        cleaned = [str(name).strip() for name in names if str(name).strip()]
+        if cleaned:
+            normalized[center_id] = cleaned
+    return normalized
+
+
+def _merge_center_manager_maps(
+    target: dict[int, list[str]], source: Mapping[int, list[str]] | None
+) -> dict[int, list[str]]:
+    """ادغام نگاشت ثانویه در نگاشت اصلی با حفظ ترتیب."""
+
+    if not source:
+        return target
+    for center_id, names in source.items():
+        existing = target.setdefault(center_id, [])
+        for name in names:
+            if name not in existing:
+                existing.append(name)
+    return target
+
+
+def _resolve_center_preferences(
+    args: argparse.Namespace, policy: PolicyConfig
+) -> tuple[
+    Mapping[int, Sequence[str]] | None,
+    Mapping[int, Sequence[str]] | None,
+    list[int] | None,
+    bool,
+]:
+    """گردآوری ورودی‌های UI و CLI برای مدیریت مراکز."""
+
+    overrides = getattr(args, "_ui_overrides", {}) or {}
+    ui_mapping = _normalize_center_override_map(overrides.get("center_managers"))
+
+    cli_mapping = _parse_center_managers(getattr(args, "center_manager", None) or [])
     json_payload = getattr(args, "center_managers", None)
     if json_payload:
         data = json.loads(json_payload)
         if not isinstance(data, Mapping):
             raise ValueError("center-managers must be a JSON object")
-        for key, value in data.items():
-            try:
-                center_id = int(key)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("center-managers keys must be integers") from exc
-            names = value if isinstance(value, (list, tuple)) else [value]
-            cleaned = [str(name).strip() for name in names if str(name).strip()]
-            if cleaned:
-                mapping[center_id] = cleaned
+        cli_mapping = _merge_center_manager_maps(
+            cli_mapping, _normalize_center_override_map(data)
+        )
     legacy = {"golestan_manager": 1, "sadra_manager": 2}
     for attr, center_id in legacy.items():
         text = getattr(args, attr, None)
         if isinstance(text, str) and text.strip():
-            mapping.setdefault(center_id, []).append(text.strip())
-    return {
-        center_id: tuple(dict.fromkeys(names))
-        for center_id, names in mapping.items()
-        if names
-    }
+            cli_mapping.setdefault(center_id, []).append(text.strip())
 
-
-def _resolve_center_preferences(
-    args: argparse.Namespace, policy: PolicyConfig
-) -> tuple[dict[int, tuple[str, ...]], tuple[int, ...]]:
-    """خواندن تنظیمات مدیر مرکز و ترتیب اولویت با اولویت‌دهی به UI."""
-
-    overrides = getattr(args, "_ui_overrides", {}) or {}
-    ui_mapping = overrides.get("center_managers")
-    cli_mapping = _collect_cli_center_manager_overrides(args)
-    manager_map = parse_center_manager_config(
-        policy,
-        ui_overrides=ui_mapping if isinstance(ui_mapping, Mapping) else None,
-        cli_overrides=cli_mapping,
-    )
-    priority_source = overrides.get("center_priority") or getattr(args, "center_priority", None)
+    priority_override = overrides.get("center_priority")
+    priority_text: str | None
+    if isinstance(priority_override, (list, tuple)):
+        priority_text = ",".join(str(item) for item in priority_override)
+    elif priority_override is not None:
+        priority_text = str(priority_override)
+    else:
+        priority_text = getattr(args, "center_priority", None)
     try:
-        priority = _parse_center_priority_arg(priority_source)
+        center_priority = _parse_center_priority(priority_text)
     except ValueError as exc:
         raise ValueError(f"center priority override is invalid: {exc}") from exc
-    normalized_priority = normalize_center_priority(policy, priority)
-    return manager_map, normalized_priority
+
+    strict_flag = bool(getattr(args, "strict_manager_validation", False))
+
+    return (
+        ui_mapping or None,
+        cli_mapping or None,
+        center_priority,
+        strict_flag,
+    )
+
+
+def _collect_cli_center_manager_overrides(
+    args: argparse.Namespace,
+) -> dict[int, tuple[str, ...]]:
+    """تابع سازگار با تست‌های قدیمی برای جمع‌آوری override های CLI."""
+
+    cli_mapping = _parse_center_managers(getattr(args, "center_manager", None) or [])
+    json_payload = getattr(args, "center_managers", None)
+    if json_payload:
+        data = json.loads(json_payload)
+        if not isinstance(data, Mapping):
+            raise ValueError("center-managers must be a JSON object")
+        cli_mapping = _merge_center_manager_maps(
+            cli_mapping, _normalize_center_override_map(data)
+        )
+    legacy = {"golestan_manager": 1, "sadra_manager": 2}
+    for attr, center_id in legacy.items():
+        text = getattr(args, attr, None)
+        if isinstance(text, str) and text.strip():
+            cli_mapping.setdefault(center_id, []).append(text.strip())
+    return {center_id: tuple(names) for center_id, names in cli_mapping.items() if names}
 
 
 def _maybe_export_import_to_sabt(
@@ -772,7 +850,9 @@ def _allocate_and_write(
     student_ids, counter_summary = _inject_student_ids(students_base, args, policy)
     setattr(args, "_counter_summary", counter_summary)
 
-    center_manager_map, center_priority = _resolve_center_preferences(args, policy)
+    ui_center_map, cli_center_map, center_priority, strict_validation = _resolve_center_preferences(
+        args, policy
+    )
 
     allocations_df, updated_pool_df, logs_df, trace_df = allocate_batch(
         students_base.copy(deep=True),
@@ -781,8 +861,10 @@ def _allocate_and_write(
         progress=progress,
         capacity_column=capacity_column,
         frames_already_canonical=True,
-        center_manager_map=center_manager_map,
+        center_manager_map=cli_center_map,
+        ui_center_manager_map=ui_center_map,
         center_priority=center_priority,
+        strict_center_validation=strict_validation,
     )
 
     header_internal: HeaderMode = policy.excel.header_mode_internal  # type: ignore[assignment]
@@ -871,8 +953,10 @@ def _allocate_and_write(
             progress=lambda *_: None,
             capacity_column=capacity_column,
             frames_already_canonical=True,
-            center_manager_map=center_manager_map,
+            center_manager_map=cli_center_map,
+            ui_center_manager_map=ui_center_map,
             center_priority=center_priority,
+            strict_center_validation=strict_validation,
         )
 
         header_internal = policy.excel.header_mode_internal
@@ -1034,6 +1118,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=str(_DEFAULT_POLICY_PATH),
         help="مسیر فایل policy.json",
     )
+    _add_center_management_args(alloc_cmd)
     alloc_cmd.add_argument(
         "--golestan-manager",
         default=None,
@@ -1045,20 +1130,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="(Legacy) نام مدیر مرکز صدرا (شناسه مرکز ۲)",
     )
     alloc_cmd.add_argument(
-        "--center-manager",
-        action="append",
-        metavar="CENTER_ID=NAME",
-        help="Override مدیر یک مرکز خاص (قابل تکرار)",
-    )
-    alloc_cmd.add_argument(
         "--center-managers",
         default=None,
         help="نگاشت JSON مرکز→لیست مدیران برای override گروهی",
-    )
-    alloc_cmd.add_argument(
-        "--center-priority",
-        default=None,
-        help="ترتیب پردازش مراکز هنگام تخصیص (لیست جداشده با ویرگول)",
     )
     alloc_cmd.add_argument(
         "--audit",

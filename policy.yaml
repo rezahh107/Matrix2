@@ -1,0 +1,23 @@
+center_management:
+  enabled: true
+  default_center_for_invalid: 0
+  strict_manager_validation: false
+  school_student_column: "is_school_student"
+
+  centers:
+    - id: 1
+      name: "گلستان"
+      default_manager: "شهدخت کشاورز"
+      description: "مرکز گلستان"
+
+    - id: 2
+      name: "صدرا"
+      default_manager: "آیناز هوشمند"
+      description: "مرکز صدرا"
+
+    - id: 0
+      name: "مرکزی"
+      default_manager: null
+      description: "مرکز اصلی"
+
+  priority_order: [1, 2, 0]

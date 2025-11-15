@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, Mapping, Sequence
 
+from .center_manager import resolve_center_manager_config
 from .policy_loader import PolicyConfig
 
 __all__ = [
@@ -12,7 +13,7 @@ __all__ = [
 ]
 
 
-def _normalize_names(payload: object) -> tuple[str, ...]:
+def _normalize_names(payload: object) -> list[str]:
     """تبدیل ورودی متنی یا لیستی به تاپل تمیز و یکتا."""
 
     if payload is None:
@@ -29,10 +30,10 @@ def _normalize_names(payload: object) -> tuple[str, ...]:
             continue
         cleaned.append(text)
         seen.add(text)
-    return tuple(cleaned)
+    return cleaned
 
 
-def _normalize_override_map(source: Mapping[object, object] | None) -> Dict[int, tuple[str, ...]]:
+def _normalize_override_map(source: Mapping[object, object] | None) -> Dict[int, list[str]]:
     """تبدیل نگاشت ورودی (کلید عددی یا متنی) به ساختار پایدار."""
 
     if source is None:
@@ -44,7 +45,7 @@ def _normalize_override_map(source: Mapping[object, object] | None) -> Dict[int,
         except (TypeError, ValueError):
             continue
         names = _normalize_names(value)
-        normalized[center_id] = names
+        normalized[center_id] = list(names)
     return normalized
 
 
@@ -55,18 +56,12 @@ def parse_center_manager_config(
 ) -> Dict[int, tuple[str, ...]]:
     """ساخت نگاشت «مرکز → مدیران» با ادغام Policy و ورودی کاربر."""
 
-    result: Dict[int, tuple[str, ...]] = {}
-    for center in policy.center_management.centers:
-        defaults = _normalize_names(center.default_managers)
-        if defaults:
-            result[center.id] = defaults
-    for source in (_normalize_override_map(ui_overrides), _normalize_override_map(cli_overrides)):
-        for center_id, names in source.items():
-            if names:
-                result[center_id] = names
-            elif center_id in result:
-                del result[center_id]
-    return result
+    result, _ = resolve_center_manager_config(
+        policy=policy,
+        ui_managers=_normalize_override_map(ui_overrides),
+        cli_managers=_normalize_override_map(cli_overrides),
+    )
+    return {center_id: tuple(names) for center_id, names in result.items()}
 
 
 def normalize_center_priority(
@@ -74,26 +69,8 @@ def normalize_center_priority(
 ) -> tuple[int, ...]:
     """نرمال‌سازی لیست اولویت مراکز با تضمین پوشش تمام مراکز policy."""
 
-    if priority is None:
-        priority = []
-    normalized: list[int] = []
-    seen: set[int] = set()
-    for value in priority:
-        try:
-            center_id = int(value)
-        except (TypeError, ValueError):
-            continue
-        if center_id in seen:
-            continue
-        normalized.append(center_id)
-        seen.add(center_id)
-    default_order = policy.center_management.priority_order or policy.center_management.center_ids()
-    for center_id in default_order:
-        if center_id in seen:
-            continue
-        normalized.append(center_id)
-        seen.add(center_id)
-    fallback = policy.default_center_for_invalid
-    if fallback is not None and fallback not in seen:
-        normalized.append(fallback)
+    _, normalized = resolve_center_manager_config(
+        policy=policy,
+        cli_priority=priority or tuple(),
+    )
     return tuple(normalized)

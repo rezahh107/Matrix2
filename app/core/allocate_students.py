@@ -8,9 +8,10 @@ from numbers import Number
 from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
 
 import pandas as pd
+from pandas.api import types as pd_types
 
 from .canonical_frames import canonicalize_pool_frame, canonicalize_students_frame
-from .center_preferences import normalize_center_priority
+from .center_manager import resolve_center_manager_config, validate_center_config
 from .common.column_normalizer import normalize_input_columns
 from .common.columns import (
     CANON_EN_TO_FA,
@@ -651,14 +652,23 @@ def _sort_students_by_center_priority(
 def _separate_school_students(
     students: pd.DataFrame, policy: PolicyConfig
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """جداسازی دانش‌آموزان مدرسه‌ای از مرکزی براساس ستون تشخیص مدرسه."""
+    """جداسازی دانش‌آموزان مدرسه‌ای از مرکزی براساس ستون تنظیم‌شده."""
 
-    column = "school_status_resolved"
-    if column not in students.columns:
-        raise ValueError("students dataframe missing 'school_status_resolved' column")
-    statuses = {int(value) for value in policy.school_statuses}
-    values = pd.to_numeric(students[column], errors="coerce").fillna(0).astype(int)
-    school_mask = values.isin(statuses)
+    column_candidates = [policy.center_management.school_student_column]
+    if "school_status_resolved" not in column_candidates:
+        column_candidates.append("school_status_resolved")
+    column = next((col for col in column_candidates if col in students.columns), None)
+    if column is None:
+        raise ValueError(
+            "students dataframe missing school student indicator column"
+        )
+    series = students[column]
+    if pd_types.is_bool_dtype(series):
+        school_mask = series.fillna(False).astype(bool)
+    else:
+        statuses = {int(value) for value in policy.school_statuses}
+        values = pd.to_numeric(series, errors="coerce").fillna(0).astype(int)
+        school_mask = values.isin(statuses)
     school_students = students.loc[school_mask].copy()
     center_students = students.loc[~school_mask].copy()
     return school_students, center_students
@@ -668,6 +678,8 @@ def _build_center_manager_index(
     pool: pd.DataFrame,
     policy: PolicyConfig,
     manager_map: Mapping[int, Sequence[str]] | None,
+    *,
+    strict_validation: bool = False,
 ) -> tuple[dict[int, pd.Index], list[int]]:
     """ساخت نگاشت مرکز → ایندکس منتورها با گزارش مراکز بدون مدیر."""
 
@@ -711,7 +723,7 @@ def _build_center_manager_index(
                 UserWarning,
                 stacklevel=2,
             )
-    if missing_centers and policy.center_management.strict_manager_validation:
+    if missing_centers and (policy.center_management.strict_manager_validation or strict_validation):
         raise ValueError(
             f"مدیران مورد نیاز برای مراکز {missing_centers} در استخر یافت نشدند"
         )
@@ -1368,6 +1380,8 @@ def allocate_batch(
     frames_already_canonical: bool = False,
     center_manager_map: Mapping[int, Sequence[str]] | None = None,
     center_priority: Sequence[int] | None = None,
+    ui_center_manager_map: Mapping[int, Sequence[str]] | None = None,
+    strict_center_validation: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """تخصیص دسته‌ای دانش‌آموزان و بازگشت خروجی‌های چهارتایی.
 
@@ -1404,9 +1418,19 @@ def allocate_batch(
     else:
         students_norm = _normalize_students(students, policy)
         pool_norm = _validate_pool(_normalize_pool(candidate_pool, policy))
-    normalized_priority = normalize_center_priority(policy, center_priority)
+    final_manager_map, final_priority = resolve_center_manager_config(
+        policy=policy,
+        ui_managers=ui_center_manager_map,
+        cli_managers=center_manager_map,
+        cli_priority=center_priority,
+        cli_strict_validation=strict_center_validation,
+    )
+    config_warnings = validate_center_config(policy, final_manager_map, final_priority)
+    for message in config_warnings:
+        warnings.warn(message, UserWarning, stacklevel=2)
+
     sorted_students = _sort_students_by_center_priority(
-        students_norm, policy, normalized_priority
+        students_norm, policy, final_priority
     )
     school_students, center_students = _separate_school_students(
         sorted_students, policy
@@ -1466,7 +1490,10 @@ def allocate_batch(
     )
 
     center_manager_index, _ = _build_center_manager_index(
-        pool_with_ids, policy, center_manager_map
+        pool_with_ids,
+        policy,
+        final_manager_map,
+        strict_validation=strict_center_validation,
     )
     center_column_name = policy.stage_column("center")
 
