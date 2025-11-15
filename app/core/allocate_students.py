@@ -510,6 +510,8 @@ def _build_log_from_join_map(
         "fairness_reason_code": None,
         "fairness_reason_text": None,
         "alerts": [],
+        "alias_autofill": 0,
+        "alias_unmatched": 0,
     }
     return log
 
@@ -1107,6 +1109,9 @@ def allocate_batch(
     else:
         students_norm = _normalize_students(students, policy)
         pool_norm = _validate_pool(_normalize_pool(candidate_pool, policy))
+    pool_stats = pool_norm.attrs.get("pool_canonicalization_stats")
+    alias_autofill = int(getattr(pool_stats, "alias_autofill", 0) or 0) if pool_stats else 0
+    alias_unmatched = int(getattr(pool_stats, "alias_unmatched", 0) or 0) if pool_stats else 0
     extra_columns = [
         column for column in pool_norm.columns if column not in candidate_pool.columns
     ]
@@ -1231,6 +1236,10 @@ def allocate_batch(
                     "mentor_alias_code": mentor_alias_code,
                 }
             )
+
+    for log in logs:
+        log["alias_autofill"] = alias_autofill
+        log["alias_unmatched"] = alias_unmatched
 
     progress(100, "done")
 

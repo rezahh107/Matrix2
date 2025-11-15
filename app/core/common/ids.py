@@ -25,16 +25,21 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping
+from dataclasses import dataclass
+from typing import Any, Dict, Mapping, Sequence
 import re
 
 import pandas as pd
 
+from .columns import CANON_EN_TO_FA, ensure_series
 from .utils import normalize_fa, to_numlike_str
 
 __all__ = [
+    "MentorAliasStats",
     "natural_key",
     "build_mentor_id_map",
+    "build_mentor_alias_map",
+    "extract_alias_code_series",
     "inject_mentor_id",
     "ensure_ranking_columns",
 ]
@@ -172,3 +177,147 @@ def ensure_ranking_columns(pool: pd.DataFrame) -> pd.DataFrame:
     result["mentor_id_str"] = result["کد کارمندی پشتیبان"].map(to_numlike_str)
     result["mentor_sort_key"] = result["کد کارمندی پشتیبان"].map(natural_key)
     return result
+_MENTOR_ALIAS_COLUMNS: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        [
+            "mentor_alias_code",
+            "mentor_alias_postal_code",
+            "mentor_postal_code",
+            "alias",
+            "alias_norm",
+            "alias_normal",
+            "جایگزین | alias",
+            CANON_EN_TO_FA.get("mentor_alias_code", "کد جایگزین پشتیبان"),
+            CANON_EN_TO_FA.get("alias", "جایگزین"),
+            CANON_EN_TO_FA.get("postal_code", "کدپستی"),
+            "کد جایگزین پشتیبان",
+            "کدپستی",
+            "کد پستی",
+        ]
+    )
+)
+
+
+@dataclass(slots=True)
+class MentorAliasStats:
+    """خلاصهٔ آماری برای نگاشت alias→mentor.
+
+    مثال::
+
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({
+        ...     "alias": ["1234", "5678"],
+        ...     "کد کارمندی پشتیبان": ["EMP-1", ""],
+        ... })
+        >>> _, stats = build_mentor_alias_map(df)
+        >>> stats.as_dict()["alias_rows_with_mentor"]
+        1
+    """
+
+    total_alias_rows: int = 0
+    alias_rows_with_mentor: int = 0
+    alias_rows_without_mentor: int = 0
+    unique_aliases: int = 0
+
+    def as_dict(self) -> dict[str, int]:
+        """دیکشنری JSON-safe از مقادیر شمارشی."""
+
+        return {
+            "total_alias_rows": self.total_alias_rows,
+            "alias_rows_with_mentor": self.alias_rows_with_mentor,
+            "alias_rows_without_mentor": self.alias_rows_without_mentor,
+            "unique_aliases": self.unique_aliases,
+        }
+
+
+def _normalize_alias_code(value: Any) -> str:
+    """نرمال‌سازی کد جایگزین به digits بدون صفر پیشرو."""
+
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):  # type: ignore[arg-type]
+            return ""
+    except TypeError:
+        pass
+    text = str(value).strip()
+    if not text:
+        return ""
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if not digits:
+        return ""
+    digits = digits[-10:]
+    trimmed = digits.lstrip("0")
+    return trimmed or digits
+
+
+def extract_alias_code_series(
+    frame: pd.DataFrame, *, alias_columns: Sequence[str] | None = None
+) -> pd.Series:
+    """استخراج پایدار اولین ستون alias موجود در دیتافریم.
+
+    Args:
+        frame: دیتافریم خام Inspactor یا ماتریس.
+        alias_columns: فهرست سفارشی ستون‌ها برای جست‌وجو.
+
+    Returns:
+        pd.Series: رشتهٔ digit نرمال‌شده (بدون صفر پیشرو) یا رشتهٔ تهی.
+    """
+
+    columns = alias_columns or _MENTOR_ALIAS_COLUMNS
+    if not columns:
+        return pd.Series([""] * len(frame), dtype="string", index=frame.index)
+    alias_values = pd.Series([""] * len(frame), dtype="string", index=frame.index)
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        series = ensure_series(frame[column]).astype("string")
+        normalized = series.map(_normalize_alias_code)
+        fill_mask = alias_values.eq("") & normalized.ne("")
+        if fill_mask.any():
+            alias_values = alias_values.mask(fill_mask, normalized)
+        if alias_values.ne("").all():
+            break
+    return alias_values
+
+
+def build_mentor_alias_map(
+    frame: pd.DataFrame,
+    *,
+    mentor_column: str = "کد کارمندی پشتیبان",
+    alias_series: pd.Series | None = None,
+    alias_columns: Sequence[str] | None = None,
+) -> tuple[Dict[str, str], MentorAliasStats]:
+    """ساخت نگاشت alias→mentor بر مبنای دادهٔ Inspactor.
+
+    Args:
+        frame: دیتافریم ورودی پس از canonicalize_pool_frame.
+        mentor_column: نام ستون کد کارمندی.
+        alias_series: سری از :func:`extract_alias_code_series` (اختیاری).
+        alias_columns: در صورت عدم ارائهٔ ``alias_series``، فهرست ستون‌های جایگزین.
+
+    Returns:
+        tuple: (دیکشنری نگاشت، آمار نگاشت).
+    """
+
+    alias_values = (
+        ensure_series(alias_series).astype("string").fillna("")
+        if alias_series is not None
+        else extract_alias_code_series(frame, alias_columns=alias_columns)
+    )
+    stats = MentorAliasStats()
+    stats.total_alias_rows = int(alias_values.ne("").sum())
+    mapping: Dict[str, str] = {}
+    if mentor_column not in frame.columns:
+        return mapping, stats
+    mentor_values = ensure_series(frame[mentor_column]).astype("string").fillna("").str.strip()
+    for alias_code, mentor_code in zip(alias_values, mentor_values, strict=False):
+        if not alias_code:
+            continue
+        if not mentor_code:
+            stats.alias_rows_without_mentor += 1
+            continue
+        stats.alias_rows_with_mentor += 1
+        mapping.setdefault(alias_code, mentor_code)
+    stats.unique_aliases = len(mapping)
+    return mapping, stats

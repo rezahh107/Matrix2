@@ -215,6 +215,34 @@ def test_canonicalize_pool_frame_records_mentor_id_autofill(_base_pool: pd.DataF
     assert stats.mentor_id_autofill == len(pool)
 
 
+def test_canonicalize_pool_frame_uses_alias_map_for_missing_ids(
+    _base_pool: pd.DataFrame,
+) -> None:
+    policy = load_policy()
+    pool = _base_pool.copy()
+    pool.loc[1, "کد کارمندی پشتیبان"] = ""
+    pool["alias"] = ["0012345678", "0012345678"]
+
+    normalized = canonicalize_pool_frame(pool, policy=policy, sanitize_pool=False)
+    stats = normalized.attrs["pool_canonicalization_stats"]
+
+    assert normalized.loc[1, "mentor_id"] == "EMP-001"
+    assert stats.alias_autofill == 1
+    assert stats.alias_unmatched == 0
+
+
+def test_canonicalize_pool_frame_tracks_alias_unmatched(_base_pool: pd.DataFrame) -> None:
+    policy = load_policy()
+    pool = _base_pool.copy()
+    pool.loc[1, "کد کارمندی پشتیبان"] = ""
+    pool["alias"] = ["0012345678", "009876543"]
+
+    normalized = canonicalize_pool_frame(pool, policy=policy, sanitize_pool=False)
+    stats = normalized.attrs["pool_canonicalization_stats"]
+
+    assert stats.alias_unmatched == 1
+
+
 def test_allocate_student_dict_missing_school_field_skips_filter(
     _base_pool: pd.DataFrame,
 ) -> None:
@@ -369,6 +397,18 @@ def test_allocate_batch_capacity_full_sets_error(_base_pool: pd.DataFrame) -> No
     assert logs.iloc[0]["error_type"] == "CAPACITY_FULL"
     assert logs.iloc[0]["candidate_count"] == 2
     assert logs.iloc[0]["detailed_reason"] == "No capacity among matched candidates"
+
+
+def test_allocate_batch_logs_include_alias_stats(_base_pool: pd.DataFrame) -> None:
+    students = _single_student()
+    pool = _base_pool.copy()
+    pool.loc[1, "کد کارمندی پشتیبان"] = ""
+    pool["alias"] = ["0012345678", "0012345678"]
+
+    _, _, logs, _ = allocate_batch(students, pool)
+
+    assert logs["alias_autofill"].unique().tolist() == [1]
+    assert logs["alias_unmatched"].unique().tolist() == [0]
 
 
 def test_allocate_student_handles_empty_ranking(
