@@ -14,7 +14,7 @@ import tempfile
 import warnings
 from os import PathLike
 from pathlib import Path
-from typing import Dict, Iterator, List, Sequence
+from typing import Dict, Iterator, List, Literal, Mapping, Sequence
 
 import pandas as pd
 
@@ -250,6 +250,8 @@ def write_xlsx_atomic(
     font_name: str | None = None,
     font_size: int | None = None,
     header_mode: HeaderMode | None = None,
+    sheet_header_modes: Mapping[str, HeaderMode | None] | None = None,
+    sheet_prepare_modes: Mapping[str, Literal["default", "raw"]] | None = None,
 ) -> None:
     """نوشتن امن و اتمیک Excel با مدیریت نام شیت و انتخاب engine."""
 
@@ -271,10 +273,17 @@ def write_xlsx_atomic(
     written_frames: Dict[str, pd.DataFrame] = {}
 
     processed_data: Dict[str, pd.DataFrame] = {}
+    sheet_header_modes = sheet_header_modes or {}
+    sheet_prepare_modes = sheet_prepare_modes or {}
     for sheet_name, df in data_dict.items():
-        prepared = _prepare_dataframe_for_excel(df)
-        if header_mode:
-            prepared = canonicalize_headers(prepared, header_mode=header_mode)
+        prepare_mode = sheet_prepare_modes.get(sheet_name, "default")
+        if prepare_mode == "raw":
+            prepared = df.copy()
+        else:
+            prepared = _prepare_dataframe_for_excel(df)
+        mode = sheet_header_modes.get(sheet_name, header_mode)
+        if mode:
+            prepared = canonicalize_headers(prepared, header_mode=mode)
         processed_data[sheet_name] = prepared
 
     if engine is None:

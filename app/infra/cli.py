@@ -19,7 +19,7 @@ import platform
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Mapping, Sequence
+from typing import Any, Callable, Dict, Literal, Mapping, Sequence
 
 import pandas as pd
 from pandas import testing as pd_testing
@@ -33,6 +33,11 @@ from app.core.canonical_frames import (
 from app.core.build_matrix import BuildConfig, build_matrix
 from app.core.policy_loader import PolicyConfig, load_policy
 from app.infra.excel_writer import write_selection_reasons_sheet
+from app.infra.excel.export_allocations import (
+    DEFAULT_SABT_PROFILE_PATH,
+    build_sabt_export_frame,
+    load_sabt_export_profile,
+)
 from app.infra.excel.import_to_sabt import (
     apply_alias_rule,
     build_errors_frame,
@@ -71,6 +76,7 @@ ProgressFn = Callable[[int, str], None]
 _DEFAULT_POLICY_PATH = Path("config/policy.json")
 _DEFAULT_EXPORTER_CONFIG_PATH = Path("config/SmartAlloc_Exporter_Config_v1.json")
 _DEFAULT_SABT_TEMPLATE_PATH = Path("templates/ImportToSabt (1404) - Copy.xlsx")
+_DEFAULT_ALLOC_PROFILE_PATH = DEFAULT_SABT_PROFILE_PATH
 
 
 def _default_progress(pct: int, message: str) -> None:
@@ -884,6 +890,23 @@ def _allocate_and_write(
     logs_df = _attach_student_id(logs_df, ensure_existing=True)
     trace_df = _attach_student_id(trace_df, ensure_existing=True)
 
+    export_profile_choice = _resolve_optional_override(args, "export_profile", "sabt") or "sabt"
+    export_profile_path = _resolve_optional_override(
+        args, "export_profile_path", str(_DEFAULT_ALLOC_PROFILE_PATH)
+    ) or str(_DEFAULT_ALLOC_PROFILE_PATH)
+    students_for_export = canonicalize_headers(students_base, header_mode=header_internal)
+    students_for_export["student_id"] = (
+        student_ids.reindex(students_for_export.index).astype("string")
+    )
+    sabt_allocations_df: pd.DataFrame | None = None
+    if export_profile_choice == "sabt":
+        sabt_profile = load_sabt_export_profile(Path(export_profile_path))
+        sabt_allocations_df = build_sabt_export_frame(
+            allocations_df,
+            students_for_export,
+            profile=sabt_profile,
+        )
+
     # --- پاک‌سازی جامع خروجی قبل از نوشتن ---
     # اطمینان از معتبر بودن همه دیتافریم‌ها
     allocations_df = _ensure_valid_dataframe(allocations_df, "allocations")
@@ -914,27 +937,41 @@ def _allocate_and_write(
         student_ids=student_ids,
     )
 
+    if sabt_allocations_df is not None:
+        sabt_allocations_df = _ensure_valid_dataframe(sabt_allocations_df, "allocations_sabt")
+
     # تبدیل نهایی به فرمت‌های قابل نوشتن در Excel
     allocations_df = _make_excel_safe(allocations_df)
     updated_pool_df = _make_excel_safe(updated_pool_df)
     logs_df = _make_excel_safe(logs_df)
     trace_df = _make_excel_safe(trace_df)
     selection_reasons_df = _make_excel_safe(selection_reasons_df)
+    # sabt_allocations_df به صورت خام حفظ می‌شود تا فرمت ستون‌ها دست‌نخورده بماند.
     # --- پایان پاک‌سازی ---
 
     progress(90, "writing outputs")
-    sheets = {
-        "allocations": allocations_df,
-        "updated_pool": updated_pool_df,
-        "logs": logs_df,
-        "trace": trace_df,
-        sheet_name: selection_reasons_df,
-    }
+    sheets: dict[str, pd.DataFrame] = {}
+    header_overrides: dict[str, HeaderMode | None] = {}
+    prepare_overrides: dict[str, Literal["default", "raw"]] = {}
+    if sabt_allocations_df is not None:
+        sheets["allocations"] = allocations_df
+        sheets["allocations_sabt"] = sabt_allocations_df
+        header_overrides["allocations_sabt"] = None
+        prepare_overrides["allocations_sabt"] = "raw"
+    else:
+        sheets["allocations"] = allocations_df
+    sheets["updated_pool"] = updated_pool_df
+    sheets["logs"] = logs_df
+    sheets["trace"] = trace_df
+    sheets[sheet_name] = selection_reasons_df
+
     header_internal = policy.excel.header_mode_internal
-    prepared_sheets = {
-        name: canonicalize_headers(df, header_mode=header_internal)
-        for name, df in sheets.items()
-    }
+    prepared_sheets: dict[str, pd.DataFrame] = {}
+    for name, df in sheets.items():
+        if header_overrides.get(name) is None:
+            prepared_sheets[name] = df
+        else:
+            prepared_sheets[name] = canonicalize_headers(df, header_mode=header_internal)
     write_xlsx_atomic(
         prepared_sheets,
         output,
@@ -942,6 +979,8 @@ def _allocate_and_write(
         font_name=policy.excel.font_name,
         font_size=policy.excel.font_size,
         header_mode=policy.excel.header_mode_write,
+        sheet_header_modes=header_overrides,
+        sheet_prepare_modes=prepare_overrides,
     )
 
     if getattr(args, "determinism_check", False):
@@ -1160,6 +1199,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="مسیر فایل قالب ImportToSabt",
     )
     alloc_cmd.add_argument(
+        "--export-profile",
+        choices=("basic", "sabt"),
+        default="sabt",
+        help="نوع خروجی شیت allocations (basic=ساختار قبلی، sabt=پروفایل 45 ستونی)",
+    )
+    alloc_cmd.add_argument(
+        "--export-profile-path",
+        default=str(_DEFAULT_ALLOC_PROFILE_PATH),
+        help="مسیر فایل پروفایل Sabt (Sheet1) برای خروجی تخصیص",
+    )
+    alloc_cmd.add_argument(
         "--determinism-check",
         action="store_true",
         help="اجرای دوباره تخصیص برای تضمین دترمینیسم",
@@ -1242,6 +1292,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--sabt-template",
         default=str(_DEFAULT_SABT_TEMPLATE_PATH),
         help="مسیر فایل قالب ImportToSabt",
+    )
+    rule_cmd.add_argument(
+        "--export-profile",
+        choices=("basic", "sabt"),
+        default="sabt",
+        help="نوع خروجی شیت allocations هنگام اجرای rule-engine",
+    )
+    rule_cmd.add_argument(
+        "--export-profile-path",
+        default=str(_DEFAULT_ALLOC_PROFILE_PATH),
+        help="مسیر فایل پروفایل Sabt برای خروجی rule-engine",
     )
     return parser
 
