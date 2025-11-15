@@ -364,11 +364,13 @@ def _maybe_export_import_to_sabt(
     error_count = 0
     if isinstance(status_series, pd.Series):
         error_count = int((status_series.astype("string") != "success").sum())
+    dedupe_logs = export_df.attrs.get("dedupe_logs")
     df_summary = build_summary_frame(
         exporter_cfg,
         total_students=len(students_df),
         allocated_count=len(df_sheet2),
         error_count=error_count,
+        dedupe_logs=dedupe_logs,
     )
     df_errors = build_errors_frame(logs_df, exporter_cfg)
     df_sheet5 = build_optional_sheet_frame(exporter_cfg, "Sheet5")

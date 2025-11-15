@@ -213,6 +213,48 @@ def test_write_import_to_sabt_excel_repairs_mismatched_headers(tmp_path: Path) -
     assert df_result.columns.tolist() == expected_columns
 
 
+def test_prepare_allocation_export_frame_logs_dedupe_changes() -> None:
+    alloc = pd.DataFrame({"student_id": ["S1"], "mentor_id": ["M1"]})
+    students = pd.DataFrame(
+        [["S1", "علی", "علی"]],
+        columns=["student_id", "student_first_name", "student_first_name"],
+    )
+    mentors = pd.DataFrame(
+        [["M1", "پشتیبان", "پشتیبان"]],
+        columns=["mentor_id", "mentor_name", "mentor_name"],
+    )
+
+    export_df = prepare_allocation_export_frame(alloc, students, mentors)
+
+    dedupe_logs = export_df.attrs.get("dedupe_logs")
+    assert isinstance(dedupe_logs, list)
+    student_log = next(
+        (entry for entry in dedupe_logs if "student" in str(entry.get("context"))), None
+    )
+    mentor_log = next(
+        (entry for entry in dedupe_logs if "mentor" in str(entry.get("context"))), None
+    )
+    assert student_log is not None
+    assert mentor_log is not None
+    assert any("student_first_name" in col for col in student_log.get("columns", []))
+    assert any("mentor_name" in col for col in mentor_log.get("columns", []))
+
+
+def test_build_summary_frame_appends_dedupe_rows() -> None:
+    exporter_cfg = {"sheets": {"Summary": {"columns": ["ستون", "مقدار"]}}}
+    frame = build_summary_frame(
+        exporter_cfg,
+        total_students=2,
+        allocated_count=1,
+        error_count=1,
+        dedupe_logs=[{"context": "students", "columns": ["col1", "col2"]}],
+    )
+    assert len(frame) == 4
+    assert frame.iloc[-1]["ستون"] == "پاکسازی ستون‌های تکراری"
+    assert "students" in frame.iloc[-1]["مقدار"]
+    assert "col1" in frame.iloc[-1]["مقدار"]
+
+
 def test_ensure_template_backfills_missing_summary(tmp_path: Path) -> None:
     cfg = load_exporter_config("config/SmartAlloc_Exporter_Config_v1.json")
     template = tmp_path / "template.xlsx"

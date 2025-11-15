@@ -176,12 +176,32 @@ def prepare_allocation_export_frame(
     students = canonicalize_headers(students_df, header_mode="en").copy()
     mentors = canonicalize_headers(mentors_df, header_mode="en").copy()
 
+    dedupe_logs: list[dict[str, list[str]]] = []
+    dedupe_cache: dict[str, pd.DataFrame] = {}
+
+    def _register_dedupe_log(context: str, frame: pd.DataFrame) -> None:
+        removed = _get_deduplicated_columns(frame, context=context)
+        if removed:
+            dedupe_logs.append({"context": context, "columns": removed})
+
+    def _dedupe_cached(frame: pd.DataFrame, context: str) -> pd.DataFrame:
+        cached = dedupe_cache.get(context)
+        if cached is not None:
+            return cached
+        if not frame.columns.duplicated().any():
+            dedupe_cache[context] = frame
+            return frame
+        deduped = _deduplicate_columns(frame, context=context)
+        _register_dedupe_log(context, deduped)
+        dedupe_cache[context] = deduped
+        return deduped
+
+    alloc = _dedupe_cached(alloc, "allocations")
+    students = _dedupe_cached(students, "students_source")
+    mentors = _dedupe_cached(mentors, "mentors_source")
+
     student_source = _describe_frame_source(students_df, default_label="students_df")
     mentor_source = _describe_frame_source(mentors_df, default_label="mentors_df")
-
-    alloc = _deduplicate_columns(alloc, context="allocations")
-    students = _deduplicate_columns(students, context="students")
-    mentors = _deduplicate_columns(mentors, context="mentors")
 
     if student_ids is not None:
         aligned_ids = student_ids.reindex(students.index)
@@ -224,6 +244,9 @@ def prepare_allocation_export_frame(
         entity_name="mentor",
     )
 
+    students_prefixed = _dedupe_cached(students_prefixed, "students")
+    mentors_prefixed = _dedupe_cached(mentors_prefixed, "mentors")
+
     _ensure_unique_identifier(students_prefixed, "student_id", entity_name="student")
     _ensure_unique_identifier(mentors_prefixed, "mentor_id", entity_name="mentor")
 
@@ -260,6 +283,8 @@ def prepare_allocation_export_frame(
         )
 
     merged.index = alloc.index
+    if dedupe_logs:
+        merged.attrs["dedupe_logs"] = dedupe_logs
     return merged
 
 
@@ -322,6 +347,9 @@ def _coalesce_duplicate_identifier_rows(
     return pd.DataFrame(records, columns=frame.columns)
 
 
+_DEDUPLICATED_COLUMNS_ATTR = "_deduplicated_columns"
+
+
 def _deduplicate_columns(frame: pd.DataFrame, *, context: str) -> pd.DataFrame:
     """حذف ستون‌های تکراری با حفظ ترتیب و تشخیص داده‌های ناسازگار."""
 
@@ -347,7 +375,41 @@ def _deduplicate_columns(frame: pd.DataFrame, *, context: str) -> pd.DataFrame:
         )
 
     mask = ~columns.duplicated(keep="first")
-    return frame.loc[:, mask].copy()
+    result = frame.loc[:, mask].copy()
+    _store_deduplicated_columns(result, context=context, removed=duplicated_names)
+    return result
+
+
+def _store_deduplicated_columns(
+    frame: pd.DataFrame, *, context: str, removed: Sequence[str]
+) -> None:
+    """ذخیرهٔ ستون‌های حذف‌شده در attrs برای گزارش‌گیری."""
+
+    if not removed:
+        return
+    attrs = getattr(frame, "attrs", None)
+    if attrs is None:
+        return
+    registry = attrs.get(_DEDUPLICATED_COLUMNS_ATTR)
+    if not isinstance(registry, dict):
+        registry = {}
+        attrs[_DEDUPLICATED_COLUMNS_ATTR] = registry
+    registry[context] = [str(name) for name in removed]
+
+
+def _get_deduplicated_columns(frame: pd.DataFrame, *, context: str) -> list[str]:
+    """دریافت ستون‌های حذف‌شده برای context مشخص."""
+
+    attrs = getattr(frame, "attrs", None)
+    if not attrs:
+        return []
+    registry = attrs.get(_DEDUPLICATED_COLUMNS_ATTR)
+    if not isinstance(registry, dict):
+        return []
+    removed = registry.get(context, [])
+    if isinstance(removed, list):
+        return [str(name) for name in removed]
+    return []
 
 
 def _series_semantically_equal(left: pd.Series, right: pd.Series) -> bool:
@@ -1002,6 +1064,7 @@ def build_summary_frame(
     total_students: int,
     allocated_count: int,
     error_count: int,
+    dedupe_logs: Sequence[Mapping[str, Sequence[str]]] | None = None,
 ) -> pd.DataFrame:
     sheet_cfg = exporter_cfg.get("sheets", {}).get("Summary")
     if not isinstance(sheet_cfg, Mapping):
@@ -1014,6 +1077,16 @@ def build_summary_frame(
         {columns[0]: "تخصیص موفق", columns[1]: allocated_count},
         {columns[0]: "تخصیص ناموفق", columns[1]: error_count},
     ]
+    if dedupe_logs:
+        for entry in dedupe_logs:
+            context = str(entry.get("context", "")).strip() or "dedupe"
+            removed_columns = entry.get("columns") or []
+            removed_text = ", ".join(str(col) for col in removed_columns)
+            description = f"{context}: {removed_text}" if removed_text else context
+            row = {columns[0]: "پاکسازی ستون‌های تکراری", columns[1]: description}
+            for extra in columns[2:]:
+                row[extra] = ""
+            data.append(row)
     return pd.DataFrame(data, columns=columns)
 
 
