@@ -216,6 +216,7 @@ class BuildConfig:
     min_coverage_ratio: float | None = None
     dedup_removed_ratio_threshold: float | None = None
     join_key_duplicate_threshold: int | None = None
+    school_lookup_mismatch_threshold: float | None = None
 
     def __post_init__(self) -> None:
         policy = self.policy
@@ -307,6 +308,20 @@ class BuildConfig:
             if threshold < 0:
                 raise ValueError("join_key_duplicate_threshold must be >= 0")
             self.join_key_duplicate_threshold = threshold
+
+        if self.school_lookup_mismatch_threshold is None:
+            self.school_lookup_mismatch_threshold = float(
+                getattr(policy, "school_lookup_mismatch_threshold", 0.0)
+            )
+        else:
+            ratio = float(self.school_lookup_mismatch_threshold)
+            if ratio > 1:
+                ratio /= 100.0
+            if ratio < 0 or ratio > 1:
+                raise ValueError(
+                    "school_lookup_mismatch_threshold must be between 0 and 1 (inclusive)"
+                )
+            self.school_lookup_mismatch_threshold = ratio
 
 
 def _as_domain_config(cfg: BuildConfig) -> DomainBuildConfig:
@@ -1294,6 +1309,59 @@ def _prepare_base_rows(
     return base_df, unseen_groups, unmatched_schools
 
 
+def _detect_school_lookup_mismatches(
+    insp: pd.DataFrame,
+    *,
+    school_columns: Sequence[str],
+    code_to_name_school: Mapping[str, str],
+    school_name_to_code: Mapping[str, str],
+) -> tuple[pd.DataFrame, int, int]:
+    """بررسی مقادیر ستون‌های نام مدرسه و ثبت مقادیر ناشناخته."""
+
+    columns = [col for col in school_columns if col in insp.columns]
+    if not columns:
+        return pd.DataFrame(columns=["row_index", "پشتیبان", "مدیر", "reason", "school_column", "school_value"]), 0, 0
+
+    row_positions = {idx: pos + 1 for pos, idx in enumerate(insp.index)}
+    issues: list[dict[str, object]] = []
+    total_refs = 0
+    for column in columns:
+        series = insp[column]
+        for idx, raw_value in series.items():
+            if pd.isna(raw_value):
+                continue
+            text = str(raw_value).strip()
+            if not text:
+                continue
+            total_refs += 1
+            reason: str | None = None
+            candidate = to_int_str_or_none(text)
+            if candidate is not None:
+                if candidate not in code_to_name_school:
+                    reason = f"unknown school code ({text})"
+            else:
+                normalized = normalize_fa(text)
+                if normalized and normalized not in school_name_to_code:
+                    reason = f"unknown school name ({text})"
+            if reason is None:
+                continue
+            mentor = insp.at[idx, COL_MENTOR_NAME] if COL_MENTOR_NAME in insp.columns else ""
+            manager = insp.at[idx, COL_MANAGER_NAME] if COL_MANAGER_NAME in insp.columns else ""
+            issues.append(
+                {
+                    "row_index": row_positions.get(idx, 0),
+                    "پشتیبان": mentor,
+                    "مدیر": manager,
+                    "reason": reason,
+                    "school_column": column,
+                    "school_value": text,
+                }
+            )
+
+    frame = pd.DataFrame(issues)
+    return frame, len(issues), total_refs
+
+
 def _filter_invalid_mentors(
     insp: pd.DataFrame,
     *,
@@ -1634,6 +1702,30 @@ def build_matrix(
         crosswalk_synonyms_df,
     )
     code_to_name_school, school_name_to_code = build_school_maps(schools_df)
+    school_lookup_issues, school_mismatch_count, school_reference_count = (
+        _detect_school_lookup_mismatches(
+            insp_df,
+            school_columns=school_name_columns,
+            code_to_name_school=code_to_name_school,
+            school_name_to_code=school_name_to_code,
+        )
+    )
+    school_mismatch_ratio = (
+        school_mismatch_count / school_reference_count if school_reference_count else 0.0
+    )
+    school_lookup_threshold = float(cfg.school_lookup_mismatch_threshold or 0.0)
+    school_lookup_threshold_exceeded = (
+        school_reference_count > 0 and school_mismatch_ratio > school_lookup_threshold
+    )
+    if school_mismatch_count:
+        progress(
+            12,
+            (
+                "school lookup mismatches="
+                f"{school_mismatch_count} refs={school_reference_count}"
+                f" ratio={school_mismatch_ratio:.1%}"
+            ),
+        )
 
     insp = insp_df.copy()
     domain_cfg = _as_domain_config(cfg)
@@ -1666,6 +1758,28 @@ def build_matrix(
         included_col=included_col,
         group_cols=group_cols,
     )
+    if school_lookup_issues.empty:
+        school_lookup_invalid = pd.DataFrame(columns=invalid_mentors_df.columns)
+    else:
+        school_lookup_invalid = school_lookup_issues
+    if invalid_mentors_df.empty:
+        invalid_mentors_df = school_lookup_invalid.copy()
+    elif not school_lookup_invalid.empty:
+        invalid_mentors_df = pd.concat(
+            [invalid_mentors_df, school_lookup_invalid], ignore_index=True, sort=False
+        )
+
+    if school_lookup_threshold_exceeded:
+        message = (
+            "کد/نام مدرسه ناشناخته ({count}) بیش از آستانهٔ مجاز ({threshold:.1%}) است؛"
+            " جزئیات در شیت invalid_mentors ثبت شد."
+        ).format(count=school_mismatch_count, threshold=school_lookup_threshold)
+        error = ValueError(message)
+        setattr(error, "is_school_lookup_threshold_error", True)
+        setattr(error, "school_lookup_mismatch_count", int(school_mismatch_count))
+        setattr(error, "school_lookup_mismatch_ratio", float(school_mismatch_ratio))
+        setattr(error, "invalid_mentors_df", invalid_mentors_df)
+        raise error
 
     base_df, unseen_groups, unmatched_schools = _prepare_base_rows(
         insp_valid,
@@ -1881,6 +1995,10 @@ def build_matrix(
         "r0_skipped": 1 if r0_skipped else 0,
         "unmatched_school_count": unmatched_school_count,
         "unseen_group_count": unseen_group_count,
+        "school_lookup_mismatch_count": int(school_mismatch_count),
+        "school_lookup_mismatch_refs": int(school_reference_count),
+        "school_lookup_mismatch_ratio": float(school_mismatch_ratio),
+        "school_lookup_mismatch_threshold": float(school_lookup_threshold),
         "join_key_duplicate_rows": int(len(duplicate_join_keys_df)),
         "join_key_duplicate_threshold": duplicate_threshold,
         "coverage_ratio": coverage_ratio,

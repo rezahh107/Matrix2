@@ -858,7 +858,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Eligibility Matrix CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    build_cmd = sub.add_parser("build-matrix", help="ساخت ماتریس اهلیت")
+    build_cmd = sub.add_parser(
+        "build-matrix",
+        help="ساخت ماتریس اهلیت",
+        description=(
+            "ساخت ماتریس مطابق policy؛ شامل گیت صحت کد/نام مدرسه که "
+            "در صورت عبور از آستانهٔ policy اجرا را متوقف می‌کند و ردیف‌های خطا را "
+            "در شیت invalid_mentors ثبت می‌کند."
+        ),
+    )
     build_cmd.add_argument("--inspactor", required=True, help="مسیر فایل inspactor")
     build_cmd.add_argument("--schools", required=True, help="مسیر فایل schools")
     build_cmd.add_argument("--crosswalk", required=True, help="مسیر فایل crosswalk")
@@ -1043,7 +1051,15 @@ def main(
         is_coverage_error = getattr(exc, "is_coverage_threshold_error", False)
         is_dedup_error = getattr(exc, "is_dedup_removed_threshold_error", False)
         is_duplicate_error = getattr(exc, "is_join_key_duplicate_threshold_error", False)
-        if not (is_coverage_error or is_dedup_error or is_duplicate_error):
+        is_school_lookup_error = getattr(
+            exc, "is_school_lookup_threshold_error", False
+        )
+        if not (
+            is_coverage_error
+            or is_dedup_error
+            or is_duplicate_error
+            or is_school_lookup_error
+        ):
             raise
         print(f"❌ {exc}", file=sys.stderr)
         return 2

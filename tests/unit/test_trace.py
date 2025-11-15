@@ -36,6 +36,7 @@ def _policy_payload() -> dict[str, object]:
         "prefer_major_code": True,
         "coverage_threshold": 0.95,
         "dedup_removed_ratio_threshold": 0.05,
+        "school_lookup_mismatch_threshold": 0.0,
         "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
             "کدرشته",
@@ -177,6 +178,7 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
         prefer_major_code=True,
         coverage_threshold=0.95,
         dedup_removed_ratio_threshold=0.05,
+        school_lookup_mismatch_threshold=0.0,
         join_key_duplicate_threshold=0,
         alias_rule=PolicyAliasRule(normal="postal_or_fallback_mentor_id", school="mentor_id"),
         columns=PolicyColumns(

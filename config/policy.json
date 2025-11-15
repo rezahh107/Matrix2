@@ -18,6 +18,7 @@
   ],
   "coverage_threshold": 0.95,
   "dedup_removed_ratio_threshold": 0.05,
+  "school_lookup_mismatch_threshold": 0.0,
   "join_key_duplicate_threshold": 0,
   "center_map": {
     "شهدخت کشاورز": 1,
