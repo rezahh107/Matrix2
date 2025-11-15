@@ -580,6 +580,9 @@ def build_sheet2_frame(
         if map_dict:
             if spec.get("type") == "choice_value":
                 mapped = series.map(map_dict)
+                if mapped.isna().any():
+                    fallback = series.astype("string").map(map_dict)
+                    mapped = mapped.fillna(fallback)
             else:
                 mapped = series.astype("string").map(map_dict)
             series = mapped.fillna(series)
