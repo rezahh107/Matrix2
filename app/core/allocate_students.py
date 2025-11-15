@@ -98,7 +98,9 @@ _STAGE_LABEL_FA: Dict[str, str] = {
 }
 
 
-def _normalize_digit_code(value: object, *, length: int | None = None, pad: bool = False) -> str:
+def _normalize_digit_code(
+    value: object, *, length: int | None = None, pad: bool = False, allow_shorter: bool = False
+) -> str:
     """نرمال‌سازی ورودی‌های عددی به رشتهٔ digits پایدار برای خروجی اکسل."""
 
     if value is None:
@@ -119,7 +121,7 @@ def _normalize_digit_code(value: object, *, length: int | None = None, pad: bool
             digits = digits[-length:]
         if pad:
             digits = digits.zfill(length)
-        elif len(digits) < length:
+        elif len(digits) < length and not allow_shorter:
             return ""
     return digits
 
@@ -140,9 +142,11 @@ def _extract_mentor_alias_code(mentor_row: Mapping[str, object] | pd.Series) -> 
 
     for key in _MENTOR_ALIAS_KEYS:
         value = mentor_row.get(key)
-        normalized = _normalize_digit_code(value, length=10, pad=True)
+        normalized = _normalize_digit_code(value, length=10, allow_shorter=True)
         if normalized:
-            return normalized
+            trimmed = normalized.lstrip("0")
+            if trimmed:
+                return trimmed
     return ""
 
 
