@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Sequence, Tuple
 
 import pandas as pd
-from PySide6.QtCore import QByteArray, QSettings, Qt, Slot, QUrl
+from PySide6.QtCore import QByteArray, QSettings, Qt, Slot, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -33,7 +33,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.common.columns import HeaderMode, canonicalize_headers
+from app.core.common.columns import (
+    CANON_EN_TO_FA,
+    HeaderMode,
+    canonicalize_headers,
+    ensure_series,
+)
 from app.core.counter import (
     detect_academic_year_from_counters,
     find_max_sequence_by_prefix,
@@ -65,6 +70,8 @@ class MainWindow(QMainWindow):
         self._success_hook: Callable[[], None] | None = None
         self._prefs = AppPreferences()
         self._btn_open_output_folder: QPushButton | None = None
+        self._combo_manager_golestan: QComboBox | None = None
+        self._combo_manager_sadra: QComboBox | None = None
         policy_file = resource_path("config", "policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
         exporter_config = resource_path("config", "SmartAlloc_Exporter_Config_v1.json")
@@ -306,6 +313,7 @@ class MainWindow(QMainWindow):
         self._picker_pool = FilePicker(page, placeholder="استخر منتورها (*.xlsx)")
         self._picker_pool.setObjectName("editPool")
         self._picker_pool.setToolTip("فهرست منتورها یا پشتیبان‌ها برای تخصیص")
+        self._picker_pool.line_edit().textChanged.connect(self._refresh_manager_choices)
         inputs_layout.addRow("استخر منتورها", self._picker_pool)
 
         outer.addWidget(inputs_group)
@@ -337,6 +345,36 @@ class MainWindow(QMainWindow):
         advanced_layout.addRow("ستون ظرفیت", self._edit_capacity)
 
         outer.addWidget(advanced_group)
+
+        manager_group = QGroupBox("تنظیمات مدیران مرکز", page)
+        manager_group.setObjectName("centerManagerGroup")
+        manager_layout = QFormLayout(manager_group)
+        manager_layout.setLabelAlignment(Qt.AlignRight)
+        manager_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        self._combo_manager_golestan = self._create_manager_combo(manager_group)
+        self._combo_manager_golestan.setObjectName("comboGolestanManager")
+        self._combo_manager_golestan.setEditText(self._prefs.golestan_manager)
+        self._combo_manager_golestan.currentTextChanged.connect(
+            self._on_golestan_manager_changed
+        )
+        manager_layout.addRow("مدیر گلستان", self._combo_manager_golestan)
+
+        self._combo_manager_sadra = self._create_manager_combo(manager_group)
+        self._combo_manager_sadra.setObjectName("comboSadraManager")
+        self._combo_manager_sadra.setEditText(self._prefs.sadra_manager)
+        self._combo_manager_sadra.currentTextChanged.connect(
+            self._on_sadra_manager_changed
+        )
+        manager_layout.addRow("مدیر صدرا", self._combo_manager_sadra)
+
+        hint = QLabel(
+            "قبل از شروع تخصیص، مدیر هر مرکز را مشخص کنید تا دانش‌آموزان به پشتیبان‌های همان مدیر متصل شوند."
+        )
+        hint.setWordWrap(True)
+        manager_layout.addRow("", hint)
+
+        outer.addWidget(manager_group)
 
         register_box = QGroupBox("شناسهٔ ثبت‌نام", page)
         register_box.setObjectName("registrationGroupBox")
@@ -452,6 +490,8 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(self._btn_allocate)
         outer.addLayout(action_layout)
         outer.addStretch(1)
+
+        QTimer.singleShot(0, self._refresh_manager_choices)
 
         return page
 
@@ -744,6 +784,8 @@ class MainWindow(QMainWindow):
             self._picker_prior_roster,
             self._picker_current_roster,
             self._btn_autodetect,
+            self._combo_manager_golestan,
+            self._combo_manager_sadra,
             self._picker_rule_matrix,
             self._picker_rule_students,
             self._picker_policy_rule,
@@ -984,6 +1026,15 @@ class MainWindow(QMainWindow):
         if sabt_template:
             overrides["sabt_template"] = sabt_template
 
+        if self._combo_manager_golestan is not None:
+            golestan = self._combo_manager_golestan.currentText().strip()
+            if golestan:
+                overrides["golestan_manager"] = golestan
+        if self._combo_manager_sadra is not None:
+            sadra = self._combo_manager_sadra.currentText().strip()
+            if sadra:
+                overrides["sadra_manager"] = sadra
+
         return overrides
 
     def _build_rule_engine_overrides(self) -> dict[str, object]:
@@ -1015,6 +1066,112 @@ class MainWindow(QMainWindow):
             overrides["sabt_template"] = sabt_template
 
         return overrides
+
+    def _create_manager_combo(self, parent: QWidget) -> QComboBox:
+        """ساخت ComboBox قابل‌ویرایش برای انتخاب مدیران مراکز."""
+
+        combo = QComboBox(parent)
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.NoInsert)
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        combo.setMinimumContentsLength(1)
+        combo.setToolTip("نام مدیر مرکز را انتخاب یا وارد کنید")
+        return combo
+
+    def _on_golestan_manager_changed(self, text: str) -> None:
+        """ذخیرهٔ انتخاب مدیر گلستان در تنظیمات."""
+
+        cleaned = text.strip()
+        if cleaned:
+            self._prefs.golestan_manager = cleaned
+
+    def _on_sadra_manager_changed(self, text: str) -> None:
+        """ذخیرهٔ انتخاب مدیر صدرا در تنظیمات."""
+
+        cleaned = text.strip()
+        if cleaned:
+            self._prefs.sadra_manager = cleaned
+
+    def _refresh_manager_choices(self) -> None:
+        """بارگذاری لیست مدیران از فایل استخر و به‌روز رسانی ComboBoxها."""
+
+        if self._combo_manager_golestan is None or self._combo_manager_sadra is None:
+            return
+        path_text = self._picker_pool.text().strip()
+        if not path_text:
+            return
+        path = Path(path_text)
+        try:
+            names = self._load_manager_names_from_pool(path)
+        except ValueError as exc:
+            self._append_log(f"⚠️ بارگذاری مدیران: {exc}")
+            return
+        if not names:
+            return
+        self._populate_manager_combo(
+            self._combo_manager_golestan, names, self._prefs.golestan_manager
+        )
+        self._populate_manager_combo(
+            self._combo_manager_sadra, names, self._prefs.sadra_manager
+        )
+
+    def _populate_manager_combo(
+        self, combo: QComboBox | None, names: list[str], preferred: str
+    ) -> None:
+        """به‌روزرسانی ایمن ComboBox با لیست مدیران."""
+
+        if combo is None:
+            return
+        current = combo.currentText().strip()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(names)
+        target = preferred.strip() or current
+        if target:
+            combo.setEditText(target)
+        combo.blockSignals(False)
+
+    def _load_manager_names_from_pool(self, path: Path) -> list[str]:
+        """خواندن ستون مدیر از فایل استخر برای ساخت فهرست کشویی."""
+
+        if not path.exists() or path.is_dir():
+            return []
+        suffix = path.suffix.lower()
+        manager_candidates = [
+            CANON_EN_TO_FA.get("manager_name", "مدیر"),
+            "manager_name",
+        ]
+
+        try:
+            if suffix in {".xlsx", ".xls", ".xlsm"}:
+                with pd.ExcelFile(path) as workbook:
+                    sheet = "matrix" if "matrix" in workbook.sheet_names else workbook.sheet_names[0]
+                    try:
+                        frame = workbook.parse(sheet, usecols=manager_candidates)
+                    except ValueError:
+                        frame = workbook.parse(sheet)
+            else:
+                try:
+                    frame = pd.read_csv(path, usecols=manager_candidates)
+                except ValueError:
+                    frame = pd.read_csv(path)
+        except Exception as exc:  # pragma: no cover - خطای فایل غیرمنتظره
+            raise ValueError(str(exc)) from exc
+
+        canonical = canonicalize_headers(frame, header_mode="fa")
+        manager_col = CANON_EN_TO_FA.get("manager_name", "مدیر")
+        if manager_col not in canonical.columns:
+            return []
+        names_series = ensure_series(canonical[manager_col]).astype("string").str.strip()
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for name in names_series:
+            text = str(name or "").strip()
+            if not text or text in seen:
+                continue
+            ordered.append(text)
+            seen.add(text)
+        return ordered
 
     def _start_demo_task(self) -> None:
         """اجرای پیش‌نمایش پیشرفت برای تست UI."""

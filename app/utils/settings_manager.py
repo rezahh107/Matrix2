@@ -236,10 +236,30 @@ class AppPreferences:
     def priority_new_mentors(self) -> bool:
         """اولویت منتورهای جدید"""
         return self._settings.get_bool('allocation/priority_new_mentors', True)
-    
+
     @priority_new_mentors.setter
     def priority_new_mentors(self, value: bool):
         self._settings.set('allocation/priority_new_mentors', value)
+
+    @property
+    def golestan_manager(self) -> str:
+        """نام مدیر پیش‌فرض مرکز گلستان."""
+
+        return self._settings.get('allocation/golestan_manager', 'شهدخت کشاورز')
+
+    @golestan_manager.setter
+    def golestan_manager(self, value: str) -> None:
+        self._settings.set('allocation/golestan_manager', value)
+
+    @property
+    def sadra_manager(self) -> str:
+        """نام مدیر پیش‌فرض مرکز صدرا."""
+
+        return self._settings.get('allocation/sadra_manager', 'آیناز هوشمند')
+
+    @sadra_manager.setter
+    def sadra_manager(self, value: str) -> None:
+        self._settings.set('allocation/sadra_manager', value)
     
     @property
     def priority_high_capacity(self) -> bool:
