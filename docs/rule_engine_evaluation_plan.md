@@ -39,6 +39,7 @@
 3. **Golden / Integration Tests**
    - فایل `tests/integration/test_rule_engine_golden.py`: dataset ≈15 دانش‌آموز + 6 mentor با capacity مختلف. سناریوها: پرشدن ظرفیت mentor، gender mismatch، school wildcard، تفاوت رشته. خروجی نهایی باید در snapshot (`tests/snapshots/golden_allocations.json`) قفل شود با `pandas.testing.assert_frame_equal`.
    - Trace Golden: stage candidate counts ذخیره و در snapshot (`tests/snapshots/golden_trace.parquet`) مقایسه شود تا هر تغییری در policy فوراً دیده شود.
+   - Trace Snapshot کوچک: `tests/integration/test_allocation_trace_snapshot.py` با fixture دو دانش‌آموز (pass/fail) و استخر سه mentor اجرا می‌شود و خروجی ۸ مرحله‌ای را در `tests/snapshots/allocation_trace_snapshot.json` قفل می‌کند. این تست reason code هر مرحله را نیز assert می‌کند تا هر تغییر Policy/Rule فوراً مشخص شود؛ برای به‌روزرسانی snapshot از دستور `python tests/integration/test_allocation_trace_snapshot.py` استفاده کنید.
    - Determinism Golden: همان تست integration دو بار allocation را اجرا می‌کند و با `assert_frame_equal` خروجی‌ها را مقایسه و همچنین hash ساده (sha256) از allocations/logs محاسبه می‌کند.
 
 ## 5. Instrumentation & Tooling Proposal
@@ -63,6 +64,11 @@
 - اجرای `pytest -q tests/integration/test_rule_engine_golden.py` برای golden.
 - هر تغییر Policy یا core باید snapshotها را به‌روزرسانی کند؛ شکست تست golden نشانهٔ deviation است.
 - گزارش QA باید شامل: عبور همه تست‌ها، hash خروجی golden، و فهرست هر قاعدهٔ ثابت که پوشش داده شده است.
+
+### Trace Snapshot Update Workflow
+1. `python tests/integration/test_allocation_trace_snapshot.py` را با `PYTHONPATH` پیش‌فرض اجرا کنید تا فایل `tests/snapshots/allocation_trace_snapshot.json` بازنویسی شود (اسکریپت مسیر ریشه را خودکار به `sys.path` اضافه می‌کند).
+2. با `git diff tests/snapshots/allocation_trace_snapshot.json` تعداد کاندیدای هر مرحله و reason codeها را مرور کنید و هر تغییر Policy را مستند سازید.
+3. `pytest tests/integration/test_allocation_trace_snapshot.py -q` را اجرا کنید تا همخوانی snapshot و تست تضمین شود و سپس فایل به‌روز شده را commit نمایید.
 
 ## 8. Rule Evaluation Table (Executed 82-student Scenario)
 
