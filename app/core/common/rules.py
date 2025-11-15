@@ -13,13 +13,14 @@ from numbers import Integral, Real
 from typing import Any, Mapping, Protocol
 
 from .reasons import LocalizedReason, ReasonCode, build_reason
-from .types import TraceStageLiteral, TraceStageRecord
+from .types import CANONICAL_TRACE_ORDER, TraceStageLiteral, TraceStageRecord
 
 __all__ = [
     "Rule",
     "RuleContext",
     "RuleResult",
     "CandidateStageRule",
+    "StageRecordGuard",
     "apply_rule",
     "compose_rules",
     "default_stage_rule_map",
@@ -81,6 +82,67 @@ def compose_rules(*rules: Rule) -> Rule:
         return last_result
 
     return _combined
+
+
+@dataclass(frozen=True, slots=True)
+class StageRecordGuard:
+    """نگهبان سازگار با Policy برای بررسی صحت رکورد مرحله قبل از Rule اصلی.
+
+    مثال::
+
+        >>> record = {"stage": "gender", "total_before": 5, "total_after": 5}
+        >>> guard = StageRecordGuard(stage="gender")
+        >>> guard(RuleContext(stage_record=record)).passed
+        True
+    """
+
+    stage: TraceStageLiteral
+    allowed_stages: tuple[TraceStageLiteral, ...] = CANONICAL_TRACE_ORDER
+
+    def __call__(self, context: RuleContext) -> RuleResult:
+        record = context.stage_record
+        record_stage = record.get("stage")
+        before = _coerce_detail_int(record.get("total_before"))
+        after = _coerce_detail_int(record.get("total_after"))
+        issue: str | None = None
+
+        if record_stage not in self.allowed_stages:
+            issue = "invalid_stage"
+        elif record_stage != self.stage:
+            issue = "stage_mismatch"
+        elif before is None or after is None:
+            issue = "missing_totals"
+        elif before < after:
+            issue = "before_lt_after"
+        elif after < 0:
+            issue = "negative_total_after"
+
+        if issue is not None:
+            details: dict[str, object] = {
+                "issue": issue,
+                "record_stage": record_stage,
+                "expected_stage": self.stage,
+                "total_before": record.get("total_before"),
+                "total_after": record.get("total_after"),
+            }
+            if issue == "invalid_stage":
+                details["allowed_stages"] = self.allowed_stages
+            return RuleResult(
+                stage=self.stage,
+                passed=False,
+                reason=build_reason(ReasonCode.INTERNAL_ERROR),
+                details=details,
+            )
+
+        return RuleResult(
+            stage=self.stage,
+            passed=True,
+            reason=build_reason(ReasonCode.OK),
+            details={
+                "total_before": before,
+                "total_after": after,
+            },
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,7 +275,13 @@ _DEFAULT_RULE_CODES: Mapping[TraceStageLiteral, tuple[ReasonCode, tuple[str, ...
 def default_stage_rule_map() -> Mapping[TraceStageLiteral, Rule]:
     """تولید Ruleهای پیش‌فرض مطابق ترتیب ۸ مرحله‌ای."""
 
-    return {
-        stage: CandidateStageRule(stage=stage, failure_code=code, detail_keys=detail_keys)
-        for stage, (code, detail_keys) in _DEFAULT_RULE_CODES.items()
-    }
+    rules: dict[TraceStageLiteral, Rule] = {}
+    for stage, (code, detail_keys) in _DEFAULT_RULE_CODES.items():
+        guard = StageRecordGuard(stage=stage)
+        candidate_rule = CandidateStageRule(
+            stage=stage,
+            failure_code=code,
+            detail_keys=detail_keys,
+        )
+        rules[stage] = compose_rules(guard, candidate_rule)
+    return rules

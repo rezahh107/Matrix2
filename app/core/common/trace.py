@@ -34,7 +34,12 @@ from ..policy_loader import PolicyConfig, load_policy
 from .filters import filter_school_by_value, resolve_student_school_code
 from .columns import normalize_bool_like, to_int64
 from .rules import Rule, RuleContext, apply_rule, default_stage_rule_map
-from .types import StudentRow, TraceStageLiteral, TraceStageRecord
+from .types import (
+    CANONICAL_TRACE_ORDER,
+    StudentRow,
+    TraceStageLiteral,
+    TraceStageRecord,
+)
 
 __all__ = [
     "TraceStagePlan",
@@ -42,18 +47,6 @@ __all__ = [
     "build_stage_rule_map",
     "build_allocation_trace",
 ]
-
-
-_CANONICAL_TRACE_ORDER: tuple[TraceStageLiteral, ...] = (
-    "type",
-    "group",
-    "gender",
-    "graduation_status",
-    "center",
-    "finance",
-    "school",
-    "capacity_gate",
-)
 
 
 @dataclass(frozen=True)
@@ -84,7 +77,7 @@ def build_trace_plan(
 ) -> List[TraceStagePlan]:
     """ساخت برنامهٔ پیش‌فرض مراحل تریس از روی Policy."""
 
-    if policy.trace_stage_names != _CANONICAL_TRACE_ORDER:
+    if policy.trace_stage_names != CANONICAL_TRACE_ORDER:
         raise ValueError(
             "Policy trace stages must match the canonical 8-stage order",
         )

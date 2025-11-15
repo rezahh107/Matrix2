@@ -34,6 +34,7 @@ class ReasonCode(StrEnum):
     CAPACITY_FULL = "CAPACITY_FULL"
     FILTERED_OUT = "FILTERED_OUT"
     FAIRNESS_ORDER = "FAIRNESS_ORDER"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +58,7 @@ _REASON_MESSAGES_FA: Mapping[ReasonCode, str] = {
     ReasonCode.CAPACITY_FULL: "هیچ ظرفیت فعالی در پشتیبان‌های واجد شرایط باقی نمانده است.",
     ReasonCode.FILTERED_OUT: "دانش‌آموز در این مرحله از فیلتر Policy حذف شد.",
     ReasonCode.FAIRNESS_ORDER: "بازچینش عدالت‌محور طبق Policy انجام شد.",
+    ReasonCode.INTERNAL_ERROR: "سیستم Trace دادهٔ نامعتبر تولید کرد؛ لطفاً تنظیمات Policy/Data را بررسی کنید.",
 }
 
 

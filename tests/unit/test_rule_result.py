@@ -7,12 +7,13 @@ from app.core.common.rules import (
 )
 
 
-def _stage_record(stage: str, *, after: int) -> dict:
+def _stage_record(stage: str, *, after: int, before: int | None = None) -> dict:
+    total_before = before if before is not None else max(after, 5)
     return {
         "stage": stage,
         "column": "ستون",
         "expected_value": 1,
-        "total_before": 2,
+        "total_before": total_before,
         "total_after": after,
         "matched": after > 0,
         "expected_op": None,

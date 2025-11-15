@@ -94,6 +94,7 @@ __all__ = [
     "AllocationLogRecord",
     "TraceStageLiteral",
     "TraceStageRecord",
+    "CANONICAL_TRACE_ORDER",
 ]
 
 
@@ -208,6 +209,18 @@ TraceStageLiteral = Literal[
     "school",
     "capacity_gate",
 ]
+
+
+CANONICAL_TRACE_ORDER: tuple[TraceStageLiteral, ...] = (
+    "type",
+    "group",
+    "gender",
+    "graduation_status",
+    "center",
+    "finance",
+    "school",
+    "capacity_gate",
+)
 
 
 class TraceStageRecord(TypedDict):
