@@ -25,6 +25,33 @@
     "آیناز هوشمند": 2,
     "*": 0
   },
+  "center_management": {
+    "enabled": true,
+    "strict_manager_validation": false,
+    "default_center_for_invalid": 0,
+    "priority_order": [
+      1,
+      2,
+      0
+    ],
+    "centers": [
+      {
+        "id": 1,
+        "name": "گلستان",
+        "default_manager": "شهدخت کشاورز"
+      },
+      {
+        "id": 2,
+        "name": "صدرا",
+        "default_manager": "آیناز هوشمند"
+      },
+      {
+        "id": 0,
+        "name": "مرکزی",
+        "default_manager": null
+      }
+    ]
+  },
   "school_code_empty_as_zero": true,
   "prefer_major_code": true,
   "alias_rule": {

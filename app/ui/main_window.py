@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Iterable, List, Sequence, Tuple
+from functools import partial
+from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
 import pandas as pd
 from PySide6.QtCore import QByteArray, QSettings, Qt, Slot, QTimer, QUrl
@@ -70,8 +71,9 @@ class MainWindow(QMainWindow):
         self._success_hook: Callable[[], None] | None = None
         self._prefs = AppPreferences()
         self._btn_open_output_folder: QPushButton | None = None
-        self._combo_manager_golestan: QComboBox | None = None
-        self._combo_manager_sadra: QComboBox | None = None
+        self._center_manager_combos: Dict[int, QComboBox] = {}
+        self._center_definitions = self._resolve_center_definitions()
+        self._btn_reset_managers: QPushButton | None = None
         policy_file = resource_path("config", "policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
         exporter_config = resource_path("config", "SmartAlloc_Exporter_Config_v1.json")
@@ -351,23 +353,25 @@ class MainWindow(QMainWindow):
         manager_layout = QFormLayout(manager_group)
         manager_layout.setLabelAlignment(Qt.AlignRight)
         manager_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
-
-        self._combo_manager_golestan = self._create_manager_combo(manager_group)
-        self._combo_manager_golestan.setObjectName("comboGolestanManager")
-        self._combo_manager_golestan.setEditText(self._prefs.golestan_manager)
-        self._combo_manager_golestan.currentTextChanged.connect(
-            self._on_golestan_manager_changed
-        )
-        manager_layout.addRow("مدیر گلستان", self._combo_manager_golestan)
-
-        self._combo_manager_sadra = self._create_manager_combo(manager_group)
-        self._combo_manager_sadra.setObjectName("comboSadraManager")
-        self._combo_manager_sadra.setEditText(self._prefs.sadra_manager)
-        self._combo_manager_sadra.currentTextChanged.connect(
-            self._on_sadra_manager_changed
-        )
-        manager_layout.addRow("مدیر صدرا", self._combo_manager_sadra)
-
+        self._center_manager_combos.clear()
+        for center in self._center_definitions:
+            center_id = int(center["id"])
+            combo = self._create_manager_combo(manager_group)
+            combo.setObjectName(f"comboCenterManager_{center_id}")
+            preferred = self._prefs.get_center_manager(
+                center_id, self._center_default_manager(center_id)
+            )
+            combo.setEditText(preferred)
+            combo.currentTextChanged.connect(
+                partial(self._on_center_manager_changed, center_id)
+            )
+            label = f"مدیر {center['name']}"
+            manager_layout.addRow(label, combo)
+            self._center_manager_combos[center_id] = combo
+        reset_btn = QPushButton("بازگشت به پیش‌فرض‌ها", manager_group)
+        reset_btn.clicked.connect(self._reset_center_managers_to_defaults)
+        manager_layout.addRow("", reset_btn)
+        self._btn_reset_managers = reset_btn
         hint = QLabel(
             "قبل از شروع تخصیص، مدیر هر مرکز را مشخص کنید تا دانش‌آموزان به پشتیبان‌های همان مدیر متصل شوند."
         )
@@ -784,8 +788,6 @@ class MainWindow(QMainWindow):
             self._picker_prior_roster,
             self._picker_current_roster,
             self._btn_autodetect,
-            self._combo_manager_golestan,
-            self._combo_manager_sadra,
             self._picker_rule_matrix,
             self._picker_rule_students,
             self._picker_policy_rule,
@@ -799,6 +801,9 @@ class MainWindow(QMainWindow):
             self._picker_rule_current_roster,
             self._btn_rule_autodetect,
         ]
+        self._interactive.extend(self._center_manager_combos.values())
+        if self._btn_reset_managers is not None:
+            self._interactive.append(self._btn_reset_managers)
 
     # ------------------------------------------------------------------ Actions
     def _start_build(self) -> None:
@@ -1026,14 +1031,13 @@ class MainWindow(QMainWindow):
         if sabt_template:
             overrides["sabt_template"] = sabt_template
 
-        if self._combo_manager_golestan is not None:
-            golestan = self._combo_manager_golestan.currentText().strip()
-            if golestan:
-                overrides["golestan_manager"] = golestan
-        if self._combo_manager_sadra is not None:
-            sadra = self._combo_manager_sadra.currentText().strip()
-            if sadra:
-                overrides["sadra_manager"] = sadra
+        center_overrides: dict[int, list[str]] = {}
+        for center_id, combo in self._center_manager_combos.items():
+            manager = combo.currentText().strip()
+            if manager:
+                center_overrides[int(center_id)] = [manager]
+        if center_overrides:
+            overrides["center_managers"] = center_overrides
 
         return overrides
 
@@ -1078,24 +1082,66 @@ class MainWindow(QMainWindow):
         combo.setToolTip("نام مدیر مرکز را انتخاب یا وارد کنید")
         return combo
 
-    def _on_golestan_manager_changed(self, text: str) -> None:
-        """ذخیرهٔ انتخاب مدیر گلستان در تنظیمات."""
+    def _resolve_center_definitions(self) -> list[dict[str, object]]:
+        """خواندن لیست مراکز از Policy با fallback به دو مرکز Legacy."""
+
+        try:
+            policy = get_policy()
+        except Exception:
+            return [
+                {"id": 1, "name": "گلستان", "defaults": ("شهدخت کشاورز",)},
+                {"id": 2, "name": "صدرا", "defaults": ("آیناز هوشمند",)},
+                {"id": 0, "name": "مرکزی", "defaults": tuple()},
+            ]
+        definitions: list[dict[str, object]] = []
+        for center in policy.center_management.centers:
+            defaults = tuple(center.default_managers)
+            definitions.append(
+                {"id": center.id, "name": center.name, "defaults": defaults}
+            )
+        if not definitions:
+            definitions = [
+                {"id": 1, "name": "گلستان", "defaults": ("شهدخت کشاورز",)},
+                {"id": 2, "name": "صدرا", "defaults": ("آیناز هوشمند",)},
+            ]
+        return definitions
+
+    def _center_default_manager(self, center_id: int) -> str:
+        """بازیابی اولین مدیر پیش‌فرض برای مرکز داده‌شده."""
+
+        for center in self._center_definitions:
+            if center["id"] == center_id:
+                defaults = center.get("defaults", ())
+                if defaults:
+                    return str(defaults[0])
+        return ""
+
+    def _on_center_manager_changed(self, center_id: int, text: str) -> None:
+        """ذخیرهٔ انتخاب مدیر مرکز پویا در تنظیمات."""
 
         cleaned = text.strip()
         if cleaned:
-            self._prefs.golestan_manager = cleaned
+            self._prefs.set_center_manager(center_id, cleaned)
+        else:
+            self._prefs.clear_center_manager(center_id)
 
-    def _on_sadra_manager_changed(self, text: str) -> None:
-        """ذخیرهٔ انتخاب مدیر صدرا در تنظیمات."""
+    def _reset_center_managers_to_defaults(self) -> None:
+        """بازگردانی همه مراکز به مدیران پیش‌فرض Policy."""
 
-        cleaned = text.strip()
-        if cleaned:
-            self._prefs.sadra_manager = cleaned
+        for center_id, combo in self._center_manager_combos.items():
+            default_name = self._center_default_manager(center_id)
+            combo.blockSignals(True)
+            combo.setEditText(default_name)
+            combo.blockSignals(False)
+            if default_name:
+                self._prefs.set_center_manager(center_id, default_name)
+            else:
+                self._prefs.clear_center_manager(center_id)
 
     def _refresh_manager_choices(self) -> None:
         """بارگذاری لیست مدیران از فایل استخر و به‌روز رسانی ComboBoxها."""
 
-        if self._combo_manager_golestan is None or self._combo_manager_sadra is None:
+        if not self._center_manager_combos:
             return
         path_text = self._picker_pool.text().strip()
         if not path_text:
@@ -1104,19 +1150,26 @@ class MainWindow(QMainWindow):
         try:
             names = self._load_manager_names_from_pool(path)
         except ValueError as exc:
+            QMessageBox.warning(self, "بارگذاری مدیران", str(exc))
             self._append_log(f"⚠️ بارگذاری مدیران: {exc}")
             return
         if not names:
+            QMessageBox.warning(
+                self,
+                "لیست مدیران",
+                "هیچ نام مدیری در فایل استخر یافت نشد. ستون 'مدیر' را بررسی کنید.",
+            )
+            self._append_log("⚠️ ستونی برای مدیر در فایل استخر یافت نشد")
             return
-        self._populate_manager_combo(
-            self._combo_manager_golestan, names, self._prefs.golestan_manager
-        )
-        self._populate_manager_combo(
-            self._combo_manager_sadra, names, self._prefs.sadra_manager
-        )
+        for center_id, combo in self._center_manager_combos.items():
+            preferred = self._prefs.get_center_manager(
+                center_id, self._center_default_manager(center_id)
+            )
+            self._populate_manager_combo(center_id, combo, names, preferred)
+        self._append_log("✅ لیست مدیران به‌روزرسانی شد")
 
     def _populate_manager_combo(
-        self, combo: QComboBox | None, names: list[str], preferred: str
+        self, center_id: int, combo: QComboBox | None, names: list[str], preferred: str
     ) -> None:
         """به‌روزرسانی ایمن ComboBox با لیست مدیران."""
 
@@ -1161,7 +1214,7 @@ class MainWindow(QMainWindow):
         canonical = canonicalize_headers(frame, header_mode="fa")
         manager_col = CANON_EN_TO_FA.get("manager_name", "مدیر")
         if manager_col not in canonical.columns:
-            return []
+            raise ValueError("ستون 'مدیر' در فایل استخر یافت نشد")
         names_series = ensure_series(canonical[manager_col]).astype("string").str.strip()
         ordered: list[str] = []
         seen: set[str] = set()

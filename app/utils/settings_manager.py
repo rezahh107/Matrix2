@@ -245,21 +245,85 @@ class AppPreferences:
     def golestan_manager(self) -> str:
         """نام مدیر پیش‌فرض مرکز گلستان."""
 
-        return self._settings.get('allocation/golestan_manager', 'شهدخت کشاورز')
+        return self.get_center_manager(1, 'شهدخت کشاورز')
 
     @golestan_manager.setter
     def golestan_manager(self, value: str) -> None:
-        self._settings.set('allocation/golestan_manager', value)
+        self.set_center_manager(1, value)
 
     @property
     def sadra_manager(self) -> str:
         """نام مدیر پیش‌فرض مرکز صدرا."""
 
-        return self._settings.get('allocation/sadra_manager', 'آیناز هوشمند')
+        return self.get_center_manager(2, 'آیناز هوشمند')
 
     @sadra_manager.setter
     def sadra_manager(self, value: str) -> None:
-        self._settings.set('allocation/sadra_manager', value)
+        self.set_center_manager(2, value)
+
+    def get_center_manager(self, center_id: int, default: str) -> str:
+        """دریافت نام ذخیره‌شده برای یک مرکز با fallback امن."""
+
+        mapping = self._load_center_manager_map()
+        key = str(center_id)
+        value = mapping.get(key, default)
+        cleaned = str(value or "").strip()
+        fallback = str(default or "").strip()
+        return cleaned or fallback
+
+    def set_center_manager(self, center_id: int, value: str) -> None:
+        """ذخیرهٔ نام مدیر یک مرکز به‌صورت ساخت‌یافته."""
+
+        mapping = self._load_center_manager_map()
+        key = str(center_id)
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            mapping.pop(key, None)
+        else:
+            mapping[key] = cleaned
+        self._save_center_manager_map(mapping)
+
+    def clear_center_manager(self, center_id: int) -> None:
+        """حذف override مدیر برای مرکز مشخص."""
+
+        mapping = self._load_center_manager_map()
+        mapping.pop(str(center_id), None)
+        self._save_center_manager_map(mapping)
+
+    def _load_center_manager_map(self) -> Dict[str, str]:
+        """بارگذاری نگاشت مدیران ذخیره‌شده از QSettings."""
+
+        raw = self._settings.get('allocation/center_manager_map', '{}')
+        if isinstance(raw, str):
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data = {}
+        elif isinstance(raw, dict):
+            data = raw
+        else:
+            data = {}
+        normalized: Dict[str, str] = {}
+        for key, value in data.items():
+            cleaned = str(value or "").strip()
+            if not cleaned:
+                continue
+            normalized[str(key)] = cleaned
+        legacy = {
+            "1": self._settings.get('allocation/golestan_manager', ''),
+            "2": self._settings.get('allocation/sadra_manager', ''),
+        }
+        for key, value in legacy.items():
+            cleaned = str(value or "").strip()
+            if cleaned and key not in normalized:
+                normalized[key] = cleaned
+        return normalized
+
+    def _save_center_manager_map(self, mapping: Dict[str, str]) -> None:
+        """ذخیرهٔ نگاشت مدیران با سریال‌سازی JSON برای پایداری."""
+
+        payload = json.dumps(mapping, ensure_ascii=False)
+        self._settings.set('allocation/center_manager_map', payload)
     
     @property
     def priority_high_capacity(self) -> bool:

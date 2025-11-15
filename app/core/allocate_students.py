@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from numbers import Number
 from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
@@ -9,6 +10,7 @@ from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
 import pandas as pd
 
 from .canonical_frames import canonicalize_pool_frame, canonicalize_students_frame
+from .center_preferences import normalize_center_priority
 from .common.column_normalizer import normalize_input_columns
 from .common.columns import (
     CANON_EN_TO_FA,
@@ -233,6 +235,16 @@ class AllocationResult:
     log: AllocationLogRecord
 
 
+@dataclass(frozen=True)
+class StudentCenterInfo:
+    """اطلاعات استخراج‌شده از ستون مرکز برای یک دانش‌آموز."""
+
+    column: str
+    raw_value: object | None
+    normalized_value: int | None
+    is_invalid: bool
+
+
 def _maybe_int_from_text(value: object) -> int | None:
     """Try to coerce heterogeneous inputs to a stable integer identifier."""
 
@@ -449,23 +461,40 @@ def _student_value(student: Mapping[str, object], column: str) -> object:
     raise KeyError(f"Student row missing value for '{column}'")
 
 
-def _extract_student_center(
+def _resolve_student_center_info(
     student: Mapping[str, object], policy: PolicyConfig
-) -> int | None:
-    """دریافت مقدار مرکز دانش‌آموز با احترام به نام ستون اعلام‌شده در Policy."""
+) -> StudentCenterInfo:
+    """استخراج ستون مرکز و تشخیص معتبر بودن مقدار."""
 
     column = policy.stage_column("center")
-    try:
-        value = _student_value(student, column)
-    except KeyError:
-        normalized = column.replace(" ", "_")
-        value = student.get(normalized)
+    candidates = (
+        column,
+        column.replace(" ", "_"),
+        CANON_EN_TO_FA.get("center", "center"),
+        "center",
+    )
+    value: object | None = None
+    source = column
+    for candidate in candidates:
+        if candidate in student:
+            value = student[candidate]
+            source = candidate
+            break
+    normalized = _maybe_int_from_text(value)
+    text_value = str(value).strip() if isinstance(value, str) else value
+    is_invalid = False
     if value is None:
-        return None
-    try:
-        return _maybe_int_from_text(value)
-    except ValueError:
-        return None
+        is_invalid = True
+    elif isinstance(text_value, str) and not text_value:
+        is_invalid = True
+    elif normalized is None:
+        is_invalid = True
+    return StudentCenterInfo(
+        column=str(source),
+        raw_value=value,
+        normalized_value=normalized,
+        is_invalid=is_invalid,
+    )
 
 
 def _collect_join_key_map(
@@ -538,7 +567,27 @@ def _build_log_from_join_map(
 def _sort_students_by_center_priority(
     students: pd.DataFrame, policy: PolicyConfig, priority: Sequence[int] | None
 ) -> pd.DataFrame:
-    """اعمال اولویت اجرای مرکز بر روی دیتافریم دانش‌آموزان با sort پایدار."""
+    """مرتب‌سازی پایدار دانش‌آموزان براساس اولویت مرکز.
+
+    این تابع دانش‌آموزان را طبق لیست اولویت مرتب می‌کند تا مراکز با
+    اولویت بالاتر زودتر پردازش شوند.
+
+    Args:
+        students: DataFrame دانش‌آموزان (canonical).
+        policy: سیاست فعال برای تشخیص ستون مرکز و fallback.
+        priority: لیست اولویت مراکز (مثلاً [1, 2, 0]).
+
+    Returns:
+        DataFrame مرتب‌شده با حفظ ایندکس اصلی.
+
+    Raises:
+        ValueError: اگر ستون مرکز در students موجود نباشد.
+
+    مثال::
+        >>> sorted_df = _sort_students_by_center_priority(
+        ...     students, policy, priority=[1, 2, 0]
+        ... )
+    """
 
     if not priority:
         return students
@@ -551,8 +600,11 @@ def _sort_students_by_center_priority(
     )
     target_column = next((name for name in candidates if name in students.columns), None)
     if target_column is None:
-        return students
-    numeric = pd.to_numeric(students[target_column], errors="coerce").fillna(-1).astype(int)
+        raise ValueError("students dataframe missing center column for sorting")
+    numeric = pd.to_numeric(students[target_column], errors="coerce")
+    fallback_center = policy.default_center_for_invalid
+    fill_value = fallback_center if fallback_center is not None else -1
+    numeric = numeric.fillna(fill_value).astype(int)
     order_map = {int(value): idx for idx, value in enumerate(priority)}
     fallback = len(order_map)
     order = numeric.map(lambda x: order_map.get(int(x), fallback))
@@ -562,6 +614,22 @@ def _sort_students_by_center_priority(
         by_columns.append("student_id")
     sorted_students = sorted_students.sort_values(by=by_columns, kind="stable")
     return sorted_students.drop(columns=["__center_order__"])
+
+
+def _separate_school_students(
+    students: pd.DataFrame, policy: PolicyConfig
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """جداسازی دانش‌آموزان مدرسه‌ای از مرکزی براساس ستون تشخیص مدرسه."""
+
+    column = "school_status_resolved"
+    if column not in students.columns:
+        raise ValueError("students dataframe missing 'school_status_resolved' column")
+    statuses = {int(value) for value in policy.school_statuses}
+    values = pd.to_numeric(students[column], errors="coerce").fillna(0).astype(int)
+    school_mask = values.isin(statuses)
+    school_students = students.loc[school_mask].copy()
+    center_students = students.loc[~school_mask].copy()
+    return school_students, center_students
 
 
 def _build_center_manager_index(
@@ -598,6 +666,19 @@ def _build_center_manager_index(
         mask = center_series.eq(int(center_value)) & manager_series.isin(normalized_names)
         if mask.any():
             result[int(center_value)] = pool.index[mask]
+    missing_centers: list[int] = []
+    for center_value, names in manager_map.items():
+        if int(center_value) not in result:
+            missing_centers.append(int(center_value))
+            manager_list = ", ".join(str(name) for name in names)
+            warnings.warn(
+                f"⚠️ مرکز {center_value}: هیچ پشتیبانی با مدیران {manager_list} پیدا نشد",
+                stacklevel=2,
+            )
+    if missing_centers and policy.center_management.strict_manager_validation:
+        raise ValueError(
+            f"مدیران مورد نظر برای مراکز {missing_centers} در استخر یافت نشدند"
+        )
     return result
 
 
@@ -701,6 +782,36 @@ def _derive_failure_alerts(
         "context": context,
     }
     return [alert]
+
+
+def _append_invalid_center_alert(
+    log: AllocationLogRecord, info: StudentCenterInfo, fallback_center: int | None
+) -> None:
+    """ثبت هشدار برای مقادیر نامعتبر ستون مرکز."""
+
+    if not info.is_invalid:
+        return
+    context: Dict[str, Any] = {"column": info.column, "raw_value": info.raw_value}
+    if fallback_center is not None:
+        context["fallback_center"] = fallback_center
+        message = (
+            f"مقدار ستون {info.column} نامعتبر بود؛ مرکز {fallback_center} به‌عنوان "
+            "fallback استفاده شد."
+        )
+    else:
+        message = f"مقدار ستون {info.column} نامعتبر بود و فیلتر مرکز اعمال نشد."
+    alert: AllocationAlertRecord = {
+        "code": "INVALID_CENTER",
+        "stage": "center",
+        "message": message,
+        "context": context,
+    }
+    existing = log.get("alerts")
+    if isinstance(existing, list):
+        existing.append(alert)
+    else:
+        log["alerts"] = [alert]
+    warnings.warn(message, stacklevel=2)
 
 
 def _emit_alert_progress(
@@ -843,6 +954,11 @@ def allocate_student(
     if alert_progress is None:
         alert_progress = progress
 
+    center_info = _resolve_student_center_info(student, policy)
+    center_fallback = None
+    if center_info.is_invalid and center_info.normalized_value is None:
+        center_fallback = policy.default_center_for_invalid
+
     join_map, missing_columns = _collect_join_key_map(student, policy)
 
     progress(5, "prefilter")
@@ -898,6 +1014,7 @@ def allocate_student(
                 ],
             }
         )
+        _append_invalid_center_alert(log, center_info, center_fallback)
         return AllocationResult(None, trace, log)
 
     def _fail_allocation(
@@ -934,6 +1051,7 @@ def allocate_student(
     log["rule_reason_code"] = rule_reason_code
     log["rule_reason_text"] = rule_reason_text
     log["rule_reason_details"] = rule_details
+    _append_invalid_center_alert(log, center_info, center_fallback)
 
     if eligible.empty:
         return _fail_allocation(
@@ -1200,9 +1318,14 @@ def allocate_batch(
     else:
         students_norm = _normalize_students(students, policy)
         pool_norm = _validate_pool(_normalize_pool(candidate_pool, policy))
-    students_norm = _sort_students_by_center_priority(
-        students_norm, policy, center_priority
+    normalized_priority = normalize_center_priority(policy, center_priority)
+    sorted_students = _sort_students_by_center_priority(
+        students_norm, policy, normalized_priority
     )
+    school_students, center_students = _separate_school_students(
+        sorted_students, policy
+    )
+    students_norm = pd.concat([school_students, center_students], axis=0)
     pool_stats = pool_norm.attrs.get("pool_canonicalization_stats")
     alias_autofill = int(getattr(pool_stats, "alias_autofill", 0) or 0) if pool_stats else 0
     alias_unmatched = int(getattr(pool_stats, "alias_unmatched", 0) or 0) if pool_stats else 0
@@ -1272,7 +1395,10 @@ def allocate_batch(
     for idx, (_, student_row) in enumerate(students_norm.iterrows(), start=1):
         student_dict = student_row.to_dict()
         progress(int(idx * 100 / total), f"allocating {idx}/{total}")
-        student_center = _extract_student_center(student_dict, policy)
+        center_info = _resolve_student_center_info(student_dict, policy)
+        student_center = center_info.normalized_value
+        if student_center is None and center_info.is_invalid:
+            student_center = policy.default_center_for_invalid
         pool_view = pool_with_ids
         if student_center is not None:
             center_key = int(student_center)

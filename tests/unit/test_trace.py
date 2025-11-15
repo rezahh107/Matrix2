@@ -12,6 +12,8 @@ from app.core.common.trace import build_allocation_trace, build_trace_plan
 from app.core.policy_loader import (
     ExcelOptions,
     EmissionOptions,
+    CenterDefinition,
+    CenterManagementConfig,
     GenderCode,
     GenderCodes,
     PolicyAliasRule,
@@ -261,6 +263,25 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
             )
         ),
         fairness_strategy="none",
+        center_management=CenterManagementConfig(
+            enabled=True,
+            centers=(
+                CenterDefinition(
+                    id=1,
+                    name="گلستان",
+                    default_managers=("شهدخت کشاورز",),
+                ),
+                CenterDefinition(
+                    id=2,
+                    name="صدرا",
+                    default_managers=("آیناز هوشمند",),
+                ),
+                CenterDefinition(id=0, name="مرکزی", default_managers=()),
+            ),
+            priority_order=(1, 2, 0),
+            strict_manager_validation=False,
+            default_center_for_invalid=0,
+        ),
     )
 
     with pytest.raises(ValueError, match="canonical 8-stage order"):
