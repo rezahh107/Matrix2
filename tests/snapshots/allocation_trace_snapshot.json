@@ -14,6 +14,8 @@
         "expected_threshold": null,
         "join_value_norm": 1201,
         "join_value_raw": 1201,
+        "mentor_value_norm": 1201,
+        "mentor_value_raw": 1201,
         "rule_details": {
           "column": "کدرشته",
           "expected_op": "=",
@@ -44,6 +46,8 @@
         "expected_threshold": null,
         "join_value_norm": 1201,
         "join_value_raw": 1201,
+        "mentor_value_norm": 1201,
+        "mentor_value_raw": 1201,
         "rule_details": {
           "column": "کدرشته",
           "expected_op": "=",
@@ -74,6 +78,8 @@
         "expected_threshold": null,
         "join_value_norm": 0,
         "join_value_raw": 0,
+        "mentor_value_norm": 0,
+        "mentor_value_raw": 0,
         "rule_details": {
           "column": "جنسیت",
           "expected_op": "=",
@@ -104,6 +110,8 @@
         "expected_threshold": null,
         "join_value_norm": 0,
         "join_value_raw": 0,
+        "mentor_value_norm": 0,
+        "mentor_value_raw": 0,
         "rule_details": {
           "column": "دانش آموز فارغ",
           "expected_op": "=",
@@ -134,6 +142,8 @@
         "expected_threshold": null,
         "join_value_norm": 1,
         "join_value_raw": 1,
+        "mentor_value_norm": 1,
+        "mentor_value_raw": 1,
         "rule_details": {
           "column": "مرکز گلستان صدرا",
           "expected_op": "=",
@@ -164,6 +174,8 @@
         "expected_threshold": null,
         "join_value_norm": 0,
         "join_value_raw": 0,
+        "mentor_value_norm": 0,
+        "mentor_value_raw": 0,
         "rule_details": {
           "column": "مالی حکمت بنیاد",
           "expected_op": "=",
@@ -194,6 +206,8 @@
         "expected_threshold": 0,
         "join_value_norm": 2001,
         "join_value_raw": "2001",
+        "mentor_value_norm": 2001,
+        "mentor_value_raw": 2001,
         "rule_details": {
           "column": "کد مدرسه",
           "expected_op": ">",
@@ -266,6 +280,8 @@
         "expected_threshold": null,
         "join_value_norm": 9999,
         "join_value_raw": 9999,
+        "mentor_value_norm": 1201,
+        "mentor_value_raw": 1201,
         "rule_details": {
           "column": "کدرشته",
           "expected_op": "=",
@@ -334,6 +350,7 @@
           "join_value_norm": 1,
           "join_value_raw": 1,
           "stage": "gender",
+          "student_value": 1,
           "total_after": 0,
           "total_before": 0
         },
@@ -394,6 +411,7 @@
           "join_value_norm": 3,
           "join_value_raw": 3,
           "stage": "center",
+          "student_value": 3,
           "total_after": 0,
           "total_before": 0
         },
@@ -458,6 +476,7 @@
           "school_filter_applied": false,
           "school_status_resolved": true,
           "stage": "school",
+          "student_value": 9999,
           "total_after": 0,
           "total_before": 0
         },
