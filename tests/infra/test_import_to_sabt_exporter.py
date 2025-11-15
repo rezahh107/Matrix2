@@ -310,6 +310,29 @@ def test_prepare_allocation_export_frame_reports_missing_student_identifier(tmp_
     assert "Please add the column" in message
 
 
+def test_prepare_allocation_export_frame_injects_student_identifier_from_series() -> None:
+    alloc = pd.DataFrame([
+        {"student_id": "STD-1", "mentor_id": "EMP-1"},
+    ])
+    students = pd.DataFrame([
+        {"GF_FirstName": "سارا"},
+    ])
+    mentors = pd.DataFrame([
+        {"mentor_id": "EMP-1", "mentor_name": "پشتیبان"},
+    ])
+    student_ids = pd.Series(["STD-1"], index=students.index, name="student_id")
+
+    merged = prepare_allocation_export_frame(
+        alloc,
+        students,
+        mentors,
+        student_ids=student_ids,
+    )
+
+    assert "student_id" in merged.columns
+    assert merged.loc[0, "student_id"] == "STD-1"
+
+
 def test_prepare_allocation_export_frame_reports_missing_mentor_identifier(tmp_path: Path) -> None:
     alloc = pd.DataFrame([
         {"student_id": "STD-1", "mentor_id": "EMP-1"},
