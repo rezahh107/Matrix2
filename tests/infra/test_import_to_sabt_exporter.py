@@ -150,6 +150,10 @@ def test_write_import_to_sabt_excel_repairs_mismatched_headers(tmp_path: Path) -
     df_alloc = _sample_alloc_frame()
     df_sheet2 = build_sheet2_frame(df_alloc, cfg, today=datetime(2024, 3, 20))
     df_sheet2 = apply_alias_rule(df_sheet2, df_alloc)
+    df_sheet2.attrs["exporter_config"] = {
+        "version": cfg.get("version"),
+        "sheets": {"Sheet2": cfg["sheets"]["Sheet2"]},
+    }
     df_summary = build_summary_frame(
         cfg,
         total_students=2,
@@ -211,6 +215,14 @@ def test_write_import_to_sabt_excel_repairs_mismatched_headers(tmp_path: Path) -
     expected_columns = list(cfg["sheets"]["Sheet2"]["columns"].keys())
     df_result = pd.read_excel(output, sheet_name="Sheet2")
     assert df_result.columns.tolist() == expected_columns
+    logs = df_summary.attrs.get("header_mismatch_logs")
+    assert isinstance(logs, list) and logs
+    assert any(log.sheet_name in {"Summary", "Errors", "Sheet5", "9394"} for log in logs)
+    summary_df = pd.read_excel(output, sheet_name="Summary")
+    assert "هشدار ناسازگاری هدر" in summary_df["شاخص"].tolist()
+    warning_row = summary_df.iloc[-1]
+    assert warning_row["مقدار"] in {"Sheet2", "Summary", "Errors", "Sheet5", "9394"}
+    assert "expected=v" in str(warning_row["هشدار قالب"])
 
 
 def test_prepare_allocation_export_frame_logs_dedupe_changes() -> None:
