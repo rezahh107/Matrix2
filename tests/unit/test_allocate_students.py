@@ -321,6 +321,25 @@ def test_invalid_center_value_adds_alert(_base_pool: pd.DataFrame) -> None:
     assert any(alert.get("code") == "INVALID_CENTER" for alert in alerts)
 
 
+def test_allocate_with_invalid_center_values(_base_pool: pd.DataFrame) -> None:
+    students = pd.concat(
+        [
+            _single_student(student_id="S-1", مرکز_گلستان_صدرا=1),
+            _single_student(student_id="S-2", مرکز_گلستان_صدرا="invalid"),
+            _single_student(student_id="S-3", مرکز_گلستان_صدرا=None),
+            _single_student(student_id="S-4", مرکز_گلستان_صدرا=""),
+        ],
+        ignore_index=True,
+    )
+
+    allocations, _, logs, _ = allocate_batch(students, _base_pool)
+
+    assert isinstance(allocations, pd.DataFrame)
+    invalid_column = logs.get("invalid_center_alerts")
+    assert invalid_column is not None
+    assert any(isinstance(value, list) and value for value in invalid_column)
+
+
 def test_missing_manager_validation_strict() -> None:
     policy = load_policy()
     strict_policy = replace(
@@ -359,6 +378,36 @@ def test_missing_manager_validation_strict() -> None:
             policy=strict_policy,
             center_manager_map={1: ("ناموجود",)},
         )
+
+
+def test_allocate_with_missing_school_column(_base_pool: pd.DataFrame) -> None:
+    policy = load_policy()
+    policy_missing = replace(
+        policy,
+        center_management=replace(
+            policy.center_management,
+            school_student_column="column_that_doesnt_exist",
+        ),
+    )
+    students = _single_student(student_id="S-missing")
+
+    allocations, _, _, _ = allocate_batch(students, _base_pool, policy=policy_missing)
+
+    assert isinstance(allocations, pd.DataFrame)
+
+
+def test_allocate_with_empty_manager_pool(_base_pool: pd.DataFrame) -> None:
+    pool = _base_pool.copy()
+    pool["manager_name"] = pd.NA
+    students = _single_student(student_id="S-empty")
+
+    allocations, _, _, _ = allocate_batch(
+        students,
+        pool,
+        center_manager_map={1: ("مدیر خاص",)},
+    )
+
+    assert isinstance(allocations, pd.DataFrame)
 
 
 def test_canonicalize_pool_frame_reports_join_key_duplicates(

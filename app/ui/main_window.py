@@ -49,10 +49,10 @@ from app.core.counter import (
 from app.core.policy_loader import get_policy, load_policy
 from app.infra import cli
 from app.utils.path_utils import resource_path
-from app.utils.settings_manager import AppPreferences
 
 from .task_runner import ProgressFn, Worker
 from .widgets import FilePicker
+from .app_preferences import AppPreferences
 
 __all__ = ["MainWindow", "run_demo", "FilePicker"]
 
@@ -1038,7 +1038,19 @@ class MainWindow(QMainWindow):
         return overrides
 
     def _create_center_management_section(self) -> QWidget:
-        """ساخت بخش مدیریت مراکز با خواندن Policy و تنظیم دکمه‌ها."""
+        """ایجاد بخش پویای مدیریت مراکز بر اساس پیکربندی Policy.
+
+        این تابع با خواندن تنظیمات مراکز از Policy، یک ویجت پویا ایجاد می‌کند
+        که شامل ComboBoxهای انتخاب مدیر برای هر مرکز (به جز مرکز 0) می‌باشد.
+
+        Returns:
+            QWidget: گروه ویجت شامل تمام کنترل‌های مدیریت مراکز
+
+        Note:
+            - برای هر مرکز تعریف شده در Policy (به جز مرکز 0) یک ردیف ایجاد می‌شود
+            - مقادیر پیش‌فرض از policy.center_management.centers خوانده می‌شوند
+            - در صورت خطا در بارگذاری Policy، پیام خطا نمایش داده می‌شود
+        """
 
         group_box = QGroupBox("مدیریت مراکز")
         group_box.setObjectName("centerManagerGroup")
@@ -1126,7 +1138,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 source_names = []
         if not source_names:
-            source_names = self._default_manager_names()
+            source_names = self._get_default_managers()
         combo.addItems(source_names)
         preferred = self._prefs.get_center_manager(center_id, "")
         if preferred:
@@ -1138,35 +1150,9 @@ class MainWindow(QMainWindow):
 
         if not self._center_manager_combos:
             return
-        default_names = self._default_manager_names()
-        try:
-            names = self._load_manager_names_from_pool()
-        except FileNotFoundError:
-            QMessageBox.warning(
-                self,
-                "فایل استخر",
-                "فایل استخر انتخاب نشده یا وجود ندارد",
-                QMessageBox.Ok,
-            )
-            names = default_names
-        except ValueError as exc:
-            QMessageBox.warning(
-                self,
-                "ستون مدیر یافت نشد",
-                f"{exc}\nبرنامه از مقادیر پیش‌فرض استفاده می‌کند.",
-                QMessageBox.Ok,
-            )
-            names = default_names
-        except Exception as exc:  # pragma: no cover - خطای فایل غیرمنتظره
-            QMessageBox.critical(
-                self,
-                "خطا در بارگذاری مدیران",
-                f"خطا در بارگذاری لیست مدیران:\n{exc}",
-                QMessageBox.Ok,
-            )
-            names = default_names
+        names = self._load_manager_names_from_pool()
         if not names:
-            names = default_names
+            names = self._get_default_managers()
         for center_id, combo in self._center_manager_combos.items():
             self._refresh_manager_combo(center_id, combo, list(names))
         self._append_log("✅ لیست مدیران به‌روزرسانی شد")
@@ -1202,74 +1188,103 @@ class MainWindow(QMainWindow):
                 result[int(center_id)] = [manager]
         return result
 
-    def _default_manager_names(self) -> list[str]:
-        """تولید fallback پیش‌فرض در صورت نبود دادهٔ استخر."""
+    def _get_default_managers(self) -> List[str]:
+        """دریافت لیست پیش‌فرض مدیران از Policy."""
 
-        ordered: list[str] = []
-        seen: set[str] = set()
         try:
             policy = load_policy()
-            centers = policy.center_management.centers
+            managers: List[str] = []
+            seen: set[str] = set()
+            for center in policy.center_management.centers:
+                if center.default_manager:
+                    text = center.default_manager.strip()
+                    if text and text not in seen:
+                        managers.append(text)
+                        seen.add(text)
+            return managers if managers else ["شهدخت کشاورز", "آیناز هوشمند"]
         except Exception:
-            centers = ()
-        for center in centers:
-            text = str(center.default_manager or "").strip()
-            if not text or text in seen:
-                continue
-            ordered.append(text)
-            seen.add(text)
-        if not ordered:
-            ordered = ["شهدخت کشاورز", "آیناز هوشمند"]
-        return ordered
+            return ["شهدخت کشاورز", "آیناز هوشمند"]
 
-    def _load_manager_names_from_pool(self, path: Path | None = None) -> list[str]:
-        """خواندن ستون مدیر از فایل استخر برای ساخت فهرست کشویی."""
+    def _load_manager_names_from_pool(self) -> List[str]:
+        """بارگذاری نام مدیران از فایل استخر با error handling پیشرفته.
 
-        if path is None:
-            path_text = self._picker_pool.text().strip()
-            if not path_text:
-                raise FileNotFoundError("فایل استخر انتخاب نشده یا وجود ندارد")
-            path = Path(path_text)
-        if not path.exists():
-            raise FileNotFoundError(f"فایل استخر یافت نشد: {path}")
-        if path.is_dir():
-            raise ValueError("مسیر انتخاب‌شده یک پوشه است")
-        suffix = path.suffix.lower()
-        manager_candidates = [
-            CANON_EN_TO_FA.get("manager_name", "مدیر"),
-            "manager_name",
-        ]
+        Returns:
+            List[str]: لیست نام‌های منحصربه‌فرد مدیران
+
+        Note:
+            در صورت بروز هرگونه خطا، لیست پیش‌فرض برگردانده می‌شود و خطا ثبت می‌گردد.
+        """
 
         try:
-            if suffix in {".xlsx", ".xls", ".xlsm"}:
-                with pd.ExcelFile(path) as workbook:
-                    sheet = "matrix" if "matrix" in workbook.sheet_names else workbook.sheet_names[0]
-                    try:
-                        frame = workbook.parse(sheet, usecols=manager_candidates)
-                    except ValueError:
-                        frame = workbook.parse(sheet)
-            else:
-                try:
-                    frame = pd.read_csv(path, usecols=manager_candidates)
-                except ValueError:
-                    frame = pd.read_csv(path)
-        except Exception as exc:  # pragma: no cover - خطای فایل غیرمنتظره
-            raise ValueError(str(exc)) from exc
+            path_text = self._picker_pool.text().strip()
+            if not path_text:
+                self._append_log("⚠️ مسیر فایل استخر مشخص نشده است")
+                return self._get_default_managers()
 
-        canonical = canonicalize_headers(frame, header_mode="fa")
-        manager_col = CANON_EN_TO_FA.get("manager_name", "مدیر")
-        if manager_col not in canonical.columns:
-            raise ValueError("ستون 'مدیر' در فایل استخر یافت نشد")
-        names_series = ensure_series(canonical[manager_col]).astype("string").str.strip()
-        ordered: list[str] = []
-        seen: set[str] = set()
-        for name in names_series:
-            text = str(name or "").strip()
-            if not text or text in seen:
-                continue
-            ordered.append(text)
-            seen.add(text)
-        return ordered
+            pool_path = Path(path_text)
+            if not pool_path.exists():
+                self._append_log("❌ فایل استخر یافت نشد")
+                QMessageBox.warning(
+                    self,
+                    "فایل یافت نشد",
+                    f"فایل استخر در مسیر زیر وجود ندارد:\n{pool_path}\n\n"
+                    "لطفاً از تب 'فایل‌ها' فایل استخر را انتخاب کنید.",
+                )
+                return self._get_default_managers()
+
+            if pool_path.is_dir():
+                self._append_log("❌ مسیر انتخاب‌شده یک پوشه است")
+                QMessageBox.warning(
+                    self,
+                    "مسیر نامعتبر",
+                    "مسیر انتخاب‌شده یک پوشه است. لطفاً فایل معتبر انتخاب کنید.",
+                )
+                return self._get_default_managers()
+
+            pool_df = pd.read_excel(pool_path)
+            if "manager_name" not in pool_df.columns:
+                self._append_log("❌ ستون manager_name در فایل استخر وجود ندارد")
+                QMessageBox.warning(
+                    self,
+                    "ستون ضروری یافت نشد",
+                    "ستون 'manager_name' در فایل استخر وجود ندارد.\n\n"
+                    "لطفاً از صحت فایل اطمینان حاصل کنید.",
+                )
+                return self._get_default_managers()
+
+            managers = pool_df["manager_name"].dropna().unique().tolist()
+            if not managers:
+                self._append_log("⚠️ هیچ مدیری در فایل استخر یافت نشد")
+                QMessageBox.information(
+                    self,
+                    "فهرست مدیران خالی است",
+                    "هیچ مدیری در ستون 'manager_name' فایل استخر یافت نشد.\n\n"
+                    "از مقادیر پیش‌فرض استفاده خواهد شد.",
+                )
+                return self._get_default_managers()
+
+            cleaned_managers = [str(m).strip() for m in managers if str(m).strip()]
+            self._append_log(f"✅ {len(cleaned_managers)} مدیر از استخر بارگذاری شد")
+            return cleaned_managers or self._get_default_managers()
+
+        except PermissionError:
+            self._append_log("❌ دسترسی به فایل استخر امکان‌پذیر نیست")
+            QMessageBox.critical(
+                self,
+                "خطای دسترسی",
+                "دسترسی به فایل استخر امکان‌پذیر نیست.\n\n"
+                "لطفاً از باز نبودن فایل در برنامه‌ای دیگر اطمینان حاصل کنید.",
+            )
+            return self._get_default_managers()
+        except Exception as exc:  # pragma: no cover - خطای پیش‌بینی‌نشده
+            self._append_log(f"❌ خطای غیرمنتظره در بارگذاری مدیران: {exc}")
+            QMessageBox.critical(
+                self,
+                "خطای بارگذاری",
+                f"خطای غیرمنتظره در بارگذاری مدیران:\n{exc}\n\n"
+                "از مقادیر پیش‌فرض استفاده خواهد شد.",
+            )
+            return self._get_default_managers()
 
     def _start_demo_task(self) -> None:
         """اجرای پیش‌نمایش پیشرفت برای تست UI."""
