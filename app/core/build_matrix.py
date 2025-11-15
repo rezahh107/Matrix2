@@ -212,6 +212,7 @@ class BuildConfig:
     remaining_capacity_column: str | None = None
     prefer_major_code: bool | None = None
     min_coverage_ratio: float | None = None
+    dedup_removed_ratio_threshold: float | None = None
 
     def __post_init__(self) -> None:
         policy = self.policy
@@ -279,6 +280,20 @@ class BuildConfig:
             if ratio < 0 or ratio > 1:
                 raise ValueError("min_coverage_ratio must be between 0 and 1 (inclusive)")
             self.min_coverage_ratio = ratio
+
+        if self.dedup_removed_ratio_threshold is None:
+            self.dedup_removed_ratio_threshold = float(
+                getattr(policy, "dedup_removed_ratio_threshold", 0.0)
+            )
+        else:
+            ratio = float(self.dedup_removed_ratio_threshold)
+            if ratio > 1:
+                ratio /= 100.0
+            if ratio < 0 or ratio > 1:
+                raise ValueError(
+                    "dedup_removed_ratio_threshold must be between 0 and 1 (inclusive)"
+                )
+            self.dedup_removed_ratio_threshold = ratio
 
 
 def _as_domain_config(cfg: BuildConfig) -> DomainBuildConfig:
@@ -1451,6 +1466,7 @@ def build_matrix(
     pd.DataFrame,
     pd.DataFrame,
     pd.DataFrame,
+    pd.DataFrame,
 ]:
     """ساخت ماتریس اهلیت بر مبنای دیتافریم‌های ورودی.
 
@@ -1467,7 +1483,7 @@ def build_matrix(
         progress: تابع پیشرفت تزریق‌شده از لایهٔ زیرساخت.
 
     Returns:
-        هفت‌تایی دیتافریم شامل ماتریس، گزارش QA و جداول کنترلی.
+        هشت‌تایی دیتافریم شامل ماتریس، گزارش QA، لاگ پیشرفت و جداول کنترلی.
     """
     try:
         insp_df = assert_inspactor_schema(insp_df, cfg.policy)
@@ -1634,6 +1650,13 @@ def build_matrix(
     unseen_group_count = len(unseen_groups_df)
     unmatched_school_count = len(unmatched_schools_df)
 
+    dedup_threshold = float(cfg.dedup_removed_ratio_threshold or 0.0)
+    rows_before_dedupe = len(matrix)
+    rows_after_dedupe = len(matrix)
+    dedup_removed_rows = 0
+    dedup_removed_ratio = 0.0
+    dedup_threshold_exceeded = False
+
     if not matrix.empty:
         matrix = matrix.copy()
         matrix["ردیف پشتیبان"] = ensure_series(matrix["ردیف پشتیبان"]).map(
@@ -1698,9 +1721,26 @@ def build_matrix(
         matrix["جنسیت"] = ensure_series(matrix["جنسیت"]).astype("Int64")
         matrix["دانش آموز فارغ"] = ensure_series(matrix["دانش آموز فارغ"]).astype("Int64")
 
+        rows_before_dedupe = len(matrix)
         dedupe_cols = [col for col in DEDUP_KEY_ORDER if col in matrix.columns]
         if dedupe_cols:
             matrix = matrix.drop_duplicates(subset=dedupe_cols, keep="first")
+        rows_after_dedupe = len(matrix)
+        dedup_removed_rows = max(rows_before_dedupe - rows_after_dedupe, 0)
+        dedup_removed_ratio = (
+            dedup_removed_rows / rows_before_dedupe if rows_before_dedupe else 0.0
+        )
+        dedup_threshold_exceeded = rows_before_dedupe > 0 and (
+            dedup_removed_ratio > dedup_threshold
+        )
+        progress(
+            80,
+            (
+                "dedupe removed="
+                f"{dedup_removed_rows} ratio={dedup_removed_ratio:.1%}"
+                f" threshold={dedup_threshold:.1%}"
+            ),
+        )
         sort_cols = [col for col in SORT_COLUMNS if col in matrix.columns]
         if sort_cols:
             matrix = matrix.sort_values(sort_cols, kind="stable")
@@ -1740,6 +1780,25 @@ def build_matrix(
                 "coverage_ratio": coverage_ratio,
                 "coverage_threshold": min_coverage_ratio,
                 "total_candidates": total_candidates,
+                "dedup_removed_rows": int(dedup_removed_rows),
+                "dedup_removed_ratio": dedup_removed_ratio,
+                "dedup_removed_threshold": dedup_threshold,
+            }
+        ]
+    )
+
+    progress_log = pd.DataFrame(
+        [
+            {
+                "step": "deduplicate_matrix",
+                "pct": 80,
+                "message": "drop_duplicates applied on final matrix",
+                "total_rows_before_dedup": rows_before_dedupe,
+                "total_rows_after_dedup": rows_after_dedupe,
+                "dedup_removed_rows": int(dedup_removed_rows),
+                "dedup_removed_ratio": dedup_removed_ratio,
+                "dedup_removed_threshold": dedup_threshold,
+                "status": "error" if dedup_threshold_exceeded else "ok",
             }
         ]
     )
@@ -1770,6 +1829,33 @@ def build_matrix(
         setattr(error, "is_coverage_threshold_error", True)
         raise error
 
+    if dedup_threshold_exceeded:
+        message = (
+            "حذف رکوردهای تکراری ({removed:.1%}) از آستانهٔ مجاز ({threshold:.1%}) بیشتر است."
+        ).format(
+            removed=dedup_removed_ratio,
+            threshold=dedup_threshold,
+        )
+        LOGGER.error(
+            "dedupe threshold exceeded: removed=%s threshold=%s rows_before=%s rows_after=%s",
+            f"{dedup_removed_ratio:.4f}",
+            f"{dedup_threshold:.4f}",
+            rows_before_dedupe,
+            rows_after_dedupe,
+        )
+        progress(
+            85,
+            (
+                "⚠️ dedupe threshold exceeded: removed="
+                f"{dedup_removed_rows} ratio={dedup_removed_ratio:.1%}"
+            ),
+        )
+        error = ValueError(message)
+        setattr(error, "is_dedup_removed_threshold_error", True)
+        setattr(error, "dedup_removed_rows", int(dedup_removed_rows))
+        setattr(error, "dedup_removed_ratio", float(dedup_removed_ratio))
+        raise error
+
     return (
         matrix,
         validation,
@@ -1778,6 +1864,7 @@ def build_matrix(
         unseen_groups_df,
         invalid_mentors_df,
         duplicate_join_keys_df,
+        progress_log,
     )
 
 

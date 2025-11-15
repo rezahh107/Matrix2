@@ -118,7 +118,7 @@ def test_vectorized_matrix_matches_reference() -> None:
     insp_df, schools_df, crosswalk_df = _create_sample_inputs()
     cfg = BuildConfig()
 
-    matrix, _, _, unmatched_df, unseen_df, invalid_df, _ = build_matrix(
+    matrix, _, _, unmatched_df, unseen_df, invalid_df, _, _ = build_matrix(
         insp_df,
         schools_df,
         crosswalk_df,
@@ -183,7 +183,7 @@ def test_duplicate_mentors_are_filtered_before_row_generation() -> None:
     duplicate_row.loc[:, "نام پشتیبان"] = ["زهرا تکراری"]
     insp_with_duplicate = pd.concat([insp_df, duplicate_row], ignore_index=True)
 
-    matrix, _, _, _, _, invalid_df, _ = build_matrix(
+    matrix, _, _, _, _, invalid_df, _, _ = build_matrix(
         insp_with_duplicate,
         schools_df,
         crosswalk_df,
@@ -216,7 +216,7 @@ def test_validation_captures_unmatched_school_counts() -> None:
     insp_df.loc[0, "نام مدرسه 1"] = "123456"
 
     cfg = BuildConfig(min_coverage_ratio=0.0)
-    _, validation, _, unmatched_df, _, _, _ = build_matrix(
+    _, validation, _, unmatched_df, _, _, _, _ = build_matrix(
         insp_df,
         schools_df,
         crosswalk_df,
@@ -258,7 +258,7 @@ def test_build_matrix_reports_join_key_duplicates() -> None:
     duplicate.loc[:, "کد کارمندی پشتیبان"] = ["EMP-99"]
     insp_df = pd.concat([first_row, duplicate], ignore_index=True)
 
-    _, validation, _, _, _, _, duplicate_join_keys = build_matrix(
+    _, validation, _, _, _, _, duplicate_join_keys, _ = build_matrix(
         insp_df,
         schools_df,
         crosswalk_df,
@@ -268,3 +268,53 @@ def test_build_matrix_reports_join_key_duplicates() -> None:
     assert len(duplicate_join_keys) == 2
     assert duplicate_join_keys["کد کارمندی پشتیبان"].tolist() == ["EMP-1", "EMP-99"]
     assert validation["join_key_duplicate_rows"].iat[0] == 2
+
+
+def test_validation_reports_dedup_metrics() -> None:
+    insp_df, schools_df, crosswalk_df = _create_sample_inputs()
+
+    _, validation, _, _, _, _, _, progress_log = build_matrix(
+        insp_df,
+        schools_df,
+        crosswalk_df,
+        cfg=BuildConfig(),
+    )
+
+    assert "dedup_removed_rows" in validation.columns
+    assert validation["dedup_removed_rows"].iat[0] == 0
+    assert "dedup_removed_rows" in progress_log.columns
+    assert progress_log["dedup_removed_rows"].iat[0] == 0
+
+
+def test_build_matrix_raises_when_dedup_threshold_exceeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    insp_df, schools_df, crosswalk_df = _create_sample_inputs()
+
+    from app.core import build_matrix as build_module
+
+    original_drop_duplicates = pd.DataFrame.drop_duplicates
+
+    def _fake_drop_duplicates(self, subset=None, keep="first", *args, **kwargs):
+        result = original_drop_duplicates(
+            self, subset=subset, keep=keep, *args, **kwargs
+        )
+        subset_cols = subset or []
+        if any(col == "پشتیبان" for col in subset_cols) and len(result) > 1:
+            return result.iloc[:-1].copy()
+        return result
+
+    monkeypatch.setattr(pd.DataFrame, "drop_duplicates", _fake_drop_duplicates)
+    monkeypatch.setattr(
+        build_module, "_validate_finance_invariants", lambda *_, **__: None
+    )
+
+    with pytest.raises(ValueError, match="حذف رکوردهای تکراری") as excinfo:
+        build_matrix(
+            insp_df,
+            schools_df,
+            crosswalk_df,
+            cfg=BuildConfig(dedup_removed_ratio_threshold=0.0),
+        )
+
+    assert getattr(excinfo.value, "is_dedup_removed_threshold_error", False)

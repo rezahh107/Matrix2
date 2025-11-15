@@ -17,6 +17,7 @@
     3
   ],
   "coverage_threshold": 0.95,
+  "dedup_removed_ratio_threshold": 0.05,
   "center_map": {
     "شهدخت کشاورز": 1,
     "آیناز هوشمند": 2,
