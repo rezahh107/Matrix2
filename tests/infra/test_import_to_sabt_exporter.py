@@ -303,9 +303,34 @@ def test_prepare_allocation_export_frame_reports_missing_student_identifier(tmp_
         prepare_allocation_export_frame(alloc, students, mentors)
 
     message = str(excinfo.value)
+    assert "ImportToSabt export failed: missing required student identifier" in message
     assert "sheet 'Students'" in message
     assert "students.xlsx" in message
-    assert "student identifier" in message
+    assert "Please add the column" in message
+
+
+def test_prepare_allocation_export_frame_reports_missing_mentor_identifier(tmp_path: Path) -> None:
+    alloc = pd.DataFrame([
+        {"student_id": "STD-1", "mentor_id": "EMP-1"},
+    ])
+    students = pd.DataFrame([
+        {"student_id": "STD-1", "GF_FirstName": "سارا"},
+    ])
+    mentors = pd.DataFrame([
+        {"mentor_name": "پشتیبان"},
+    ])
+    mentors.attrs["sheet_name"] = "Mentors"
+    mentors.attrs["source_path"] = tmp_path / "mentors.xlsx"
+
+    with pytest.raises(ImportToSabtExportError) as excinfo:
+        prepare_allocation_export_frame(alloc, students, mentors)
+
+    message = str(excinfo.value)
+    assert "ImportToSabt export failed: missing required mentor identifier" in message
+    assert "sheet 'Mentors'" in message
+    assert "mentors.xlsx" in message
+    assert "'mentor_id' یا 'alias'" in message
+    assert "Please add the column" in message
 
 
 def test_prepare_allocation_export_frame_rejects_duplicate_students() -> None:

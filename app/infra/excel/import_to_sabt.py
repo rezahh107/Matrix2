@@ -112,7 +112,7 @@ def _describe_frame_source(frame: pd.DataFrame, *, default_label: str) -> str:
     return default_label
 
 
-def _validate_export_identifier_columns(
+def validate_export_identifiers(
     frame: pd.DataFrame,
     *,
     required_column: str,
@@ -175,13 +175,13 @@ def prepare_allocation_export_frame(
     student_source = _describe_frame_source(students_df, default_label="students_df")
     mentor_source = _describe_frame_source(mentors_df, default_label="mentors_df")
 
-    _validate_export_identifier_columns(
+    validate_export_identifiers(
         students_df,
         required_column="student_id",
         entity_name="student",
         source_label=student_source,
     )
-    _validate_export_identifier_columns(
+    validate_export_identifiers(
         mentors_df,
         required_column="mentor_id",
         entity_name="mentor",
