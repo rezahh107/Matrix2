@@ -88,6 +88,7 @@ __all__ = [
     "StudentRow",
     "MentorRow",
     "AllocationErrorLiteral",
+    "AllocationAlertRecord",
     "AllocationLogRecord",
     "TraceStageLiteral",
     "TraceStageRecord",
@@ -128,6 +129,15 @@ AllocationErrorLiteral = Literal[
 ]
 
 
+class AllocationAlertRecord(TypedDict, total=False):
+    """هشدار ساخت‌یافته برای گزارش مرحلهٔ حذف کاندید."""
+
+    code: str
+    stage: str
+    message: str
+    context: Dict[str, Any]
+
+
 class AllocationLogRecord(TypedDict, total=False):
     """ساختار استاندارد برای ثبت Trace تصمیمات تخصیص."""
 
@@ -151,6 +161,7 @@ class AllocationLogRecord(TypedDict, total=False):
     rule_reason_text: Optional[str]
     fairness_reason_code: Optional[str]
     fairness_reason_text: Optional[str]
+    alerts: List[AllocationAlertRecord]
 
 
 TraceStageLiteral = Literal[

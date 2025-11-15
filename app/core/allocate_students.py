@@ -32,6 +32,7 @@ from .common.reasons import ReasonCode, build_reason
 from .common.rules import Rule, default_stage_rule_map
 from .common.trace import TraceStagePlan, build_allocation_trace, build_trace_plan
 from .common.types import (
+    AllocationAlertRecord,
     AllocationLogRecord,
     JoinKeyValues,
     TraceStageLiteral,
@@ -67,6 +68,27 @@ _MENTOR_ALIAS_KEYS: Tuple[str, ...] = (
     "کدپستی",
     "کد پستی",
 )
+
+_JOIN_STAGE_FAILURE_ORDER: Tuple[TraceStageLiteral, ...] = (
+    "type",
+    "group",
+    "gender",
+    "graduation_status",
+    "center",
+    "finance",
+    "school",
+)
+
+_STAGE_LABEL_FA: Dict[str, str] = {
+    "type": CANON_EN_TO_FA.get("group_code", "type"),
+    "group": CANON_EN_TO_FA.get("exam_group", "group"),
+    "gender": CANON_EN_TO_FA.get("gender", "gender"),
+    "graduation_status": CANON_EN_TO_FA.get("graduation_status", "graduation_status"),
+    "center": CANON_EN_TO_FA.get("center", "center"),
+    "finance": CANON_EN_TO_FA.get("finance", "finance"),
+    "school": CANON_EN_TO_FA.get("school_code", "school"),
+    "capacity_gate": "capacity",
+}
 
 
 def _normalize_digit_code(value: object, *, length: int | None = None, pad: bool = False) -> str:
@@ -378,6 +400,7 @@ def _build_log_from_join_map(
         "rule_reason_text": None,
         "fairness_reason_code": None,
         "fairness_reason_text": None,
+        "alerts": [],
     }
     return log
 
@@ -401,6 +424,105 @@ def _derive_rule_reason(trace: Sequence[TraceStageRecord]) -> tuple[str, str]:
     if code:
         return str(code), str(message or fallback.message_fa)
     return fallback.code, fallback.message_fa
+
+
+def _display_expected_value(value: object) -> str:
+    """تبدیل مقدار مورد انتظار به متن قابل‌گزارش."""
+
+    if value is None:
+        return "نامشخص"
+    try:
+        if pd.isna(value):  # type: ignore[arg-type]
+            return "نامشخص"
+    except Exception:
+        pass
+    text = str(value).strip()
+    return text or "نامشخص"
+
+
+def _format_alert_message(stage: str, record: TraceStageRecord | None) -> str:
+    """ساخت پیام فارسی برای هشدار حذف کاندید در یک مرحله."""
+
+    label = _STAGE_LABEL_FA.get(stage, stage)
+    expected_value = record.get("expected_value") if record else None
+    if stage == "capacity_gate":
+        column = record.get("column") if record else None
+        column_text = str(column or "remaining_capacity")
+        return f"ظرفیت فعال در ستون {column_text} صفر است؛ هیچ منتوری باقی نماند."
+    value_text = _display_expected_value(expected_value)
+    return f"فیلتر {label} با مقدار {value_text} هیچ کاندیدی باقی نگذاشت."
+
+
+def _derive_failure_alerts(
+    stage_candidate_counts: Mapping[str, int],
+    trace: Sequence[TraceStageRecord],
+    *,
+    error_type: str,
+) -> List[AllocationAlertRecord]:
+    """استخراج هشدارهای ساخت‌یافته براساس stage و trace."""
+
+    if not stage_candidate_counts:
+        return []
+    if error_type == "ELIGIBILITY_NO_MATCH":
+        stage_sequence: Tuple[str, ...] = _JOIN_STAGE_FAILURE_ORDER
+    elif error_type == "CAPACITY_FULL":
+        stage_sequence = ("capacity_gate",)
+    else:
+        return []
+    failing_stage = next(
+        (stage for stage in stage_sequence if stage_candidate_counts.get(stage) == 0),
+        None,
+    )
+    if failing_stage is None:
+        return []
+    record = next((item for item in trace if item.get("stage") == failing_stage), None)
+    message = _format_alert_message(failing_stage, record)
+    context: Dict[str, Any] = {}
+    if record is not None:
+        context = {
+            "column": record.get("column"),
+            "expected_value": record.get("expected_value"),
+            "total_before": record.get("total_before"),
+            "total_after": record.get("total_after"),
+        }
+        extras = record.get("extras") or {}
+        if extras:
+            context["extras"] = dict(extras)
+    alert: AllocationAlertRecord = {
+        "code": str(error_type),
+        "stage": str(failing_stage),
+        "message": message,
+        "context": context,
+    }
+    return [alert]
+
+
+def _emit_alert_progress(
+    alerts: Sequence[AllocationAlertRecord], alert_progress: ProgressFn | None
+) -> None:
+    """ارسال پیام هشدار به progress hook برای مشاهدهٔ لحظه‌ای."""
+
+    if not alerts or alert_progress in (None, _noop_progress):
+        return
+    for alert in alerts:
+        stage = str(alert.get("stage") or "join")
+        pct = 30 if stage == "capacity_gate" else 5
+        context = alert.get("context") or {}
+        expected = context.get("expected_value")
+        try:
+            if expected is not None and pd.isna(expected):  # type: ignore[arg-type]
+                expected = None
+        except Exception:
+            pass
+        column = context.get("column")
+        hints: List[str] = []
+        if expected not in (None, ""):
+            hints.append(f"مقدار={expected}")
+        if column:
+            hints.append(f"ستون={column}")
+        hint_text = f" ({' | '.join(hints)})" if hints else ""
+        message = alert.get("message") or "هشدار"
+        alert_progress(pct, f"⚠️ {alert.get('code', 'WARNING')} - {message}{hint_text}")
 
 
 def _build_log_base(
@@ -502,6 +624,7 @@ def allocate_student(
     stage_rules: Mapping[TraceStageLiteral, Rule] | None = None,
     state: Dict[object, Dict[str, int]] | None = None,
     pool_state_view: pd.DataFrame | None = None,
+    alert_progress: ProgressFn | None = None,
 ) -> AllocationResult:
     """تخصیص تک‌دانش‌آموز با حفظ Trace و لاگ کامل."""
     if policy is None:
@@ -511,6 +634,8 @@ def allocate_student(
         trace_plan = build_trace_plan(policy, capacity_column=resolved_capacity_column)
     if stage_rules is None:
         stage_rules = default_stage_rule_map()
+    if alert_progress is None:
+        alert_progress = progress
 
     join_map, missing_columns = _collect_join_key_map(student, policy)
 
@@ -580,6 +705,18 @@ def allocate_student(
             "error_type": error_type,
             "suggested_actions": list(suggested_actions or []),
         }
+        alerts = _derive_failure_alerts(
+            stage_candidate_counts,
+            trace,
+            error_type=error_type,
+        )
+        if alerts:
+            existing = log.get("alerts")
+            if isinstance(existing, list):
+                existing.extend(alerts)
+            else:
+                log["alerts"] = list(alerts)
+            _emit_alert_progress(alerts, alert_progress)
         if extra_updates:
             payload.update(extra_updates)
         log.update(payload)
@@ -874,6 +1011,7 @@ def allocate_batch(
             stage_rules=stage_rules,
             state=mentor_state,
             pool_state_view=pool_internal,
+            alert_progress=progress,
         )
         logs.append(result.log)
         for stage in result.trace:
