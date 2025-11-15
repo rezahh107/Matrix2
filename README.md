@@ -37,33 +37,41 @@ pyinstaller --onefile --windowed --name تخصیص_دانشجو_منتور \
 
 ### پیکربندی مراکز
 
-مراکز در فایل `policy.yaml` تعریف می‌شوند:
+مراکز در فایل JSON اصلی سیستم یعنی `config/policy.json` تعریف می‌شوند (هسته‌ی برنامه هیچ فایل YAML را بارگذاری نمی‌کند؛ اگر نسخه‌ی YAML در اختیار دارید باید آن را به JSON تبدیل کرده و سپس برنامه را اجرا کنید):
 
-```yaml
-center_management:
-  enabled: true
-  default_center_for_invalid: 0
-  strict_manager_validation: false
-  school_student_column: "is_school_student"
-  
-  centers:
-    - id: 1
-      name: "گلستان"
-      default_manager: "شهدخت کشاورز"
-      description: "مرکز گلستان"
-      
-    - id: 2  
-      name: "صدرا"
-      default_manager: "آیناز هوشمند" 
-      description: "مرکز صدرا"
-      
-    - id: 0
-      name: "مرکزی"
-      default_manager: null
-      description: "مرکز اصلی"
-  
-  priority_order: [1, 2, 0]
+```json
+{
+  "center_management": {
+    "enabled": true,
+    "default_center_for_invalid": 0,
+    "strict_manager_validation": false,
+    "school_student_column": "is_school_student",
+    "centers": [
+      {
+        "id": 1,
+        "name": "گلستان",
+        "default_manager": "شهدخت کشاورز",
+        "description": "مرکز گلستان"
+      },
+      {
+        "id": 2,
+        "name": "صدرا",
+        "default_manager": "آیناز هوشمند",
+        "description": "مرکز صدرا"
+      },
+      {
+        "id": 0,
+        "name": "مرکزی",
+        "default_manager": null,
+        "description": "مرکز اصلی"
+      }
+    ],
+    "priority_order": [1, 2, 0]
+  }
+}
 ```
+
+> 📎 **یادآوری:** تابع `load_policy()` در `app/core/policy_loader.py` فقط `config/policy.json` را می‌خواند. هر تغییری که در قالب‌های دیگر اعمال شود (مثل `policy.yaml`) در اجرا اثر ندارد مگر این‌که قبل از اجرا به JSON مرجع منتقل شود.
 
 ### استفاده از طریق UI
 
@@ -76,14 +84,25 @@ center_management:
 ### استفاده از طریق CLI
 
 ```bash
+# مسیرهای اجباری (دانش‌آموزان، استخر منتورها و خروجی نهایی)
+STUDENTS=data/StudentReport.xlsx
+POOL=data/MentorPool.xlsx
+OUTPUT=out/allocation.xlsx
+
 # تنظیم مدیران برای مراکز مختلف
 python -m app.cli allocate \
+  --students "$STUDENTS" \
+  --pool "$POOL" \
+  --output "$OUTPUT" \
   --center-manager 1="شهدخت کشاورز" \
   --center-manager 2="آیناز هوشمند" \
   --center-priority 1,2,0
 
-# فعال‌سازی validation سخت‌گیرانه
+# فعال‌سازی validation سخت‌گیرانه (همراه با ورودی‌های اجباری)
 python -m app.cli allocate \
+  --students "$STUDENTS" \
+  --pool "$POOL" \
+  --output "$OUTPUT" \
   --center-manager 1="مدیر گلستان" \
   --strict-manager-validation
 ```
