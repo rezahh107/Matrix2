@@ -188,3 +188,47 @@ def test_bilingual_headers_reduce_false_no_match(
         trace1.sort_index(axis=1).sort_index(),
         trace2.sort_index(axis=1).sort_index(),
     )
+
+
+def test_empty_pool_emits_type_alert(
+    _policy: PolicyConfig,
+    _students_alias_join: pd.DataFrame,
+    _candidate_pool_alias: pd.DataFrame,
+) -> None:
+    students = _students_alias_join.iloc[[0]].copy()
+    empty_pool = _candidate_pool_alias.iloc[0:0].copy()
+
+    _, _, logs, _ = allocate_batch(students, empty_pool, policy=_policy)
+
+    record = logs.iloc[0]
+    assert record["error_type"] == "ELIGIBILITY_NO_MATCH"
+    alerts = record["alerts"]
+    assert isinstance(alerts, list) and alerts
+    first_alert = alerts[0]
+    assert first_alert["stage"] == "type"
+    assert first_alert["code"] == "ELIGIBILITY_NO_MATCH"
+    context = first_alert.get("context") or {}
+    expected_value = context.get("expected_value")
+    assert str(expected_value).strip() == str(students.iloc[0]["کدرشته"])
+
+
+def test_zero_capacity_emits_capacity_alert(
+    _policy: PolicyConfig,
+    _students_alias_join: pd.DataFrame,
+    _candidate_pool_alias: pd.DataFrame,
+) -> None:
+    students = _students_alias_join.iloc[[0]].copy()
+    zero_capacity_pool = _candidate_pool_alias.copy()
+    zero_capacity_pool["remaining_capacity"] = 0
+
+    _, _, logs, _ = allocate_batch(students, zero_capacity_pool, policy=_policy)
+
+    record = logs.iloc[0]
+    assert record["error_type"] == "CAPACITY_FULL"
+    alerts = record["alerts"]
+    assert isinstance(alerts, list) and alerts
+    first_alert = alerts[0]
+    assert first_alert["stage"] == "capacity_gate"
+    assert first_alert["code"] == "CAPACITY_FULL"
+    context = first_alert.get("context") or {}
+    assert context.get("column")
