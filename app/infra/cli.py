@@ -486,6 +486,7 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         unmatched_schools,
         unseen_groups,
         invalid_mentors,
+        join_key_duplicates,
     ) = build_matrix(
         insp_df,
         schools_df,
@@ -514,6 +515,7 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         "unmatched_schools": unmatched_schools,
         "unseen_groups": unseen_groups,
         "invalid_mentors": invalid_mentors,
+        "join_key_duplicates": join_key_duplicates,
         "meta": pd.json_normalize([meta]),
     }
     header_internal = policy.excel.header_mode_internal
