@@ -197,6 +197,8 @@ class AllocationLogRecord(TypedDict, total=False):
     fairness_reason_code: Optional[str]
     fairness_reason_text: Optional[str]
     alerts: List[AllocationAlertRecord]
+    alias_autofill: int
+    alias_unmatched: int
 
 
 TraceStageLiteral = Literal[

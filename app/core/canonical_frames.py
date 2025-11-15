@@ -20,6 +20,7 @@ from .common.columns import (
     enforce_join_key_types,
     resolve_aliases,
 )
+from .common.ids import build_mentor_alias_map, extract_alias_code_series
 from .common.normalization import normalize_fa
 from .policy_loader import PolicyConfig
 
@@ -52,6 +53,9 @@ class PoolCanonicalizationStats:
 
     virtual_filtered: int = 0
     mentor_id_autofill: int = 0
+    alias_autofill: int = 0
+    alias_unmatched: int = 0
+    alias_pairs: int = 0
     capacity_coerced: int = 0
     columns_renamed: int = 0
     default_columns_injected: int = 0
@@ -63,6 +67,9 @@ class PoolCanonicalizationStats:
         return {
             "virtual_filtered": self.virtual_filtered,
             "mentor_id_autofill": self.mentor_id_autofill,
+            "alias_autofill": self.alias_autofill,
+            "alias_unmatched": self.alias_unmatched,
+            "alias_pairs": self.alias_pairs,
             "capacity_coerced": self.capacity_coerced,
             "columns_renamed": self.columns_renamed,
             "default_columns_injected": self.default_columns_injected,
@@ -486,6 +493,17 @@ def canonicalize_pool_frame(
         )
     pool[mentor_column] = mentor_normalized
 
+    alias_series = pd.Series([""] * len(pool), dtype="string", index=pool.index)
+    alias_map: dict[str, str] = {}
+    if source == "inspactor":
+        alias_series = extract_alias_code_series(pool)
+        alias_map, alias_stats = build_mentor_alias_map(
+            pool, mentor_column=mentor_column, alias_series=alias_series
+        )
+        stats.alias_pairs = alias_stats.unique_aliases
+    else:
+        stats.alias_pairs = 0
+
     capacity_alias = policy.columns.remaining_capacity
     if capacity_alias in pool.columns and "remaining_capacity" not in pool.columns:
         pool["remaining_capacity"] = ensure_series(pool[capacity_alias])
@@ -508,7 +526,26 @@ def canonicalize_pool_frame(
     mentor_id_series = mentor_id_series.astype("string").str.strip()
     missing_mask = mentor_id_series.eq("") | mentor_id_series.isna()
     if missing_mask.any():
-        mentor_id_series = mentor_id_series.mask(missing_mask, mentor_normalized)
+        alias_target_mask = missing_mask & mentor_normalized.eq("")
+        if source == "inspactor" and alias_target_mask.any():
+            alias_candidates = alias_series.astype("string").fillna("")
+            alias_missing = alias_candidates[alias_target_mask]
+            alias_non_empty = alias_missing[alias_missing.ne("")]
+            alias_unmatched_count = 0
+            matched_alias = pd.Series(dtype="string")
+            if not alias_non_empty.empty:
+                alias_lookup = alias_non_empty.map(alias_map.get).fillna("")
+                alias_lookup = alias_lookup.astype("string").str.strip()
+                matched_alias = alias_lookup[alias_lookup.ne("")]
+                if not matched_alias.empty:
+                    mentor_id_series.loc[matched_alias.index] = matched_alias
+                    pool.loc[matched_alias.index, mentor_column] = matched_alias
+                    stats.alias_autofill += int(len(matched_alias))
+                alias_unmatched_count = int(len(alias_non_empty) - len(matched_alias))
+            if alias_unmatched_count > 0:
+                stats.alias_unmatched += alias_unmatched_count
+        post_alias_missing = mentor_id_series.eq("") | mentor_id_series.isna()
+        mentor_id_series = mentor_id_series.mask(post_alias_missing, mentor_normalized)
         stats.mentor_id_autofill += int(missing_mask.sum())
     pool["mentor_id"] = mentor_id_series
 

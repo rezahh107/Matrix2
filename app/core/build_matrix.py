@@ -1608,6 +1608,9 @@ def build_matrix(
         require_join_keys=False,
         preserve_columns=school_name_columns,
     )
+    pool_stats = insp_df.attrs.get("pool_canonicalization_stats")
+    alias_autofill = int(getattr(pool_stats, "alias_autofill", 0) or 0) if pool_stats else 0
+    alias_unmatched = int(getattr(pool_stats, "alias_unmatched", 0) or 0) if pool_stats else 0
     duplicate_join_keys_df = insp_df.attrs.get(POOL_JOIN_KEY_DUPLICATES_ATTR)
     if duplicate_join_keys_df is None:
         columns = list(cfg.policy.join_keys) + [COL_MENTOR_ID, "duplicate_group_size"]
@@ -1886,6 +1889,8 @@ def build_matrix(
         "dedup_removed_rows": int(dedup_removed_rows),
         "dedup_removed_ratio": dedup_removed_ratio,
         "dedup_removed_threshold": dedup_threshold,
+        "alias_autofill": alias_autofill,
+        "alias_unmatched": alias_unmatched,
         "warning_type": pd.NA,
         "warning_message": pd.NA,
         "warning_payload": pd.NA,

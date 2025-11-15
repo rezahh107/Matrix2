@@ -12,7 +12,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.common.columns import canonicalize_headers
 from app.core.common.domain import BuildConfig, MentorType, compute_alias
-from app.core.common.ids import build_mentor_id_map, ensure_ranking_columns, inject_mentor_id
+from app.core.common.ids import (
+    build_mentor_alias_map,
+    build_mentor_id_map,
+    ensure_ranking_columns,
+    extract_alias_code_series,
+    inject_mentor_id,
+)
 from app.core.common.ranking import (
     apply_ranking_policy,
     build_mentor_state,
@@ -100,6 +106,24 @@ def test_build_mentor_id_map_normalizes_inputs() -> None:
     assert mapping["زهرا"] == "001"
     assert mapping["علی"] == "EMP-010"
     assert len(mapping) == 2
+
+
+def test_build_mentor_alias_map_collects_stats() -> None:
+    pool = pd.DataFrame(
+        {
+            "alias": ["0012345678", "009876543", None],
+            "کد کارمندی پشتیبان": ["EMP-001", "", "EMP-777"],
+        }
+    )
+
+    alias_series = extract_alias_code_series(pool)
+    mapping, stats = build_mentor_alias_map(pool, alias_series=alias_series)
+
+    assert mapping["12345678"] == "EMP-001"
+    assert stats.total_alias_rows == 2
+    assert stats.alias_rows_with_mentor == 1
+    assert stats.alias_rows_without_mentor == 1
+    assert stats.unique_aliases == 1
 
 
 def test_inject_mentor_id_preserves_original_dataframe() -> None:
