@@ -117,18 +117,40 @@ class CandidateStageRule:
         )
 
 
+_COMMON_DETAIL_KEYS = (
+    "join_value_raw",
+    "join_value_norm",
+    "expected_op",
+    "expected_threshold",
+)
+
+
 _DEFAULT_RULE_CODES: Mapping[TraceStageLiteral, tuple[ReasonCode, tuple[str, ...]]] = {
-    "type": (ReasonCode.TYPE_MISMATCH, ()),
-    "group": (ReasonCode.GROUP_MISMATCH, ()),
-    "gender": (ReasonCode.GENDER_MISMATCH, ()),
-    "graduation_status": (ReasonCode.GRADUATION_STATUS_MISMATCH, ()),
-    "center": (ReasonCode.CENTER_MISMATCH, ()),
-    "finance": (ReasonCode.FINANCE_MISMATCH, ()),
+    "type": (ReasonCode.TYPE_MISMATCH, _COMMON_DETAIL_KEYS),
+    "group": (ReasonCode.GROUP_MISMATCH, _COMMON_DETAIL_KEYS),
+    "gender": (ReasonCode.GENDER_MISMATCH, _COMMON_DETAIL_KEYS),
+    "graduation_status": (ReasonCode.GRADUATION_STATUS_MISMATCH, _COMMON_DETAIL_KEYS),
+    "center": (ReasonCode.CENTER_MISMATCH, _COMMON_DETAIL_KEYS),
+    "finance": (ReasonCode.FINANCE_MISMATCH, _COMMON_DETAIL_KEYS),
     "school": (
         ReasonCode.SCHOOL_STATUS_MISMATCH,
-        ("school_code_raw", "school_code_norm", "school_status_resolved"),
+        _COMMON_DETAIL_KEYS
+        + (
+            "school_code_raw",
+            "school_code_norm",
+            "school_status_resolved",
+            "school_filter_applied",
+        ),
     ),
-    "capacity_gate": (ReasonCode.CAPACITY_FULL, ()),
+    "capacity_gate": (
+        ReasonCode.CAPACITY_FULL,
+        (
+            "expected_op",
+            "expected_threshold",
+            "capacity_before",
+            "capacity_after",
+        ),
+    ),
 }
 
 

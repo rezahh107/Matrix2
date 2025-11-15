@@ -258,20 +258,27 @@ def build_allocation_trace(
     for plan in non_capacity_plan:
         before = int(current.shape[0])
         expected_value: object
-        expected_op: str | None = None
+        expected_op: str | None = "="
         expected_threshold: object | None = None
-        extras: Mapping[str, Any] | None = None
+        stage_extras: dict[str, Any] = {}
         if plan.stage == "school":
-            filtered, extras, norm_value = _school_stage_filter(
+            filtered, school_extras, norm_value = _school_stage_filter(
                 current, plan.column, student, policy
             )
             expected_value = norm_value
             expected_op = ">"
             expected_threshold = 0
+            stage_extras.update(school_extras)
+            stage_extras.setdefault("join_value_raw", school_extras.get("school_code_raw"))
+            stage_extras.setdefault("join_value_norm", school_extras.get("school_code_norm"))
         else:
             value = _student_value(student, plan.column)
             filtered = _filter_stage(current, plan.column, value)
             expected_value = value
+            stage_extras["join_value_raw"] = value
+            stage_extras["join_value_norm"] = _coerce_optional_int(value)
+        stage_extras["expected_op"] = expected_op
+        stage_extras["expected_threshold"] = expected_threshold
         trace.append(
             TraceStageRecord(
                 stage=plan.stage,
@@ -282,7 +289,7 @@ def build_allocation_trace(
                 matched=bool(filtered.shape[0]),
                 expected_op=expected_op,
                 expected_threshold=expected_threshold,
-                extras=extras,
+                extras=stage_extras,
             )
         )
         _apply_stage_rule(trace[-1], resolved_rules, student)
@@ -290,6 +297,14 @@ def build_allocation_trace(
 
     before_capacity = int(current.shape[0])
     capacity_filtered = current.loc[current[capacity_stage.column] > 0]
+    capacity_extras: dict[str, Any] = {
+        "expected_op": ">",
+        "expected_threshold": 0,
+        "capacity_before": before_capacity,
+        "capacity_after": int(capacity_filtered.shape[0]),
+        "join_value_raw": None,
+        "join_value_norm": None,
+    }
     trace.append(
         TraceStageRecord(
             stage="capacity_gate",
@@ -300,7 +315,7 @@ def build_allocation_trace(
             matched=bool(capacity_filtered.shape[0]),
             expected_op=">",
             expected_threshold=0,
-            extras=None,
+            extras=capacity_extras,
         )
     )
     _apply_stage_rule(trace[-1], resolved_rules, student)

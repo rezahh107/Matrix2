@@ -38,6 +38,13 @@ def test_selection_reason_sheet_enriches_reason_text() -> None:
             "student_id": ["S-1"],
             "rule_reason_code": ["GENDER_MISMATCH"],
             "rule_reason_text": [""],
+            "rule_reason_details": [
+                {
+                    "stage": "gender",
+                    "join_value_norm": policy.gender_codes.female.value,
+                    "expected_op": "=",
+                }
+            ],
             "fairness_reason_code": ["FAIRNESS_ORDER"],
             "fairness_reason_text": ["[FAIRNESS_ORDER] بازچینش عدالت"],
         }
@@ -52,6 +59,8 @@ def test_selection_reason_sheet_enriches_reason_text() -> None:
     )
     reason_text = reasons.iloc[0]["دلیل انتخاب پشتیبان"]
     assert "دلیل Policy" in reason_text
+    assert "جزئیات Policy" in reason_text
+    assert "join_value_norm" in reason_text
     assert "عدالت" in reason_text
     assert "[GENDER_MISMATCH]" in reason_text
     sheet_name, sanitized = write_selection_reasons_sheet(reasons, writer=None, policy=policy)
