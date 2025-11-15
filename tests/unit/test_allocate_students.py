@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.allocate_students import (
     _normalize_pool,
+    _separate_school_students,
     allocate_batch,
     allocate_student,
     build_selection_reason_rows,
@@ -990,6 +991,95 @@ def test_policy_required_fields_enforced_from_config(
     assert exam_group_col in normalized.columns
     assert normalized[exam_group_col].isna().all()
     allocate_batch(missing_group, _base_pool, policy=policy)
+
+
+def test_separate_school_students_handles_missing_indicator_column() -> None:
+    policy = load_policy()
+    students = _single_student()
+
+    school, center = _separate_school_students(students, policy)
+
+    assert school.empty
+    pd.testing.assert_frame_equal(
+        center.reset_index(drop=True), students.reset_index(drop=True)
+    )
+
+
+def test_school_students_have_priority_without_center_manager_filter() -> None:
+    policy = load_policy()
+    students = pd.DataFrame(
+        [
+            {
+                "student_id": "STD-SCHOOL",
+                "کدرشته": 1201,
+                "گروه_آزمایشی": "تجربی",
+                "جنسیت": 1,
+                "دانش_آموز_فارغ": 0,
+                "مرکز_گلستان_صدرا": 1,
+                "مالی_حکمت_بنیاد": 0,
+                "کد_مدرسه": 1111,
+                "is_school_student": True,
+            },
+            {
+                "student_id": "STD-CENTER",
+                "کدرشته": 1201,
+                "گروه_آزمایشی": "تجربی",
+                "جنسیت": 1,
+                "دانش_آموز_فارغ": 0,
+                "مرکز_گلستان_صدرا": 1,
+                "مالی_حکمت_بنیاد": 0,
+                "کد_مدرسه": 1111,
+                "is_school_student": False,
+            },
+        ]
+    )
+    pool = pd.DataFrame(
+        [
+            {
+                "پشتیبان": "منتور آلفا",
+                "کد کارمندی پشتیبان": "EMP-001",
+                "کدرشته": 1201,
+                "گروه آزمایشی": "تجربی",
+                "جنسیت": 1,
+                "دانش آموز فارغ": 0,
+                "مرکز گلستان صدرا": 1,
+                "مالی حکمت بنیاد": 0,
+                "کد مدرسه": 1111,
+                "remaining_capacity": 1,
+                "allocations_new": 0,
+                "occupancy_ratio": 0.0,
+                "مدیر": "مدیر آلفا",
+            },
+            {
+                "پشتیبان": "منتور بتا",
+                "کد کارمندی پشتیبان": "EMP-002",
+                "کدرشته": 1201,
+                "گروه آزمایشی": "تجربی",
+                "جنسیت": 1,
+                "دانش آموز فارغ": 0,
+                "مرکز گلستان صدرا": 1,
+                "مالی حکمت بنیاد": 0,
+                "کد مدرسه": 1111,
+                "remaining_capacity": 1,
+                "allocations_new": 0,
+                "occupancy_ratio": 0.5,
+                "مدیر": "مدیر بتا",
+            },
+        ]
+    )
+
+    allocations, _, _, _ = allocate_batch(
+        students,
+        pool,
+        policy=policy,
+        center_manager_map={1: ["مدیر بتا"]},
+    )
+
+    assert allocations.shape[0] == 2
+    school_row = allocations.loc[allocations["student_id"] == "STD-SCHOOL"].iloc[0]
+    center_row = allocations.loc[allocations["student_id"] == "STD-CENTER"].iloc[0]
+    assert school_row["mentor_id"] == "EMP-001"
+    assert center_row["mentor_id"] == "EMP-002"
 
 
 @pytest.mark.skipif(importlib.util.find_spec("openpyxl") is None, reason="openpyxl لازم است")

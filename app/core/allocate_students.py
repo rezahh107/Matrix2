@@ -665,22 +665,23 @@ def _separate_school_students(
     Returns:
         tuple: شامل دو DataFrame:
             - school_students: دانش‌آموزان مدرسه‌ای
-            - center_students: دانش‌آموزان مرکزی
-
-    Raises:
-        KeyError: اگر ستون تشخیص دانش‌آموز مدرسه‌ای در DataFrame وجود نداشته باشد
+            - center_students: دانش‌آموزان مرکزی (یا تمام دانش‌آموزان در صورت نبود ستون)
 
     Note:
         ستون تشخیص دانش‌آموز مدرسه‌ای از policy.center_management.school_student_column
         خوانده می‌شود. مقدار True/1 در این ستون نشان‌دهنده دانش‌آموز مدرسه‌ای است.
     """
 
-    column_candidates = [policy.center_management.school_student_column]
+    column_candidates: list[str] = []
+    school_column = policy.center_management.school_student_column
+    if school_column:
+        column_candidates.append(school_column)
     if "school_status_resolved" not in column_candidates:
         column_candidates.append("school_status_resolved")
     column = next((col for col in column_candidates if col in students.columns), None)
     if column is None:
-        raise KeyError("students dataframe missing school student indicator column")
+        empty = students.iloc[0:0].copy()
+        return empty, students.copy()
     series = students[column]
     if pd_types.is_bool_dtype(series):
         school_mask = series.fillna(False).astype(bool)
@@ -1451,18 +1452,7 @@ def allocate_batch(
     sorted_students = _sort_students_by_center_priority(
         students_norm, policy, final_priority
     )
-    try:
-        school_students, center_students = _separate_school_students(
-            sorted_students, policy
-        )
-    except KeyError as exc:
-        warnings.warn(
-            f"ستون تشخیص دانش‌آموز مدرسه‌ای یافت نشد: {exc}",
-            UserWarning,
-            stacklevel=2,
-        )
-        school_students = sorted_students.iloc[0:0].copy()
-        center_students = sorted_students.copy()
+    school_students, center_students = _separate_school_students(sorted_students, policy)
     students_norm = pd.concat([school_students, center_students], axis=0)
     pool_stats = pool_norm.attrs.get("pool_canonicalization_stats")
     alias_autofill = int(getattr(pool_stats, "alias_autofill", 0) or 0) if pool_stats else 0
@@ -1534,89 +1524,108 @@ def allocate_batch(
     trace_plan = build_trace_plan(policy, capacity_column=resolved_capacity_column)
 
     progress(0, "start")
-    for idx, (_, student_row) in enumerate(students_norm.iterrows(), start=1):
-        student_dict = student_row.to_dict()
-        progress(int(idx * 100 / total), f"allocating {idx}/{total}")
-        student_center, center_is_valid = _extract_and_validate_center(
-            student_dict, policy
-        )
-        invalid_center_payload: Dict[str, object] | None = None
-        if not center_is_valid:
-            invalid_center_payload = {
-                "student_id": student_dict.get("student_id", idx),
-                "original_center": student_dict.get(center_column_name),
-                "center_column": center_column_name,
-            }
-        pool_view = pool_with_ids
-        if student_center is not None:
-            center_key = int(student_center)
-            if center_key in center_manager_index and len(center_manager_index[center_key]) > 0:
-                pool_view = pool_with_ids.loc[center_manager_index[center_key]]
+    processed = 0
 
-        result = allocate_student(
-            student_dict,
-            pool_view,
-            policy=policy,
-            progress=_noop_progress,
-            capacity_column=resolved_capacity_column,
-            trace_plan=trace_plan,
-            stage_rules=stage_rules,
-            state=mentor_state,
-            pool_state_view=pool_internal,
-            alert_progress=progress,
-        )
-        if invalid_center_payload is not None:
-            _append_invalid_center_alert(result.log, invalid_center_payload, student_center)
-        logs.append(result.log)
-        for stage in result.trace:
-            trace_rows.append({"student_id": result.log["student_id"], **stage})
-
-        if result.mentor_row is not None:
-            chosen_index = result.mentor_row.name
-            mentor_identifier = _resolve_mentor_identifier(result, policy=policy)
-            resolved_identifier, state_entry = _resolve_mentor_state_entry(
-                mentor_state, mentor_identifier
+    def _allocate_group(
+        group: pd.DataFrame,
+        *,
+        enforce_center_manager: bool,
+    ) -> None:
+        nonlocal processed
+        if group.empty:
+            return
+        for _, student_row in group.iterrows():
+            processed += 1
+            student_dict = student_row.to_dict()
+            progress(int(processed * 100 / total), f"allocating {processed}/{total}")
+            student_center, center_is_valid = _extract_and_validate_center(
+                student_dict, policy
             )
-            if state_entry is None:
-                raise KeyError(
-                    f"Mentor '{mentor_identifier}' missing from state after allocation"
-                )
-            pool_internal.loc[chosen_index, capacity_internal] = state_entry["remaining"]
-            if (
-                capacity_internal != "remaining_capacity"
-                and "remaining_capacity" in pool_internal.columns
-            ):
-                pool_internal.loc[chosen_index, "remaining_capacity"] = state_entry["remaining"]
-            pool_internal.loc[chosen_index, "allocations_new"] = state_entry["alloc_new"]
-            initial_value = max(int(state_entry.get("initial", 0)), 1)
-            pool_internal.loc[chosen_index, "occupancy_ratio"] = (
-                (int(state_entry.get("initial", 0)) - state_entry["remaining"]) / initial_value
-            )
-            pool_with_ids.loc[chosen_index, resolved_capacity_column] = state_entry["remaining"]
-            if (
-                resolved_capacity_column != "remaining_capacity"
-                and "remaining_capacity" in pool_with_ids.columns
-            ):
-                pool_with_ids.loc[chosen_index, "remaining_capacity"] = state_entry["remaining"]
-            pool_with_ids.loc[chosen_index, "allocations_new"] = state_entry["alloc_new"]
-            pool_with_ids.loc[chosen_index, "occupancy_ratio"] = pool_internal.loc[
-                chosen_index, "occupancy_ratio"
-            ]
-
-            mentor_id_display = result.log.get("mentor_id")
-            if mentor_id_display is None:
-                mentor_id_display = resolved_identifier
-            student_national_code = _extract_student_national_code(student_dict)
-            mentor_alias_code = _extract_mentor_alias_code(result.mentor_row)
-            allocations.append(
-                {
-                    "student_id": student_dict.get("student_id", ""),
-                    "student_national_code": student_national_code,
-                    "mentor": result.mentor_row.get("پشتیبان", ""),
-                    "mentor_id": "" if mentor_id_display is None else str(mentor_id_display),
-                    "mentor_alias_code": mentor_alias_code,
+            invalid_center_payload: Dict[str, object] | None = None
+            if not center_is_valid:
+                invalid_center_payload = {
+                    "student_id": student_dict.get("student_id", processed),
+                    "original_center": student_dict.get(center_column_name),
+                    "center_column": center_column_name,
                 }
+            pool_view = pool_with_ids
+            if enforce_center_manager and student_center is not None:
+                center_key = int(student_center)
+                manager_index = center_manager_index.get(center_key)
+                if manager_index is not None and len(manager_index) > 0:
+                    pool_view = pool_with_ids.loc[manager_index]
+
+            result = allocate_student(
+                student_dict,
+                pool_view,
+                policy=policy,
+                progress=_noop_progress,
+                capacity_column=resolved_capacity_column,
+                trace_plan=trace_plan,
+                stage_rules=stage_rules,
+                state=mentor_state,
+                pool_state_view=pool_internal,
+                alert_progress=progress,
             )
+            if invalid_center_payload is not None:
+                _append_invalid_center_alert(
+                    result.log, invalid_center_payload, student_center
+                )
+            logs.append(result.log)
+            for stage in result.trace:
+                trace_rows.append({"student_id": result.log["student_id"], **stage})
+
+            if result.mentor_row is not None:
+                chosen_index = result.mentor_row.name
+                mentor_identifier = _resolve_mentor_identifier(result, policy=policy)
+                resolved_identifier, state_entry = _resolve_mentor_state_entry(
+                    mentor_state, mentor_identifier
+                )
+                if state_entry is None:
+                    raise KeyError(
+                        f"Mentor '{mentor_identifier}' missing from state after allocation"
+                    )
+                pool_internal.loc[chosen_index, capacity_internal] = state_entry["remaining"]
+                if (
+                    capacity_internal != "remaining_capacity"
+                    and "remaining_capacity" in pool_internal.columns
+                ):
+                    pool_internal.loc[chosen_index, "remaining_capacity"] = state_entry["remaining"]
+                pool_internal.loc[chosen_index, "allocations_new"] = state_entry["alloc_new"]
+                initial_value = max(int(state_entry.get("initial", 0)), 1)
+                pool_internal.loc[chosen_index, "occupancy_ratio"] = (
+                    (int(state_entry.get("initial", 0)) - state_entry["remaining"]) / initial_value
+                )
+                pool_with_ids.loc[chosen_index, resolved_capacity_column] = state_entry["remaining"]
+                if (
+                    resolved_capacity_column != "remaining_capacity"
+                    and "remaining_capacity" in pool_with_ids.columns
+                ):
+                    pool_with_ids.loc[chosen_index, "remaining_capacity"] = state_entry["remaining"]
+                pool_with_ids.loc[chosen_index, "allocations_new"] = state_entry["alloc_new"]
+                pool_with_ids.loc[chosen_index, "occupancy_ratio"] = pool_internal.loc[
+                    chosen_index, "occupancy_ratio"
+                ]
+
+                mentor_id_display = result.log.get("mentor_id")
+                if mentor_id_display is None:
+                    mentor_id_display = resolved_identifier
+                student_national_code = _extract_student_national_code(student_dict)
+                mentor_alias_code = _extract_mentor_alias_code(result.mentor_row)
+                allocations.append(
+                    {
+                        "student_id": student_dict.get("student_id", ""),
+                        "student_national_code": student_national_code,
+                        "mentor": result.mentor_row.get("پشتیبان", ""),
+                        "mentor_id": ""
+                        if mentor_id_display is None
+                        else str(mentor_id_display),
+                        "mentor_alias_code": mentor_alias_code,
+                    }
+                )
+
+    _allocate_group(school_students, enforce_center_manager=False)
+    _allocate_group(center_students, enforce_center_manager=True)
 
     for log in logs:
         log["alias_autofill"] = alias_autofill
