@@ -22,6 +22,7 @@ from app.core.canonical_frames import (
     canonicalize_allocation_frames,
     canonicalize_pool_frame,
     canonicalize_students_frame,
+    sanitize_pool_for_allocation,
 )
 from app.core.common import columns
 from app.core.common.types import JoinKeyValues
@@ -166,6 +167,33 @@ def test_canonicalize_pool_frame_handles_duplicate_mentor_columns(
 
     assert normalized["mentor_id"].tolist() == ["EMP-001", "EMP-002"]
     assert normalized["کد کارمندی پشتیبان"].tolist() == ["EMP-001", "EMP-002"]
+
+
+def test_sanitize_pool_records_virtual_and_capacity_stats() -> None:
+    policy = load_policy()
+    raw = pd.DataFrame(
+        {
+            "mentor_name": ["فراگیر آزمون", "علی"],
+            "alias": [7505, 102],
+            "remaining_capacity": ["5", "X"],
+        }
+    )
+
+    sanitized = sanitize_pool_for_allocation(raw, policy=policy)
+    stats = sanitized.attrs["pool_canonicalization_stats"]
+
+    assert stats.virtual_filtered == 1
+    assert stats.capacity_coerced == 1
+
+
+def test_canonicalize_pool_frame_records_mentor_id_autofill(_base_pool: pd.DataFrame) -> None:
+    policy = load_policy()
+    pool = _base_pool.drop(columns=["mentor_id"], errors="ignore")
+
+    normalized = canonicalize_pool_frame(pool, policy=policy, sanitize_pool=False)
+    stats = normalized.attrs["pool_canonicalization_stats"]
+
+    assert stats.mentor_id_autofill == len(pool)
 
 
 def test_allocate_student_dict_missing_school_field_skips_filter(
