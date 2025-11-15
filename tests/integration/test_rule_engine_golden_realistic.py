@@ -228,16 +228,76 @@ def test_realistic_high_no_match_scenario_golden() -> None:
 
     expected_allocations = pd.DataFrame(
         [
-            {"student_id": "STU-001", "mentor": "Mentor-A", "mentor_id": "EMP-001"},
-            {"student_id": "STU-002", "mentor": "Mentor-A", "mentor_id": "EMP-001"},
-            {"student_id": "STU-003", "mentor": "Mentor-A", "mentor_id": "EMP-001"},
-            {"student_id": "STU-007", "mentor": "Mentor-B", "mentor_id": "EMP-002"},
-            {"student_id": "STU-008", "mentor": "Mentor-B", "mentor_id": "EMP-002"},
-            {"student_id": "STU-011", "mentor": "Mentor-C", "mentor_id": "EMP-003"},
-            {"student_id": "STU-013", "mentor": "Mentor-D", "mentor_id": "EMP-004"},
-            {"student_id": "STU-014", "mentor": "Mentor-D", "mentor_id": "EMP-004"},
-            {"student_id": "STU-015", "mentor": "Mentor-D", "mentor_id": "EMP-004"},
-            {"student_id": "STU-016", "mentor": "Mentor-D", "mentor_id": "EMP-004"},
+            {
+                "student_id": "STU-001",
+                "student_national_code": "",
+                "mentor": "Mentor-A",
+                "mentor_id": "EMP-001",
+                "mentor_alias_code": "",
+            },
+            {
+                "student_id": "STU-002",
+                "student_national_code": "",
+                "mentor": "Mentor-A",
+                "mentor_id": "EMP-001",
+                "mentor_alias_code": "",
+            },
+            {
+                "student_id": "STU-003",
+                "student_national_code": "",
+                "mentor": "Mentor-A",
+                "mentor_id": "EMP-001",
+                "mentor_alias_code": "",
+            },
+            {
+                "student_id": "STU-007",
+                "student_national_code": "",
+                "mentor": "Mentor-B",
+                "mentor_id": "EMP-002",
+                "mentor_alias_code": "",
+            },
+            {
+                "student_id": "STU-008",
+                "student_national_code": "",
+                "mentor": "Mentor-B",
+                "mentor_id": "EMP-002",
+                "mentor_alias_code": "",
+            },
+            {
+                "student_id": "STU-011",
+                "student_national_code": "",
+                "mentor": "Mentor-C",
+                "mentor_id": "EMP-003",
+                "mentor_alias_code": "",
+            },
+            {
+                "student_id": "STU-013",
+                "student_national_code": "",
+                "mentor": "Mentor-D",
+                "mentor_id": "EMP-004",
+                "mentor_alias_code": "",
+            },
+            {
+                "student_id": "STU-014",
+                "student_national_code": "",
+                "mentor": "Mentor-D",
+                "mentor_id": "EMP-004",
+                "mentor_alias_code": "",
+            },
+            {
+                "student_id": "STU-015",
+                "student_national_code": "",
+                "mentor": "Mentor-D",
+                "mentor_id": "EMP-004",
+                "mentor_alias_code": "",
+            },
+            {
+                "student_id": "STU-016",
+                "student_national_code": "",
+                "mentor": "Mentor-D",
+                "mentor_id": "EMP-004",
+                "mentor_alias_code": "",
+            },
         ]
     )
     pd.testing.assert_frame_equal(
