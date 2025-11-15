@@ -1107,13 +1107,39 @@ def allocate_batch(
         column for column in pool_norm.columns if column not in candidate_pool.columns
     ]
     pool_with_ids = inject_mentor_id(pool_norm, build_mentor_id_map(pool_norm))
+    if "mentor_sort_key" not in pool_with_ids.columns:
+        pool_with_ids["mentor_sort_key"] = pool_with_ids["کد کارمندی پشتیبان"].map(
+            natural_key
+        )
     if "allocations_new" not in pool_with_ids.columns:
         pool_with_ids["allocations_new"] = 0
     if "occupancy_ratio" not in pool_with_ids.columns:
         pool_with_ids["occupancy_ratio"] = 0.0
 
+    sort_columns = ["occupancy_ratio", "allocations_new", "mentor_sort_key"]
+    existing_sort_columns = [column for column in sort_columns if column in pool_with_ids.columns]
+    if existing_sort_columns:
+        pool_with_ids = pool_with_ids.sort_values(
+            by=existing_sort_columns,
+            ascending=[True] * len(existing_sort_columns),
+            kind="stable",
+        ).reset_index(drop=True)
+
     pool_internal = canonicalize_headers(pool_with_ids, header_mode="en")
     pool_internal = pool_internal.loc[:, ~pool_internal.columns.duplicated(keep="first")]
+    if "mentor_sort_key" not in pool_internal.columns and "mentor_sort_key" in pool_with_ids.columns:
+        pool_internal["mentor_sort_key"] = pool_with_ids["mentor_sort_key"].values
+    internal_sort_columns = [
+        column
+        for column in ("occupancy_ratio", "allocations_new", "mentor_sort_key")
+        if column in pool_internal.columns
+    ]
+    if internal_sort_columns:
+        pool_internal = pool_internal.sort_values(
+            by=internal_sort_columns,
+            ascending=[True] * len(internal_sort_columns),
+            kind="stable",
+        ).reset_index(drop=True)
     if capacity_internal not in pool_internal.columns:
         pool_internal[capacity_internal] = 0
     if "allocations_new" not in pool_internal.columns:
