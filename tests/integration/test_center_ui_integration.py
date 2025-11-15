@@ -1,6 +1,7 @@
 import os
 from unittest.mock import Mock, patch
 
+import pandas as pd
 import pytest
 
 pytest.importorskip("PySide6.QtWidgets")
@@ -48,4 +49,16 @@ def test_manager_list_loading_error_handling(qt_app, monkeypatch):  # noqa: ARG0
         managers = window._load_manager_names_from_pool()
 
     assert managers == ["پیش‌فرض"]
+    window.deleteLater()
+
+
+def test_manager_list_loading_with_farsi_column(qt_app, tmp_path):  # noqa: ARG001
+    window = MainWindow()
+    pool_path = tmp_path / "pool.xlsx"
+    pd.DataFrame({"مدیر ": ["  علی کیانی  ", None]}).to_excel(pool_path, index=False)
+    window._picker_pool.setText(str(pool_path))
+
+    managers = window._load_manager_names_from_pool()
+
+    assert managers == ["علی کیانی"]
     window.deleteLater()

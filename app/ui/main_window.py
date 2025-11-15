@@ -1242,7 +1242,8 @@ class MainWindow(QMainWindow):
                 return self._get_default_managers()
 
             pool_df = pd.read_excel(pool_path)
-            if "manager_name" not in pool_df.columns:
+            canonical_pool = canonicalize_headers(pool_df, header_mode="en")
+            if "manager_name" not in canonical_pool.columns:
                 self._append_log("❌ ستون manager_name در فایل استخر وجود ندارد")
                 QMessageBox.warning(
                     self,
@@ -1252,7 +1253,7 @@ class MainWindow(QMainWindow):
                 )
                 return self._get_default_managers()
 
-            managers = pool_df["manager_name"].dropna().unique().tolist()
+            managers = canonical_pool["manager_name"].dropna().unique().tolist()
             if not managers:
                 self._append_log("⚠️ هیچ مدیری در فایل استخر یافت نشد")
                 QMessageBox.information(
