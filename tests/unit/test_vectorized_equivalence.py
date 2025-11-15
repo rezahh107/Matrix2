@@ -328,7 +328,54 @@ def test_validation_reports_dedup_metrics() -> None:
     assert "dedup_removed_rows" in validation.columns
     assert validation["dedup_removed_rows"].iat[0] == 0
     assert "dedup_removed_rows" in progress_log.columns
-    assert progress_log["dedup_removed_rows"].iat[0] == 0
+    dedup_row = progress_log.loc[progress_log["step"] == "deduplicate_matrix"].iloc[0]
+    assert dedup_row["dedup_removed_rows"] == 0
+
+
+def test_progress_log_captures_normalization_alias_diffs() -> None:
+    insp_df, schools_df, crosswalk_df = _create_sample_inputs()
+
+    _, _, _, _, _, _, _, progress_log = build_matrix(
+        insp_df,
+        schools_df,
+        crosswalk_df,
+        cfg=BuildConfig(),
+    )
+
+    school_row = progress_log.loc[progress_log["dataset"] == "schools"].iloc[0]
+    assert school_row["aliases_added_count"] >= 1
+    assert "school_code" in str(school_row["aliases_added"])
+
+    schools_df_with_alias = schools_df.copy()
+    schools_df_with_alias["school_code"] = schools_df_with_alias["کد مدرسه"]
+    _, _, _, _, _, _, _, progress_log_alias = build_matrix(
+        insp_df,
+        schools_df_with_alias,
+        crosswalk_df,
+        cfg=BuildConfig(),
+    )
+
+    school_row_alias = progress_log_alias.loc[
+        progress_log_alias["dataset"] == "schools"
+    ].iloc[0]
+    assert school_row_alias["aliases_added_count"] < school_row["aliases_added_count"]
+    assert "school_code" not in str(school_row_alias["aliases_added"])
+
+
+def test_progress_log_exposes_normalization_reports_in_attrs() -> None:
+    insp_df, schools_df, crosswalk_df = _create_sample_inputs()
+
+    _, _, _, _, _, _, _, progress_log = build_matrix(
+        insp_df,
+        schools_df,
+        crosswalk_df,
+        cfg=BuildConfig(),
+    )
+
+    reports = progress_log.attrs.get("column_normalization_reports")
+    assert reports
+    assert {"inspactor", "schools", "crosswalk"}.issubset(reports.keys())
+    assert "school_code" in reports["schools"]["aliases_added"]
 
 
 def test_build_matrix_raises_when_dedup_threshold_exceeded(

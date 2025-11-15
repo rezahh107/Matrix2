@@ -1,6 +1,6 @@
 import pandas as pd
 
-from app.core.common.column_normalizer import normalize_input_columns
+from app.core.common.column_normalizer import ColumnNormalizationReport, normalize_input_columns
 from app.core.common.columns import ensure_series
 
 
@@ -50,3 +50,18 @@ def test_normalize_input_columns_handles_duplicate_numeric_columns() -> None:
 
     values = ensure_series(normalized["کد مدرسه"]).astype("Int64")
     assert list(values) == [4001]
+
+
+def test_normalize_input_columns_collector_runs_even_when_report_disabled() -> None:
+    df = pd.DataFrame({"کد مدرسه": ["4001"], "نام مدرسه": ["نمونه"]})
+    captured: list[ColumnNormalizationReport] = []
+
+    normalize_input_columns(
+        df,
+        kind="SchoolReport",
+        report=False,
+        collector=captured.append,
+    )
+
+    assert len(captured) == 1
+    assert captured[0].aliases_added  # "school_code" + "school_name"

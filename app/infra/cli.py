@@ -555,6 +555,9 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
             "schools": int(len(schools_df)),
         },
     }
+    normalization_reports = progress_log.attrs.get("column_normalization_reports")
+    if normalization_reports:
+        meta["column_normalization_reports"] = normalization_reports
     sheets = {
         "matrix": matrix,
         "validation": validation,

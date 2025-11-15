@@ -37,7 +37,10 @@ from app.core.common.columns import (
     ensure_series,
     resolve_aliases,
 )
-from app.core.common.column_normalizer import normalize_input_columns
+from app.core.common.column_normalizer import (
+    ColumnNormalizationReport,
+    normalize_input_columns,
+)
 from app.core.common.domain import (
     BuildConfig as DomainBuildConfig,
     MentorType,
@@ -1648,6 +1651,42 @@ def build_matrix(
     Returns:
         هشت‌تایی دیتافریم شامل ماتریس، گزارش QA، لاگ پیشرفت و جداول کنترلی.
     """
+    progress_rows: list[dict[str, Any]] = []
+    normalization_meta: dict[str, dict[str, Any]] = {}
+
+    def _append_progress_row(row: dict[str, Any]) -> None:
+        progress_rows.append(row)
+
+    def _collect_normalization(dataset: str) -> Callable[[ColumnNormalizationReport], None]:
+        def _collector(report: ColumnNormalizationReport) -> None:
+            alias_list = list(report.aliases_added)
+            unmatched_list = list(report.unmatched)
+            renamed_pairs = dict(report.renamed)
+            normalization_meta[dataset] = {
+                "aliases_added": alias_list,
+                "renamed_columns": renamed_pairs,
+                "unmatched_columns": unmatched_list,
+            }
+            _append_progress_row(
+                {
+                    "step": f"normalize_{dataset}",
+                    "pct": pd.NA,
+                    "message": f"column normalization completed for {dataset}",
+                    "status": "ok",
+                    "dataset": dataset,
+                    "aliases_added_count": len(alias_list),
+                    "aliases_added": ", ".join(alias_list),
+                    "unmatched_columns_count": len(unmatched_list),
+                    "unmatched_columns": ", ".join(unmatched_list),
+                    "renamed_columns_count": len(renamed_pairs),
+                    "renamed_columns": ", ".join(
+                        f"{src}->{dst}" for src, dst in sorted(renamed_pairs.items())
+                    ),
+                }
+            )
+
+        return _collector
+
     try:
         insp_df = assert_inspactor_schema(insp_df, cfg.policy)
     except KeyError as exc:
@@ -1664,7 +1703,11 @@ def build_matrix(
         )
         setattr(exc, "invalid_mentors_df", schema_invalid)
         raise
-    insp_df, _ = normalize_input_columns(insp_df, kind="InspactorReport")
+    insp_df, _ = normalize_input_columns(
+        insp_df,
+        kind="InspactorReport",
+        collector=_collect_normalization("inspactor"),
+    )
     school_name_columns = [
         column for column in insp_df.columns if column.strip().startswith("نام مدرسه")
     ]
@@ -1694,9 +1737,20 @@ def build_matrix(
     schools_df = resolve_aliases(schools_df, "school")
     schools_df = coerce_semantics(schools_df, "school")
     schools_df = ensure_required_columns(schools_df, REQUIRED_SCHOOL_COLUMNS, "school")
-    schools_df, _ = normalize_input_columns(schools_df, kind="SchoolReport")
+    schools_df, _ = normalize_input_columns(
+        schools_df,
+        kind="SchoolReport",
+        collector=_collect_normalization("schools"),
+    )
 
     progress(5, "preparing crosswalk mappings")
+    crosswalk_groups_df, _ = normalize_input_columns(
+        crosswalk_groups_df,
+        kind="CrosswalkReport",
+        include_alias=False,
+        report=False,
+        collector=_collect_normalization("crosswalk"),
+    )
     name_to_code, code_to_name, buckets, synonyms = prepare_crosswalk_mappings(
         crosswalk_groups_df,
         crosswalk_synonyms_df,
@@ -2026,21 +2080,23 @@ def build_matrix(
         validation_rows.append(warning_row)
     validation = pd.DataFrame(validation_rows, columns=validation_columns)
 
-    progress_log = pd.DataFrame(
-        [
-            {
-                "step": "deduplicate_matrix",
-                "pct": 80,
-                "message": "drop_duplicates applied on final matrix",
-                "total_rows_before_dedup": rows_before_dedupe,
-                "total_rows_after_dedup": rows_after_dedupe,
-                "dedup_removed_rows": int(dedup_removed_rows),
-                "dedup_removed_ratio": dedup_removed_ratio,
-                "dedup_removed_threshold": dedup_threshold,
-                "status": "error" if dedup_threshold_exceeded else "ok",
-            }
-        ]
+    _append_progress_row(
+        {
+            "step": "deduplicate_matrix",
+            "pct": 80,
+            "message": "drop_duplicates applied on final matrix",
+            "total_rows_before_dedup": rows_before_dedupe,
+            "total_rows_after_dedup": rows_after_dedupe,
+            "dedup_removed_rows": int(dedup_removed_rows),
+            "dedup_removed_ratio": dedup_removed_ratio,
+            "dedup_removed_threshold": dedup_threshold,
+            "status": "error" if dedup_threshold_exceeded else "ok",
+            "dataset": "matrix",
+        }
     )
+
+    progress_log = pd.DataFrame(progress_rows)
+    progress_log.attrs["column_normalization_reports"] = normalization_meta
 
     removed_df = removed_mentors
     progress(90, "matrix assembly complete")
