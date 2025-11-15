@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from functools import partial
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
 import pandas as pd
@@ -47,7 +46,7 @@ from app.core.counter import (
     pick_counter_sheet_name,
     year_to_yy,
 )
-from app.core.policy_loader import get_policy
+from app.core.policy_loader import get_policy, load_policy
 from app.infra import cli
 from app.utils.path_utils import resource_path
 from app.utils.settings_manager import AppPreferences
@@ -72,7 +71,6 @@ class MainWindow(QMainWindow):
         self._prefs = AppPreferences()
         self._btn_open_output_folder: QPushButton | None = None
         self._center_manager_combos: Dict[int, QComboBox] = {}
-        self._center_definitions = self._resolve_center_definitions()
         self._btn_reset_managers: QPushButton | None = None
         policy_file = resource_path("config", "policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
@@ -315,7 +313,9 @@ class MainWindow(QMainWindow):
         self._picker_pool = FilePicker(page, placeholder="استخر منتورها (*.xlsx)")
         self._picker_pool.setObjectName("editPool")
         self._picker_pool.setToolTip("فهرست منتورها یا پشتیبان‌ها برای تخصیص")
-        self._picker_pool.line_edit().textChanged.connect(self._refresh_manager_lists)
+        self._picker_pool.line_edit().textChanged.connect(
+            lambda *_: self._refresh_all_manager_combos()
+        )
         inputs_layout.addRow("استخر منتورها", self._picker_pool)
 
         outer.addWidget(inputs_group)
@@ -348,37 +348,7 @@ class MainWindow(QMainWindow):
 
         outer.addWidget(advanced_group)
 
-        manager_group = QGroupBox("تنظیمات مدیران مرکز", page)
-        manager_group.setObjectName("centerManagerGroup")
-        manager_layout = QFormLayout(manager_group)
-        manager_layout.setLabelAlignment(Qt.AlignRight)
-        manager_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
-        self._center_manager_combos.clear()
-        for center in self._center_definitions:
-            center_id = int(center["id"])
-            combo = self._create_manager_combo(manager_group)
-            combo.setObjectName(f"comboCenterManager_{center_id}")
-            preferred = self._prefs.get_center_manager(
-                center_id, self._center_default_manager(center_id)
-            )
-            combo.setEditText(preferred)
-            combo.currentTextChanged.connect(
-                partial(self._on_center_manager_changed, center_id)
-            )
-            label = f"مدیر {center['name']}"
-            manager_layout.addRow(label, combo)
-            self._center_manager_combos[center_id] = combo
-        reset_btn = QPushButton("بازگشت به پیش‌فرض‌ها", manager_group)
-        reset_btn.clicked.connect(self._reset_center_managers_to_defaults)
-        manager_layout.addRow("", reset_btn)
-        self._btn_reset_managers = reset_btn
-        hint = QLabel(
-            "قبل از شروع تخصیص، مدیر هر مرکز را مشخص کنید تا دانش‌آموزان به پشتیبان‌های همان مدیر متصل شوند."
-        )
-        hint.setWordWrap(True)
-        manager_layout.addRow("", hint)
-
-        outer.addWidget(manager_group)
+        outer.addWidget(self._create_center_management_section())
 
         register_box = QGroupBox("شناسهٔ ثبت‌نام", page)
         register_box.setObjectName("registrationGroupBox")
@@ -495,7 +465,7 @@ class MainWindow(QMainWindow):
         outer.addLayout(action_layout)
         outer.addStretch(1)
 
-        QTimer.singleShot(0, self._refresh_manager_lists)
+        QTimer.singleShot(0, self._refresh_all_manager_combos)
 
         return page
 
@@ -1031,11 +1001,7 @@ class MainWindow(QMainWindow):
         if sabt_template:
             overrides["sabt_template"] = sabt_template
 
-        center_overrides: dict[int, list[str]] = {}
-        for center_id, combo in self._center_manager_combos.items():
-            manager = combo.currentText().strip()
-            if manager:
-                center_overrides[int(center_id)] = [manager]
+        center_overrides = self.get_center_manager_map()
         if center_overrides:
             overrides["center_managers"] = center_overrides
 
@@ -1071,6 +1037,61 @@ class MainWindow(QMainWindow):
 
         return overrides
 
+    def _create_center_management_section(self) -> QWidget:
+        """ساخت بخش مدیریت مراکز با خواندن Policy و تنظیم دکمه‌ها."""
+
+        group_box = QGroupBox("مدیریت مراکز")
+        group_box.setObjectName("centerManagerGroup")
+        main_layout = QVBoxLayout()
+        self._center_manager_combos.clear()
+
+        try:
+            policy = load_policy()
+            if not policy.center_management.enabled:
+                label = QLabel("مدیریت مراکز غیرفعال است")
+                main_layout.addWidget(label)
+                group_box.setLayout(main_layout)
+                return group_box
+            for center in policy.center_management.centers:
+                if center.id == 0:
+                    continue
+                row_layout = QHBoxLayout()
+                label = QLabel(f"مدیر {center.name}:")
+                combo = self._create_manager_combo(group_box)
+                combo.setMinimumWidth(250)
+                preferred = self._prefs.get_center_manager(
+                    center.id, center.default_manager or ""
+                )
+                self._refresh_manager_combo(center.id, combo)
+                if preferred:
+                    combo.setCurrentText(preferred)
+                combo.currentTextChanged.connect(
+                    lambda text, cid=center.id: self._on_center_manager_changed(
+                        cid, text
+                    )
+                )
+                self._center_manager_combos[center.id] = combo
+                row_layout.addWidget(label)
+                row_layout.addWidget(combo)
+                row_layout.addStretch()
+                main_layout.addLayout(row_layout)
+        except Exception as exc:
+            error_label = QLabel(f"خطا در بارگذاری تنظیمات مراکز: {exc}")
+            main_layout.addWidget(error_label)
+
+        button_layout = QHBoxLayout()
+        reset_btn = QPushButton("بازنشانی به پیش‌فرض")
+        reset_btn.clicked.connect(self._reset_center_managers_to_default)
+        button_layout.addWidget(reset_btn)
+        refresh_btn = QPushButton("بارگذاری مجدد مدیران")
+        refresh_btn.clicked.connect(self._refresh_all_manager_combos)
+        button_layout.addWidget(refresh_btn)
+        button_layout.addStretch()
+        self._btn_reset_managers = reset_btn
+        main_layout.addLayout(button_layout)
+        group_box.setLayout(main_layout)
+        return group_box
+
     def _create_manager_combo(self, parent: QWidget) -> QComboBox:
         """ساخت ComboBox قابل‌ویرایش برای انتخاب مدیران مراکز."""
 
@@ -1082,40 +1103,6 @@ class MainWindow(QMainWindow):
         combo.setToolTip("نام مدیر مرکز را انتخاب یا وارد کنید")
         return combo
 
-    def _resolve_center_definitions(self) -> list[dict[str, object]]:
-        """خواندن لیست مراکز از Policy با fallback به دو مرکز Legacy."""
-
-        try:
-            policy = get_policy()
-        except Exception:
-            return [
-                {"id": 1, "name": "گلستان", "defaults": ("شهدخت کشاورز",)},
-                {"id": 2, "name": "صدرا", "defaults": ("آیناز هوشمند",)},
-                {"id": 0, "name": "مرکزی", "defaults": tuple()},
-            ]
-        definitions: list[dict[str, object]] = []
-        for center in policy.center_management.centers:
-            defaults = tuple(center.default_managers)
-            definitions.append(
-                {"id": center.id, "name": center.name, "defaults": defaults}
-            )
-        if not definitions:
-            definitions = [
-                {"id": 1, "name": "گلستان", "defaults": ("شهدخت کشاورز",)},
-                {"id": 2, "name": "صدرا", "defaults": ("آیناز هوشمند",)},
-            ]
-        return definitions
-
-    def _center_default_manager(self, center_id: int) -> str:
-        """بازیابی اولین مدیر پیش‌فرض برای مرکز داده‌شده."""
-
-        for center in self._center_definitions:
-            if center["id"] == center_id:
-                defaults = center.get("defaults", ())
-                if defaults:
-                    return str(defaults[0])
-        return ""
-
     def _on_center_manager_changed(self, center_id: int, text: str) -> None:
         """ذخیرهٔ انتخاب مدیر مرکز پویا در تنظیمات."""
 
@@ -1125,123 +1112,128 @@ class MainWindow(QMainWindow):
         else:
             self._prefs.clear_center_manager(center_id)
 
-    def _reset_center_managers_to_defaults(self) -> None:
-        """بازگردانی همه مراکز به مدیران پیش‌فرض Policy."""
+    def _refresh_manager_combo(
+        self, center_id: int, combo: QComboBox, names: list[str] | None = None
+    ) -> None:
+        """پر کردن ComboBox با لیست مدیران."""
 
-        for center_id, combo in self._center_manager_combos.items():
-            default_name = self._center_default_manager(center_id)
-            combo.blockSignals(True)
-            combo.setEditText(default_name)
-            combo.blockSignals(False)
-            if default_name:
-                self._prefs.set_center_manager(center_id, default_name)
-            else:
-                self._prefs.clear_center_manager(center_id)
+        combo.blockSignals(True)
+        combo.clear()
+        source_names = names
+        if source_names is None:
+            try:
+                source_names = self._load_manager_names_from_pool()
+            except Exception:
+                source_names = []
+        if not source_names:
+            source_names = self._default_manager_names()
+        combo.addItems(source_names)
+        preferred = self._prefs.get_center_manager(center_id, "")
+        if preferred:
+            combo.setCurrentText(preferred)
+        combo.blockSignals(False)
 
-    def _refresh_manager_lists(self) -> None:
-        """بارگذاری لیست مدیران با نمایش هشدارهای تعاملی."""
+    def _refresh_all_manager_combos(self) -> None:
+        """بارگذاری مجدد تمام ComboBoxهای مدیران."""
 
         if not self._center_manager_combos:
             return
-        path_text = self._picker_pool.text().strip()
-        if not path_text:
-            self._append_log("⚠️ فایل استخر انتخاب نشده یا وجود ندارد")
-            return
-        path = Path(path_text)
-        if not path.exists():
+        default_names = self._default_manager_names()
+        try:
+            names = self._load_manager_names_from_pool()
+        except FileNotFoundError:
             QMessageBox.warning(
                 self,
                 "فایل استخر",
                 "فایل استخر انتخاب نشده یا وجود ندارد",
                 QMessageBox.Ok,
             )
-            self._append_log("⚠️ فایل استخر انتخاب نشده یا وجود ندارد")
-            return
-        default_names = self._default_manager_names()
-        try:
-            names = self._load_manager_names_from_pool(path)
+            names = default_names
         except ValueError as exc:
             QMessageBox.warning(
                 self,
                 "ستون مدیر یافت نشد",
-                "ستون 'manager_name' در فایل استخر وجود ندارد.\n\n"
-                "لطفاً فایل را بررسی کرده یا از مقادیر پیش‌فرض استفاده کنید.",
+                f"{exc}\nبرنامه از مقادیر پیش‌فرض استفاده می‌کند.",
                 QMessageBox.Ok,
             )
-            self._append_log(f"⚠️ بارگذاری مدیران: {exc}")
             names = default_names
         except Exception as exc:  # pragma: no cover - خطای فایل غیرمنتظره
             QMessageBox.critical(
                 self,
                 "خطا در بارگذاری مدیران",
-                f"خطا در بارگذاری لیست مدیران:\n{exc}\n\n"
-                "برنامه از مقادیر پیش‌فرض استفاده می‌کند.",
+                f"خطا در بارگذاری لیست مدیران:\n{exc}",
                 QMessageBox.Ok,
             )
-            self._append_log(f"❌ خطا در بارگذاری مدیران: {exc}")
             names = default_names
-        else:
-            if not names:
-                response = QMessageBox.warning(
-                    self,
-                    "مدیری یافت نشد",
-                    "هیچ مدیری در ستون 'manager_name' فایل استخر پیدا نشد.\n\n"
-                    "آیا می‌خواهید از مقادیر پیش‌فرض استفاده کنید؟",
-                    QMessageBox.Yes | QMessageBox.No,
-                )
-                if response == QMessageBox.No:
-                    self._append_log("⚠️ هیچ مدیر پیش‌فرضی اعمال نشد")
-                    return
-                names = default_names
-        self._populate_manager_combos(names)
-        self._append_log(f"✅ {len(names)} مدیر بارگذاری شد")
-
-    def _populate_manager_combo(
-        self, center_id: int, combo: QComboBox | None, names: list[str], preferred: str
-    ) -> None:
-        """به‌روزرسانی ایمن ComboBox با لیست مدیران."""
-
-        if combo is None:
-            return
-        current = combo.currentText().strip()
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItems(names)
-        target = preferred.strip() or current
-        if target:
-            combo.setEditText(target)
-        combo.blockSignals(False)
-
-    def _populate_manager_combos(self, names: Sequence[str]) -> None:
-        """اعمال یک‌جای لیست مدیران روی همهٔ مراکز."""
-
+        if not names:
+            names = default_names
         for center_id, combo in self._center_manager_combos.items():
-            preferred = self._prefs.get_center_manager(
-                center_id, self._center_default_manager(center_id)
-            )
-            self._populate_manager_combo(center_id, combo, list(names), preferred)
+            self._refresh_manager_combo(center_id, combo, list(names))
+        self._append_log("✅ لیست مدیران به‌روزرسانی شد")
+
+    def _reset_center_managers_to_default(self) -> None:
+        """بازنشانی تمام مدیران به مقادیر پیش‌فرض Policy."""
+
+        try:
+            policy = load_policy()
+        except Exception as exc:
+            QMessageBox.warning(self, "Policy", f"خطا در بارگذاری Policy: {exc}")
+            return
+        for center in policy.center_management.centers:
+            if center.id == 0:
+                continue
+            combo = self._center_manager_combos.get(center.id)
+            if combo is None:
+                continue
+            default_manager = center.default_manager or ""
+            combo.blockSignals(True)
+            combo.setCurrentText(default_manager)
+            combo.blockSignals(False)
+            self._on_center_manager_changed(center.id, default_manager)
+        self._append_log("✅ مدیران به پیش‌فرض Policy بازنشانی شدند")
+
+    def get_center_manager_map(self) -> Dict[int, List[str]]:
+        """دریافت نگاشت مراکز به مدیران از UI."""
+
+        result: Dict[int, List[str]] = {}
+        for center_id, combo in self._center_manager_combos.items():
+            manager = combo.currentText().strip()
+            if manager:
+                result[int(center_id)] = [manager]
+        return result
 
     def _default_manager_names(self) -> list[str]:
         """تولید fallback پیش‌فرض در صورت نبود دادهٔ استخر."""
 
         ordered: list[str] = []
         seen: set[str] = set()
-        for center in self._center_definitions:
-            for name in center.get("defaults", ()):
-                text = str(name or "").strip()
-                if not text or text in seen:
-                    continue
-                ordered.append(text)
-                seen.add(text)
+        try:
+            policy = load_policy()
+            centers = policy.center_management.centers
+        except Exception:
+            centers = ()
+        for center in centers:
+            text = str(center.default_manager or "").strip()
+            if not text or text in seen:
+                continue
+            ordered.append(text)
+            seen.add(text)
         if not ordered:
             ordered = ["شهدخت کشاورز", "آیناز هوشمند"]
         return ordered
 
-    def _load_manager_names_from_pool(self, path: Path) -> list[str]:
+    def _load_manager_names_from_pool(self, path: Path | None = None) -> list[str]:
         """خواندن ستون مدیر از فایل استخر برای ساخت فهرست کشویی."""
 
-        if not path.exists() or path.is_dir():
-            return []
+        if path is None:
+            path_text = self._picker_pool.text().strip()
+            if not path_text:
+                raise FileNotFoundError("فایل استخر انتخاب نشده یا وجود ندارد")
+            path = Path(path_text)
+        if not path.exists():
+            raise FileNotFoundError(f"فایل استخر یافت نشد: {path}")
+        if path.is_dir():
+            raise ValueError("مسیر انتخاب‌شده یک پوشه است")
         suffix = path.suffix.lower()
         manager_candidates = [
             CANON_EN_TO_FA.get("manager_name", "مدیر"),

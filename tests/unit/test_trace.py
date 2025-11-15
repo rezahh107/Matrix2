@@ -12,7 +12,7 @@ from app.core.common.trace import build_allocation_trace, build_trace_plan
 from app.core.policy_loader import (
     ExcelOptions,
     EmissionOptions,
-    CenterDefinition,
+    CenterConfig,
     CenterManagementConfig,
     GenderCode,
     GenderCodes,
@@ -266,21 +266,24 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
         center_management=CenterManagementConfig(
             enabled=True,
             centers=(
-                CenterDefinition(
+                CenterConfig(
                     id=1,
                     name="گلستان",
-                    default_managers=("شهدخت کشاورز",),
+                    default_manager="شهدخت کشاورز",
+                    description="مرکز گلستان",
                 ),
-                CenterDefinition(
+                CenterConfig(
                     id=2,
                     name="صدرا",
-                    default_managers=("آیناز هوشمند",),
+                    default_manager="آیناز هوشمند",
+                    description="مرکز صدرا",
                 ),
-                CenterDefinition(id=0, name="مرکزی", default_managers=()),
+                CenterConfig(id=0, name="مرکزی", default_manager=None, description="مرکز اصلی"),
             ),
             priority_order=(1, 2, 0),
             strict_manager_validation=False,
             default_center_for_invalid=0,
+            school_student_column="is_school_student",
         ),
     )
 

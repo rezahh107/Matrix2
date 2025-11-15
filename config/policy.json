@@ -28,6 +28,7 @@
   "center_management": {
     "enabled": true,
     "strict_manager_validation": false,
+    "school_student_column": "is_school_student",
     "default_center_for_invalid": 0,
     "priority_order": [
       1,
@@ -38,17 +39,20 @@
       {
         "id": 1,
         "name": "گلستان",
-        "default_manager": "شهدخت کشاورز"
+        "default_manager": "شهدخت کشاورز",
+        "description": "مرکز گلستان"
       },
       {
         "id": 2,
         "name": "صدرا",
-        "default_manager": "آیناز هوشمند"
+        "default_manager": "آیناز هوشمند",
+        "description": "مرکز صدرا"
       },
       {
         "id": 0,
         "name": "مرکزی",
-        "default_manager": null
+        "default_manager": null,
+        "description": "مرکز اصلی"
       }
     ]
   },
