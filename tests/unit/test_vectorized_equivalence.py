@@ -268,6 +268,10 @@ def test_build_matrix_reports_join_key_duplicates() -> None:
     assert len(duplicate_join_keys) == 2
     assert duplicate_join_keys["کد کارمندی پشتیبان"].tolist() == ["EMP-1", "EMP-99"]
     assert validation["join_key_duplicate_rows"].iat[0] == 2
+    warnings_df = validation[validation["warning_type"].notna()]
+    assert not warnings_df.empty
+    assert "join_key_duplicate" in warnings_df["warning_type"].unique()
+    assert any("EMP-1" in str(msg) for msg in warnings_df["warning_message"].dropna())
 
 
 def test_validation_reports_dedup_metrics() -> None:

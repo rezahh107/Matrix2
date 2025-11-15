@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Sequence
 
 import pandas as pd
 
@@ -25,6 +25,7 @@ from .policy_loader import PolicyConfig
 
 __all__ = [
     "PoolCanonicalizationStats",
+    "POOL_DUPLICATE_SUMMARY_ATTR",
     "POOL_JOIN_KEY_DUPLICATES_ATTR",
     "canonicalize_students_frame",
     "canonicalize_pool_frame",
@@ -34,6 +35,7 @@ __all__ = [
 
 _POOL_STATS_ATTR = "pool_canonicalization_stats"
 POOL_JOIN_KEY_DUPLICATES_ATTR = "pool_join_key_duplicates"
+POOL_DUPLICATE_SUMMARY_ATTR = "pool_duplicate_summary"
 
 
 @dataclass(slots=True)
@@ -169,6 +171,46 @@ def _build_join_key_duplicate_report(
     )
     report["duplicate_group_size"] = group_sizes
     return report.reset_index(drop=True)
+
+
+def _json_safe_value(value: object) -> object:
+    """تبدیل مقادیر pandas/numpy به انواع قابل‌سریال JSON."""
+
+    if value is None or value is pd.NA:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    if isinstance(value, (bool, int, float, str)):
+        return value
+    item_getter = getattr(value, "item", None)
+    if callable(item_getter):  # pragma: no branch - رفتار numpy scalar
+        try:
+            return item_getter()
+        except Exception:  # pragma: no cover - نگهبان دفاعی
+            return str(value)
+    iso_getter = getattr(value, "isoformat", None)
+    if callable(iso_getter):
+        try:
+            return iso_getter()
+        except Exception:  # pragma: no cover - نگهبان دفاعی
+            return str(value)
+    return str(value)
+
+
+def _build_duplicate_summary(report: pd.DataFrame, *, sample_size: int = 5) -> dict[str, Any]:
+    """تولید خلاصهٔ JSON-safe از تکرارهای کلید شش‌تایی برای درج در attrs."""
+
+    if report is None or report.empty:
+        return {"total": 0, "sample": []}
+    sample_rows = report.head(sample_size).to_dict(orient="records")
+    safe_rows = [
+        {key: _json_safe_value(value) for key, value in row.items()}
+        for row in sample_rows
+    ]
+    return {"total": int(len(report)), "sample": safe_rows}
 
 
 def sanitize_pool_for_allocation(
@@ -483,6 +525,7 @@ def canonicalize_pool_frame(
     )
     stats.join_key_duplicates = int(len(duplicate_report))
     pool.attrs[POOL_JOIN_KEY_DUPLICATES_ATTR] = duplicate_report
+    pool.attrs[POOL_DUPLICATE_SUMMARY_ATTR] = _build_duplicate_summary(duplicate_report)
     pool = _append_bilingual_alias_columns(pool, policy)
     if preserved:
         for column, original in preserved.items():
