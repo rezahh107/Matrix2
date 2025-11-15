@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Sequence
 
 import pandas as pd
@@ -23,11 +24,63 @@ from .common.normalization import normalize_fa
 from .policy_loader import PolicyConfig
 
 __all__ = [
+    "PoolCanonicalizationStats",
     "canonicalize_students_frame",
     "canonicalize_pool_frame",
     "canonicalize_allocation_frames",
     "sanitize_pool_for_allocation",
 ]
+
+_POOL_STATS_ATTR = "pool_canonicalization_stats"
+
+
+@dataclass(slots=True)
+class PoolCanonicalizationStats:
+    """شمارندهٔ اصلاحات استخر منتور برای گزارش QA.
+
+    مثال::
+
+        >>> stats = PoolCanonicalizationStats()
+        >>> stats.virtual_filtered += 2
+        >>> stats.as_dict()["virtual_filtered"]
+        2
+    """
+
+    virtual_filtered: int = 0
+    mentor_id_autofill: int = 0
+    capacity_coerced: int = 0
+    columns_renamed: int = 0
+    default_columns_injected: int = 0
+
+    def as_dict(self) -> dict[str, int]:
+        """برگرداندن کپی دیکشنری برای درج در گزارش QA."""
+
+        return {
+            "virtual_filtered": self.virtual_filtered,
+            "mentor_id_autofill": self.mentor_id_autofill,
+            "capacity_coerced": self.capacity_coerced,
+            "columns_renamed": self.columns_renamed,
+            "default_columns_injected": self.default_columns_injected,
+        }
+
+
+def _attach_pool_stats(frame: pd.DataFrame, stats: PoolCanonicalizationStats) -> pd.DataFrame:
+    """ذخیرهٔ آمار اصلاح در attrs دیتافریم و بازگرداندن همان دیتافریم."""
+
+    frame.attrs[_POOL_STATS_ATTR] = stats
+    return frame
+
+
+def _coerce_capacity_series(
+    series: pd.Series, stats: PoolCanonicalizationStats
+) -> pd.Series:
+    """تبدیل مقادیر ظرفیت به Int64 و افزایش شمارندهٔ اصلاحات."""
+
+    numeric = pd.to_numeric(series, errors="coerce")
+    invalid_mask = numeric.isna() & series.notna()
+    stats.capacity_coerced += int(invalid_mask.sum())
+    filled = numeric.fillna(0).astype("Int64")
+    return filled
 
 
 def _make_unique_columns(columns: Sequence[str]) -> list[str]:
@@ -75,9 +128,11 @@ def sanitize_pool_for_allocation(
         policy: سیاست جاری برای تشخیص الگوهای مجازی و حالت Excel.
 
     Returns:
-        دیتافریم پاک‌سازی‌شده با نام ستون‌های یکدست.
+        دیتافریم پاک‌سازی‌شده با نام ستون‌های یکدست و آمار اصلاح
+        در ``df.attrs["pool_canonicalization_stats"]``.
     """
 
+    stats = PoolCanonicalizationStats()
     frame = canonicalize_headers(df, header_mode=policy.excel.header_mode_internal).copy()
     if isinstance(frame.columns, pd.MultiIndex):
         frame.columns = [
@@ -104,6 +159,7 @@ def sanitize_pool_for_allocation(
             mask_virtual |= alias_numeric.between(start, end, inclusive="both")
 
     sanitized = frame.loc[~mask_virtual].copy()
+    stats.virtual_filtered += int(mask_virtual.sum())
 
     rename_candidates = {
         "remaining_capacity | remaining_capacity": "remaining_capacity",
@@ -111,6 +167,7 @@ def sanitize_pool_for_allocation(
     for old, new in rename_candidates.items():
         if old in sanitized.columns and new not in sanitized.columns:
             sanitized = sanitized.rename(columns={old: new})
+            stats.columns_renamed += 1
 
     defaults = {
         "remaining_capacity": ("Int64", 0),
@@ -120,16 +177,20 @@ def sanitize_pool_for_allocation(
     for column, (dtype, default) in defaults.items():
         if column not in sanitized.columns:
             sanitized[column] = pd.Series([default] * len(sanitized), dtype=dtype)
+            stats.default_columns_injected += 1
         else:
             series = ensure_series(sanitized[column])
-            if dtype == "Int64":
+            if column == "remaining_capacity":
+                series = _coerce_capacity_series(series, stats)
+            elif dtype == "Int64":
                 series = pd.to_numeric(series, errors="coerce").astype("Int64")
             else:
                 series = series.astype(dtype)
             sanitized[column] = series
 
     header_mode = output_header_mode or policy.excel.header_mode_internal
-    return canonicalize_headers(sanitized, header_mode=header_mode)
+    result = canonicalize_headers(sanitized, header_mode=header_mode)
+    return _attach_pool_stats(result, stats)
 
 
 def _append_bilingual_alias_columns(
@@ -273,7 +334,10 @@ def canonicalize_pool_frame(
     require_join_keys: bool = True,
     preserve_columns: Sequence[str] | None = None,
 ) -> pd.DataFrame:
-    """کاننیکال‌سازی استخر منتورها از هر منبع (inspactor/matrix)."""
+    """کاننیکال‌سازی استخر منتورها از هر منبع (inspactor/matrix).
+
+    آمار اصلاحات در ``df.attrs["pool_canonicalization_stats"]`` قرار می‌گیرد.
+    """
 
     source = pool_source if pool_source in {"inspactor", "matrix"} else "inspactor"
     preserved: dict[str, pd.Series] = {}
@@ -283,8 +347,10 @@ def canonicalize_pool_frame(
                 preserved[column] = pool_df[column].copy()
 
     pool = pool_df.copy(deep=True)
+    stats = PoolCanonicalizationStats()
     if sanitize_pool:
         pool = sanitize_pool_for_allocation(pool, policy=policy)
+        stats = pool.attrs.get(_POOL_STATS_ATTR, stats)
     else:
         pool = canonicalize_headers(pool, header_mode=policy.excel.header_mode_internal)
     pool = resolve_aliases(pool, source)  # type: ignore[arg-type]
@@ -314,7 +380,7 @@ def canonicalize_pool_frame(
     for column_name in {capacity_alias, "remaining_capacity"}:
         if column_name in pool.columns:
             series = ensure_series(pool[column_name])
-            pool[column_name] = pd.to_numeric(series, errors="coerce").fillna(0).astype("Int64")
+            pool[column_name] = _coerce_capacity_series(series, stats)
 
     for column, default in {
         "allocations_new": 0,
@@ -324,8 +390,15 @@ def canonicalize_pool_frame(
         if column not in pool.columns:
             pool[column] = default
 
-    if "mentor_id" not in pool.columns:
-        pool["mentor_id"] = ensure_series(pool[mentor_column]).astype("string").str.strip()
+    mentor_id_series = ensure_series(pool.get("mentor_id")) if "mentor_id" in pool.columns else None
+    if mentor_id_series is None:
+        mentor_id_series = pd.Series([pd.NA] * len(pool), dtype="string", index=pool.index)
+    mentor_id_series = mentor_id_series.astype("string").str.strip()
+    missing_mask = mentor_id_series.eq("") | mentor_id_series.isna()
+    if missing_mask.any():
+        mentor_id_series = mentor_id_series.mask(missing_mask, mentor_normalized)
+        stats.mentor_id_autofill += int(missing_mask.sum())
+    pool["mentor_id"] = mentor_id_series
 
     required = set(policy.join_keys) | {"کد کارمندی پشتیبان"}
     missing = [column for column in required if column not in pool.columns]
@@ -340,7 +413,7 @@ def canonicalize_pool_frame(
         for column, original in preserved.items():
             if column not in pool.columns:
                 pool[column] = original.reindex(pool.index)
-    return pool
+    return _attach_pool_stats(pool, stats)
 
 
 def canonicalize_allocation_frames(
