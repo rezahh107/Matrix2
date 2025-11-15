@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib
 import json
 from pathlib import Path
@@ -28,6 +29,7 @@ def policy_file(tmp_path: Path) -> Path:
         "school_code_empty_as_zero": True,
         "prefer_major_code": True,
         "coverage_threshold": 0.95,
+        "dedup_removed_ratio_threshold": 0.05,
         "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
             "کدرشته",
@@ -169,6 +171,31 @@ def test_cli_reports_dedup_threshold_error(policy_file: Path, capsys: pytest.Cap
     assert exit_code == 2
     assert "حذف رکوردهای تکراری" in captured.err
     assert captured.out == ""
+
+
+def test_build_config_from_args_uses_policy_defaults(policy_file: Path) -> None:
+    policy = load_policy(policy_file)
+    args = argparse.Namespace(min_coverage=None, dedup_threshold=None)
+
+    cfg = cli._build_config_from_args(args, policy)
+
+    assert cfg.min_coverage_ratio == pytest.approx(0.95)
+    assert cfg.dedup_removed_ratio_threshold == pytest.approx(0.05)
+
+
+def test_build_config_from_args_overrides_thresholds(policy_file: Path) -> None:
+    policy = load_policy(policy_file)
+    args = argparse.Namespace(min_coverage=80, dedup_threshold=12)
+
+    cfg = cli._build_config_from_args(args, policy)
+
+    assert cfg.min_coverage_ratio == pytest.approx(0.80)
+    assert cfg.dedup_removed_ratio_threshold == pytest.approx(0.12)
+
+
+def test_normalize_dedup_threshold_rejects_invalid() -> None:
+    with pytest.raises(ValueError):
+        cli._normalize_dedup_threshold_arg(-0.1)
 
 
 def test_cli_propagates_coverage_error_for_ui(policy_file: Path) -> None:

@@ -125,6 +125,33 @@ def _normalize_min_coverage_arg(value: float | None) -> float | None:
     return ratio
 
 
+def _normalize_dedup_threshold_arg(value: float | None) -> float | None:
+    """اعتبارسنجی و نرمال‌سازی آستانهٔ حذف رکوردهای تکراری."""
+
+    if value is None:
+        return None
+    ratio = float(value)
+    if ratio > 1:
+        ratio /= 100.0
+    if ratio < 0 or ratio > 1:
+        raise ValueError(
+            "آستانهٔ حذف رکوردهای تکراری باید بین 0 و 1 باشد یا به‌صورت درصد معتبر وارد شود."
+        )
+    return ratio
+
+
+def _build_config_from_args(args: argparse.Namespace, policy: PolicyConfig) -> BuildConfig:
+    """ساخت پیکربندی ساخت ماتریس بر اساس policy و پارامترهای ورودی CLI."""
+
+    min_coverage = _normalize_min_coverage_arg(getattr(args, "min_coverage", None))
+    dedup_threshold = _normalize_dedup_threshold_arg(getattr(args, "dedup_threshold", None))
+    return BuildConfig(
+        policy=policy,
+        min_coverage_ratio=min_coverage,
+        dedup_removed_ratio_threshold=dedup_threshold,
+    )
+
+
 # --- توابع کمکی برای پاک‌سازی خروجی (کاملاً ایمن و جامع) ---
 def _is_empty_arraylike(x) -> bool:
     """بررسی می‌کند که آیا x یک آرایه خالی است یا خیر"""
@@ -494,8 +521,7 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         "crosswalk": crosswalk.stat().st_mtime,
     }
 
-    min_coverage = _normalize_min_coverage_arg(getattr(args, "min_coverage", None))
-    cfg = BuildConfig(policy=policy, min_coverage_ratio=min_coverage)
+    cfg = _build_config_from_args(args, policy)
 
     (
         matrix,
@@ -846,6 +872,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="حداقل نسبت پوشش (0-1 یا درصد؛ پیش‌فرض از policy)",
+    )
+    build_cmd.add_argument(
+        "--dedup-threshold",
+        type=float,
+        default=None,
+        help="حداکثر نسبت حذف رکوردهای تکراری (0-1 یا درصد؛ پیش‌فرض از policy)",
     )
 
     alloc_cmd = sub.add_parser("allocate", help="تخصیص دانش‌آموزان به منتورها")
