@@ -31,6 +31,7 @@ def _base_policy_payload() -> dict[str, object]:
         "center_map": {"شهدخت کشاورز": 1, "آیناز هوشمند": 2, "*": 0},
         "school_code_empty_as_zero": True,
         "prefer_major_code": True,
+        "coverage_threshold": 0.95,
         "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
         "join_keys": [
             "کدرشته",

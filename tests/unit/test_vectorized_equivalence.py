@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import pandas.testing as pdt
+import pytest
 
 from app.core.build_matrix import (
     CAPACITY_CURRENT_COL,
@@ -214,16 +215,37 @@ def test_validation_captures_unmatched_school_counts() -> None:
     insp_df, schools_df, crosswalk_df = _create_sample_inputs()
     insp_df.loc[0, "نام مدرسه 1"] = "123456"
 
+    cfg = BuildConfig(min_coverage_ratio=0.0)
     _, validation, _, unmatched_df, _, _, _ = build_matrix(
         insp_df,
         schools_df,
         crosswalk_df,
-        cfg=BuildConfig(),
+        cfg=cfg,
     )
 
     assert len(unmatched_df) == 1
     assert validation["unmatched_school_count"].iat[0] == 1
     assert validation["join_key_duplicate_rows"].iat[0] == 0
+    assert "coverage_ratio" in validation.columns
+    total_rows = validation["total_rows"].iat[0]
+    total_candidates = validation["total_candidates"].iat[0]
+    assert total_candidates > 0
+    assert validation["coverage_ratio"].iat[0] == pytest.approx(
+        total_rows / total_candidates
+    )
+
+
+def test_build_matrix_enforces_minimum_coverage_ratio() -> None:
+    insp_df, schools_df, crosswalk_df = _create_sample_inputs()
+    insp_df.loc[0, "نام مدرسه 1"] = "123456"
+
+    with pytest.raises(ValueError, match="نسبت پوشش"):
+        build_matrix(
+            insp_df,
+            schools_df,
+            crosswalk_df,
+            cfg=BuildConfig(min_coverage_ratio=1.0),
+        )
 
 
 def test_build_matrix_reports_join_key_duplicates() -> None:
