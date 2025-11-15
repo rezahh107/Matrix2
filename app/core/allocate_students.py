@@ -449,6 +449,25 @@ def _student_value(student: Mapping[str, object], column: str) -> object:
     raise KeyError(f"Student row missing value for '{column}'")
 
 
+def _extract_student_center(
+    student: Mapping[str, object], policy: PolicyConfig
+) -> int | None:
+    """دریافت مقدار مرکز دانش‌آموز با احترام به نام ستون اعلام‌شده در Policy."""
+
+    column = policy.stage_column("center")
+    try:
+        value = _student_value(student, column)
+    except KeyError:
+        normalized = column.replace(" ", "_")
+        value = student.get(normalized)
+    if value is None:
+        return None
+    try:
+        return _maybe_int_from_text(value)
+    except ValueError:
+        return None
+
+
 def _collect_join_key_map(
     student: Mapping[str, object], policy: PolicyConfig
 ) -> tuple[Dict[str, int], Tuple[str, ...]]:
@@ -514,6 +533,72 @@ def _build_log_from_join_map(
         "alias_unmatched": 0,
     }
     return log
+
+
+def _sort_students_by_center_priority(
+    students: pd.DataFrame, policy: PolicyConfig, priority: Sequence[int] | None
+) -> pd.DataFrame:
+    """اعمال اولویت اجرای مرکز بر روی دیتافریم دانش‌آموزان با sort پایدار."""
+
+    if not priority:
+        return students
+    column = policy.stage_column("center")
+    candidates = (
+        column,
+        column.replace(" ", "_"),
+        CANON_EN_TO_FA.get("center", "center"),
+        "center",
+    )
+    target_column = next((name for name in candidates if name in students.columns), None)
+    if target_column is None:
+        return students
+    numeric = pd.to_numeric(students[target_column], errors="coerce").fillna(-1).astype(int)
+    order_map = {int(value): idx for idx, value in enumerate(priority)}
+    fallback = len(order_map)
+    order = numeric.map(lambda x: order_map.get(int(x), fallback))
+    sorted_students = students.assign(__center_order__=order)
+    by_columns = ["__center_order__"]
+    if "student_id" in sorted_students.columns:
+        by_columns.append("student_id")
+    sorted_students = sorted_students.sort_values(by=by_columns, kind="stable")
+    return sorted_students.drop(columns=["__center_order__"])
+
+
+def _build_center_manager_index(
+    pool: pd.DataFrame,
+    policy: PolicyConfig,
+    manager_map: Mapping[int, Sequence[str]] | None,
+) -> dict[int, pd.Index]:
+    """ساخت نگاشت مرکز → ایندکس منتورها برای اعمال فیلتر مدیر."""
+
+    if not manager_map:
+        return {}
+    center_candidates = (
+        policy.stage_column("center"),
+        policy.stage_column("center").replace(" ", "_"),
+        CANON_EN_TO_FA.get("center", "center"),
+        "center",
+    )
+    center_column = next((name for name in center_candidates if name in pool.columns), None)
+    manager_candidates = (
+        CANON_EN_TO_FA.get("manager_name", "مدیر"),
+        "manager_name",
+    )
+    manager_column = next((name for name in manager_candidates if name in pool.columns), None)
+    if center_column is None or manager_column is None:
+        return {}
+    center_series = pd.to_numeric(ensure_series(pool[center_column]), errors="coerce").fillna(-1)
+    center_series = center_series.astype(int)
+    manager_series = ensure_series(pool[manager_column]).astype("string").str.strip()
+    result: dict[int, pd.Index] = {}
+    for center_value, names in manager_map.items():
+        normalized_names = [str(name).strip() for name in names if str(name).strip()]
+        if not normalized_names:
+            continue
+        mask = center_series.eq(int(center_value)) & manager_series.isin(normalized_names)
+        if mask.any():
+            result[int(center_value)] = pool.index[mask]
+    return result
 
 
 def _normalize_rule_details(payload: object) -> Mapping[str, object] | None:
@@ -1077,8 +1162,14 @@ def allocate_batch(
     progress: ProgressFn = _noop_progress,
     capacity_column: str | None = None,
     frames_already_canonical: bool = False,
+    center_manager_map: Mapping[int, Sequence[str]] | None = None,
+    center_priority: Sequence[int] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """تخصیص دسته‌ای دانش‌آموزان و بازگشت خروجی‌های چهارتایی.
+
+    Args:
+        center_manager_map: نگاشت اختیاری «کد مرکز → نام‌های مدیر» برای محدودسازی استخر.
+        center_priority: ترتیب دلخواه مراکز برای پردازش دانش‌آموزان (stable sort).
 
     Raises:
         ValueError: زمانی که قاب‌های canonical قرارداد ستون‌ها را رعایت نکرده باشند.
@@ -1109,6 +1200,9 @@ def allocate_batch(
     else:
         students_norm = _normalize_students(students, policy)
         pool_norm = _validate_pool(_normalize_pool(candidate_pool, policy))
+    students_norm = _sort_students_by_center_priority(
+        students_norm, policy, center_priority
+    )
     pool_stats = pool_norm.attrs.get("pool_canonicalization_stats")
     alias_autofill = int(getattr(pool_stats, "alias_autofill", 0) or 0) if pool_stats else 0
     alias_unmatched = int(getattr(pool_stats, "alias_unmatched", 0) or 0) if pool_stats else 0
@@ -1162,6 +1256,10 @@ def allocate_batch(
         pool_internal, capacity_column=capacity_internal, policy=policy
     )
 
+    center_manager_index = _build_center_manager_index(
+        pool_with_ids, policy, center_manager_map
+    )
+
     allocations: List[Mapping[str, object]] = []
     logs: List[AllocationLogRecord] = []
     trace_rows: List[Mapping[str, object]] = []
@@ -1174,9 +1272,16 @@ def allocate_batch(
     for idx, (_, student_row) in enumerate(students_norm.iterrows(), start=1):
         student_dict = student_row.to_dict()
         progress(int(idx * 100 / total), f"allocating {idx}/{total}")
+        student_center = _extract_student_center(student_dict, policy)
+        pool_view = pool_with_ids
+        if student_center is not None:
+            center_key = int(student_center)
+            if center_key in center_manager_index and len(center_manager_index[center_key]) > 0:
+                pool_view = pool_with_ids.loc[center_manager_index[center_key]]
+
         result = allocate_student(
             student_dict,
-            pool_with_ids,
+            pool_view,
             policy=policy,
             progress=_noop_progress,
             capacity_column=resolved_capacity_column,

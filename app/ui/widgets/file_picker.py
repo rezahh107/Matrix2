@@ -51,6 +51,11 @@ class FilePicker(QWidget):
 
         self._edit.setText(value)
 
+    def line_edit(self) -> QLineEdit:
+        """دسترسی مستقیم به QLineEdit داخلی برای اتصال سیگنال‌ها."""
+
+        return self._edit
+
     def _pick(self) -> None:
         """باز کردن دیالوگ انتخاب فایل و مقداردهی فیلد."""
 

@@ -331,6 +331,62 @@ def _resolve_optional_override(
     return None
 
 
+def _parse_center_priority_arg(value: object) -> tuple[int, ...]:
+    """تبدیل ورودی دلخواه به توالی پایدار از مقادیر عددی مرکز."""
+
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple, set)):
+        items = list(value)
+    else:
+        text = str(value).replace("،", ",").strip()
+        if not text:
+            return ()
+        items = [token.strip() for token in text.split(",") if token.strip()]
+    priority: list[int] = []
+    for token in items:
+        try:
+            priority.append(int(token))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("center priority must be a comma-separated list of integers") from exc
+    return tuple(priority)
+
+
+def _resolve_center_preferences(
+    args: argparse.Namespace,
+) -> tuple[dict[int, tuple[str, ...]], tuple[int, ...]]:
+    """خواندن تنظیمات مدیر مرکز و ترتیب اولویت با اولویت‌دهی به UI."""
+
+    overrides = getattr(args, "_ui_overrides", {}) or {}
+
+    def _resolve_text(key: str, default: str) -> str:
+        value = overrides.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        cli_value = getattr(args, key, None)
+        if isinstance(cli_value, str) and cli_value.strip():
+            return cli_value.strip()
+        return default
+
+    golestan = _resolve_text("golestan_manager", "شهدخت کشاورز")
+    sadra = _resolve_text("sadra_manager", "آیناز هوشمند")
+    manager_map: dict[int, tuple[str, ...]] = {}
+    if golestan:
+        manager_map[1] = (golestan,)
+    if sadra:
+        manager_map[2] = (sadra,)
+
+    priority_source = overrides.get("center_priority") or getattr(args, "center_priority", None)
+    try:
+        priority = _parse_center_priority_arg(priority_source)
+    except ValueError as exc:
+        raise ValueError(f"center priority override is invalid: {exc}") from exc
+    if not priority:
+        priority = (1, 2, 0)
+
+    return manager_map, priority
+
+
 def _maybe_export_import_to_sabt(
     *,
     args: argparse.Namespace,
@@ -678,6 +734,8 @@ def _allocate_and_write(
     student_ids, counter_summary = _inject_student_ids(students_base, args, policy)
     setattr(args, "_counter_summary", counter_summary)
 
+    center_manager_map, center_priority = _resolve_center_preferences(args)
+
     allocations_df, updated_pool_df, logs_df, trace_df = allocate_batch(
         students_base.copy(deep=True),
         pool_base.copy(deep=True),
@@ -685,6 +743,8 @@ def _allocate_and_write(
         progress=progress,
         capacity_column=capacity_column,
         frames_already_canonical=True,
+        center_manager_map=center_manager_map,
+        center_priority=center_priority,
     )
 
     header_internal: HeaderMode = policy.excel.header_mode_internal  # type: ignore[assignment]
@@ -773,6 +833,8 @@ def _allocate_and_write(
             progress=lambda *_: None,
             capacity_column=capacity_column,
             frames_already_canonical=True,
+            center_manager_map=center_manager_map,
+            center_priority=center_priority,
         )
 
         header_internal = policy.excel.header_mode_internal
@@ -935,6 +997,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="مسیر فایل policy.json",
     )
     alloc_cmd.add_argument(
+        "--golestan-manager",
+        default="شهدخت کشاورز",
+        help="نام مدیر مرکز گلستان (شناسه مرکز ۱)",
+    )
+    alloc_cmd.add_argument(
+        "--sadra-manager",
+        default="آیناز هوشمند",
+        help="نام مدیر مرکز صدرا (شناسه مرکز ۲)",
+    )
+    alloc_cmd.add_argument(
+        "--center-priority",
+        default="1,2,0",
+        help="ترتیب پردازش مراکز هنگام تخصیص (لیست جداشده با ویرگول)",
+    )
+    alloc_cmd.add_argument(
         "--audit",
         action="store_true",
         help="پس از تولید خروجی، ممیزی خودکار را اجرا کن",
@@ -976,6 +1053,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--capacity-column",
         default=None,
         help="نام ستون ظرفیت باقی‌مانده (پیش‌فرض policy)",
+    )
+    rule_cmd.add_argument(
+        "--golestan-manager",
+        default="شهدخت کشاورز",
+        help="نام مدیر مرکز گلستان (شناسه مرکز ۱)",
+    )
+    rule_cmd.add_argument(
+        "--sadra-manager",
+        default="آیناز هوشمند",
+        help="نام مدیر مرکز صدرا (شناسه مرکز ۲)",
+    )
+    rule_cmd.add_argument(
+        "--center-priority",
+        default="1,2,0",
+        help="ترتیب پردازش مراکز هنگام اجرای موتور قواعد",
     )
     rule_cmd.add_argument(
         "--academic-year",

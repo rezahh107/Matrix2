@@ -171,6 +171,115 @@ def test_canonicalize_pool_frame_handles_duplicate_mentor_columns(
     assert normalized["کد کارمندی پشتیبان"].tolist() == ["EMP-001", "EMP-002"]
 
 
+def test_allocate_batch_respects_center_priority_ordering() -> None:
+    policy = load_policy()
+    students = pd.DataFrame(
+        [
+            {
+                "student_id": "S-A",
+                "کدرشته": 1201,
+                "گروه_آزمایشی": "تجربی",
+                "جنسیت": 1,
+                "دانش_آموز_فارغ": 0,
+                "مرکز_گلستان_صدرا": 0,
+                "مالی_حکمت_بنیاد": 0,
+                "کد_مدرسه": 3581,
+            },
+            {
+                "student_id": "S-B",
+                "کدرشته": 1201,
+                "گروه_آزمایشی": "تجربی",
+                "جنسیت": 1,
+                "دانش_آموز_فارغ": 0,
+                "مرکز_گلستان_صدرا": 2,
+                "مالی_حکمت_بنیاد": 0,
+                "کد_مدرسه": 3581,
+            },
+            {
+                "student_id": "S-C",
+                "کدرشته": 1201,
+                "گروه_آزمایشی": "تجربی",
+                "جنسیت": 1,
+                "دانش_آموز_فارغ": 0,
+                "مرکز_گلستان_صدرا": 1,
+                "مالی_حکمت_بنیاد": 0,
+                "کد_مدرسه": 3581,
+            },
+        ]
+    )
+    pool = pd.DataFrame(
+        {
+            "پشتیبان": ["M1", "M2", "M3"],
+            "کد کارمندی پشتیبان": ["EMP-1", "EMP-2", "EMP-3"],
+            "کدرشته": [1201, 1201, 1201],
+            "کدرشته | group_code": [1201, 1201, 1201],
+            "گروه آزمایشی": ["تجربی", "تجربی", "تجربی"],
+            "گروه آزمایشی | exam_group": ["تجربی", "تجربی", "تجربی"],
+            "جنسیت": [1, 1, 1],
+            "جنسیت | gender": [1, 1, 1],
+            "دانش آموز فارغ": [0, 0, 0],
+            "دانش آموز فارغ | graduation_status": [0, 0, 0],
+            "مرکز گلستان صدرا": [0, 2, 1],
+            "مرکز گلستان صدرا | center": [0, 2, 1],
+            "مالی حکمت بنیاد": [0, 0, 0],
+            "مالی حکمت بنیاد | finance": [0, 0, 0],
+            "کد مدرسه": [3581, 3581, 3581],
+            "کد مدرسه | school_code": [3581, 3581, 3581],
+            "remaining_capacity": [5, 5, 5],
+            "occupancy_ratio": [0.5, 0.4, 0.3],
+            "allocations_new": [0, 0, 0],
+        }
+    )
+
+    _, _, logs, _ = allocate_batch(
+        students,
+        pool,
+        policy=policy,
+        center_priority=[2, 1, 0],
+    )
+
+    assert logs["student_id"].tolist() == ["S-B", "S-C", "S-A"]
+
+
+def test_allocate_batch_filters_by_center_manager() -> None:
+    policy = load_policy()
+    students = _single_student(student_id="S-1")
+    pool = pd.DataFrame(
+        {
+            "پشتیبان": ["هدف", "دیگر"],
+            "کد کارمندی پشتیبان": ["EMP-10", "EMP-20"],
+            "کدرشته": [1201, 1201],
+            "کدرشته | group_code": [1201, 1201],
+            "گروه آزمایشی": ["تجربی", "تجربی"],
+            "گروه آزمایشی | exam_group": ["تجربی", "تجربی"],
+            "جنسیت": [1, 1],
+            "جنسیت | gender": [1, 1],
+            "دانش آموز فارغ": [0, 0],
+            "دانش آموز فارغ | graduation_status": [0, 0],
+            "مرکز گلستان صدرا": [1, 1],
+            "مرکز گلستان صدرا | center": [1, 1],
+            "مالی حکمت بنیاد": [0, 0],
+            "مالی حکمت بنیاد | finance": [0, 0],
+            "کد مدرسه": [3581, 3581],
+            "کد مدرسه | school_code": [3581, 3581],
+            "remaining_capacity": [1, 1],
+            "occupancy_ratio": [0.9, 0.1],
+            "allocations_new": [5, 0],
+            "مدیر": ["شهدخت کشاورز", "مدیر دیگر"],
+        }
+    )
+
+    allocations, _, logs, _ = allocate_batch(
+        students,
+        pool,
+        policy=policy,
+        center_manager_map={1: ("شهدخت کشاورز",)},
+    )
+
+    assert allocations["mentor_id"].iloc[0] == "EMP-10"
+    assert logs.loc[0, "mentor_selected"].strip() == "هدف"
+
+
 def test_canonicalize_pool_frame_reports_join_key_duplicates(
     _base_pool: pd.DataFrame,
 ) -> None:
