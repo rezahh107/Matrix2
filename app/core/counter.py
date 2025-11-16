@@ -295,14 +295,20 @@ def find_max_sequence_by_prefix(current_roster_df: pd.DataFrame | None, prefix: 
     return max(sequences) if sequences else 0
 
 
-def _prior_map(prior_roster_df: pd.DataFrame | None) -> Dict[str, str]:
+def _prior_map(
+    prior_roster_df: pd.DataFrame | None,
+) -> tuple[Dict[str, str], Dict[str, list[str]]]:
+    """ساخت نگاشت روستر سال قبل با حذف برخورد شناسه‌های تکراری."""
+
     if prior_roster_df is None or prior_roster_df.empty:
-        return {}
+        return {}, {}
     nat_col = _pick_nat_id_column(prior_roster_df)
     counter_col = _pick_counter_column(prior_roster_df)
     if nat_col is None or counter_col is None:
-        return {}
+        return {}, {}
     mapping: Dict[str, str] = {}
+    conflicts: Dict[str, list[str]] = {}
+    counter_to_owner: Dict[str, str] = {}
     for nat, counter_value in zip(prior_roster_df[nat_col], prior_roster_df[counter_col]):
         normalized = _normalize_nat_id(nat)
         if not normalized:
@@ -312,8 +318,18 @@ def _prior_map(prior_roster_df: pd.DataFrame | None) -> Dict[str, str]:
             counter_clean = validate_counter(raw_counter)
         except ValueError:
             continue
-        mapping[normalized] = counter_clean
-    return mapping
+        owner = counter_to_owner.get(counter_clean)
+        if owner is None:
+            counter_to_owner[counter_clean] = normalized
+            mapping[normalized] = counter_clean
+            continue
+        if owner == normalized:
+            mapping[normalized] = counter_clean
+            continue
+        conflict_peers = conflicts.setdefault(counter_clean, [owner])
+        if normalized not in conflict_peers:
+            conflict_peers.append(normalized)
+    return mapping, conflicts
 
 
 def assign_counters(
@@ -369,7 +385,7 @@ def assign_counters(
     )
     result = pd.Series(index=students_df.index, dtype="string", name="student_id")
 
-    prior_mapping = _prior_map(prior_roster_df)
+    prior_mapping, prior_conflicts = _prior_map(prior_roster_df)
     male_max = find_max_sequence_by_prefix(
         current_roster_df, yy_prefix + policy.male_mid3
     )
@@ -425,12 +441,17 @@ def assign_counters(
         _assign(index_label, counter_value)
         assigned_mapping[normalized_nat] = validate_counter(counter_value)
 
+    conflict_count = sum(max(len(peers) - 1, 0) for peers in prior_conflicts.values())
+    conflict_samples = sorted(prior_conflicts.keys())[:3]
+
     result.attrs["counter_summary"] = {
         "reused_count": reused_count,
         "new_male_count": new_male_count,
         "new_female_count": new_female_count,
         "next_male_start": next_male,
         "next_female_start": next_female,
+        "prior_conflict_counter_count": conflict_count,
+        "prior_conflict_counter_samples": conflict_samples,
     }
 
     return result
