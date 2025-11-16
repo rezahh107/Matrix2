@@ -191,6 +191,41 @@ class TestRegistrationStatusPreservation:
         assert sheet2.loc[1, "وضعیت ثبت نام"] == "حکمت"
         assert sheet2.loc[2, "وضعیت ثبت نام"] == "عادی"
 
+    def test_cli_path_preserves_reg_status_column(
+        self, exporter_config: dict
+    ) -> None:
+        allocations_df = pd.DataFrame(
+            {
+                "student_id": ["s1", "s2", "s3"],
+                "mentor_id": [1, 2, 3],
+            }
+        )
+        students_df = pd.DataFrame(
+            {
+                "student_id": ["s1", "s2", "s3"],
+                "reg_status": [0, 3, 0],
+                "student_first_name": ["الف", "ب", "پ"],
+                "student_last_name": ["یک", "دو", "سه"],
+                "student_gender": ["M", "F", "M"],
+            }
+        )
+        mentors_df = pd.DataFrame({"mentor_id": [1, 2, 3]})
+
+        prepared = prepare_allocation_export_frame(
+            allocations_df,
+            students_df,
+            mentors_df,
+            student_ids=allocations_df["student_id"],
+        )
+
+        assert "student_registration_status" in prepared.columns
+        numeric_status = prepared["student_registration_status"].astype("Int64").tolist()
+        assert numeric_status == [0, 3, 0]
+
+        sheet2 = build_sheet2_frame(prepared, exporter_config)
+
+        assert sheet2["وضعیت ثبت نام"].tolist() == ["عادی", "حکمت", "عادی"]
+
 
 class TestDerivedFields:
     def test_city_derived_from_school_code(

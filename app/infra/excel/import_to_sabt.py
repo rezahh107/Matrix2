@@ -919,6 +919,10 @@ def build_sheet2_frame(
     if today is None:
         today = datetime.today()
     df_alloc = enrich_student_contacts(df_alloc)
+    if "student_registration_status" not in df_alloc.columns:
+        df_alloc["student_registration_status"] = pd.Series(
+            [pd.NA] * len(df_alloc), index=df_alloc.index, dtype="Int64"
+        )
     sheet_cfg = exporter_cfg["sheets"]["Sheet2"]
     columns_cfg = sheet_cfg["columns"]
     if isinstance(columns_cfg, OrderedDict):
@@ -997,8 +1001,10 @@ def _normalize_registration_status(series: pd.Series) -> pd.Series:
     """
 
     normalized = ensure_series(series)
-    blank_mask = normalized.isna() | normalized.astype("string").str.strip().eq("")
-    return normalized.mask(blank_mask, 0)
+    numeric = pd.to_numeric(normalized, errors="coerce")
+    blank_mask = numeric.isna()
+    filled = numeric.mask(blank_mask, 0)
+    return filled.astype("Int64")
 
 
 def apply_alias_rule(sheet2: pd.DataFrame, df_alloc: pd.DataFrame) -> pd.DataFrame:
