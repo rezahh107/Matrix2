@@ -106,6 +106,35 @@ def test_assign_counters_duplicate_rows_raise_on_assert() -> None:
         assert_unique_student_ids(counters)
 
 
+def test_assign_counters_prior_conflicts_skip_duplicate_counters() -> None:
+    students = pd.DataFrame(
+        {
+            "national_id": ["0000000001", "0000000002"],
+            "gender": [1, 1],
+        }
+    )
+    prior = pd.DataFrame(
+        {
+            "national_id": ["0000000001", "0000000002"],
+            "student_id": ["533570074", "533570074"],
+        }
+    )
+
+    result = assign_counters(
+        students,
+        prior_roster_df=prior,
+        current_roster_df=None,
+        academic_year=1404,
+    )
+
+    assert result.iloc[0] != result.iloc[1]
+    assert result.is_unique
+    summary = result.attrs.get("counter_summary", {})
+    assert summary.get("reused_count") == 1
+    assert summary.get("prior_conflict_counter_count") == 1
+    assert "533570074" in summary.get("prior_conflict_counter_samples", [])
+
+
 def test_assign_counters_handles_duplicate_gender_columns() -> None:
     students = pd.DataFrame(
         [["0012345678", 1, 1]],
