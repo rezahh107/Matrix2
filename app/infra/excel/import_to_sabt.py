@@ -12,7 +12,7 @@ from typing import Any, Callable, Iterable, Mapping, MutableMapping, NamedTuple,
 
 import pandas as pd
 
-from app.core.common.columns import CANON_EN_TO_FA, canonicalize_headers, ensure_series
+from app.core.common.columns import canonicalize_headers, ensure_series
 from app.core.common.normalization import normalize_fa
 from app.core.common.phone_rules import (
     normalize_landline_series,
@@ -20,10 +20,9 @@ from app.core.common.phone_rules import (
 )
 from app.infra.excel._writer import ensure_text_columns
 from app.core.pipeline import (
-    CONTACT_POLICY_ALIAS_GROUPS,
-    CONTACT_POLICY_COLUMNS,
     enrich_student_contacts,
 )
+from app.infra.excel.common import attach_contact_columns
 
 GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
     # اطلاعات هویتی دانش‌آموز
@@ -69,24 +68,6 @@ GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
     "150": ("submission_source", "منبع ارسال"),
     "151": ("form_version", "sa_form_version"),
 }
-
-
-def _attach_contact_columns(
-    target: pd.DataFrame, contacts: pd.DataFrame
-) -> pd.DataFrame:
-    """تزریق ستون‌های تماس نرمال‌شده و تمامی معادل‌های فارسی آن‌ها."""
-
-    for column in CONTACT_POLICY_COLUMNS:
-        if column not in contacts.columns:
-            continue
-        series = ensure_series(contacts[column]).reindex(target.index)
-        target[column] = series
-        alias = CANON_EN_TO_FA.get(column)
-        if alias:
-            target[alias] = series
-        for extra in CONTACT_POLICY_ALIAS_GROUPS.get(column, ()): 
-            target[extra] = series
-    return target
 
 _DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _HEADER_SPACE_PATTERN = re.compile(r"[\s\u200c\u200f]+")
@@ -214,7 +195,7 @@ def prepare_allocation_export_frame(
     alloc = canonicalize_headers(allocations_df, header_mode="en").copy()
     students_contacts = enrich_student_contacts(students_df)
     students = canonicalize_headers(students_df, header_mode="en").copy()
-    students = _attach_contact_columns(students, students_contacts)
+    students = attach_contact_columns(students, students_contacts)
     mentors = canonicalize_headers(mentors_df, header_mode="en").copy()
 
     dedupe_logs: list[dict[str, list[str]]] = []
