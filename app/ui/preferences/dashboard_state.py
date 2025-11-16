@@ -64,13 +64,6 @@ _FILE_STATUS_TEXT = {
     "output_folder": ("files.output_folder", "آخرین پوشه‌ای که خروجی در آن ذخیره شد"),
 }
 
-_RUN_TYPE_LABELS = {
-    "build": "ساخت ماتریس",
-    "allocate": "تخصیص",
-    "rule-engine": "موتور قواعد",
-}
-
-
 def _path_from_prefs(prefs: AppPreferences, attr: str) -> str:
     value = getattr(prefs, attr, "")
     return str(value or "").strip()
@@ -119,14 +112,11 @@ def format_last_run_label(info: LastRunInfo | None, translator: UiTranslator) ->
 
     if info is None:
         return translator.text("status.no_runs", "آخرین اجرا: هنوز اجرایی ثبت نشده است")
-    run_title = _RUN_TYPE_LABELS.get(
-        info.run_type,
-        {
-            "build": translator.text("action.build", info.run_type),
-            "allocate": translator.text("action.allocate", info.run_type),
-            "rule-engine": translator.text("action.rule_engine", info.run_type),
-        }.get(info.run_type, translator.text("status.ready", info.run_type)),
-    )
+    run_title = {
+        "build": translator.text("action.build", info.run_type),
+        "allocate": translator.text("action.allocate", info.run_type),
+        "rule-engine": translator.text("action.rule_engine", info.run_type),
+    }.get(info.run_type, translator.text("status.ready", info.run_type))
     formatted_time = info.timestamp.strftime("%Y/%m/%d %H:%M")
-    prefix = translator.text("status.no_runs", "آخرین اجرا: هنوز اجرایی ثبت نشده است").split(":")[0]
+    prefix = translator.text("status.last_run_prefix", "آخرین اجرا")
     return f"{prefix}: {run_title} • {formatted_time}"
