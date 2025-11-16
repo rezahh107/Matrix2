@@ -103,10 +103,10 @@ def _policy_font_name() -> str:
         name = (get_policy().excel.font_name or "Vazirmatn").strip()
     except Exception as exc:  # pragma: no cover - خطاهای محیطی Policy
         LOGGER.warning(
-            "خواندن فونت از Policy شکست خورد؛ استفاده از تاهوما.", exc_info=exc
+            "خواندن فونت از Policy شکست خورد؛ استفاده از وزیرمتن.", exc_info=exc
         )
-        return "Tahoma"
-    return name or "Tahoma"
+        return "Vazirmatn"
+    return name or "Vazirmatn"
 
 
 @lru_cache(maxsize=1)

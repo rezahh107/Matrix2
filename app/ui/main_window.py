@@ -54,8 +54,16 @@ from app.infra import cli
 from app.utils.path_utils import resource_path
 
 from .task_runner import ProgressFn, Worker
-from .widgets import FilePicker
+from .widgets import DashboardCard, FilePicker
 from .app_preferences import AppPreferences
+from .preferences import (
+    FileStatusLevel,
+    FileStatusViewModel,
+    collect_file_statuses,
+    format_last_run_label,
+    load_dashboard_texts,
+    read_last_run_info,
+)
 
 __all__ = ["MainWindow", "run_demo", "FilePicker"]
 
@@ -72,6 +80,7 @@ class MainWindow(QMainWindow):
         self._worker: Worker | None = None
         self._success_hook: Callable[[], None] | None = None
         self._prefs = AppPreferences()
+        self._dashboard_texts = load_dashboard_texts()
         self._btn_open_output_folder: QPushButton | None = None
         self._center_manager_combos: Dict[int, QComboBox] = {}
         self._btn_reset_managers: QPushButton | None = None
@@ -82,6 +91,8 @@ class MainWindow(QMainWindow):
         self._stage_badge: QLabel | None = None
         self._stage_detail: QLabel | None = None
         self._progress_caption: QLabel | None = None
+        self._last_run_badge: QLabel | None = None
+        self._file_status_rows: Dict[str, Tuple[QLabel, QLabel]] = {}
         self._current_action: str = "آماده"
         policy_file = resource_path("config", "policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
@@ -131,6 +142,10 @@ class MainWindow(QMainWindow):
         status_column.addWidget(self._stage_badge)
         status_column.addWidget(self._stage_detail)
         status_column.addWidget(self._status)
+        self._last_run_badge = QLabel("آخرین اجرا: هنوز اجرایی ثبت نشده است")
+        self._last_run_badge.setObjectName("lastRunBadge")
+        self._last_run_badge.setWordWrap(True)
+        status_column.addWidget(self._last_run_badge)
         status_layout.addLayout(status_column, 1)
 
         self._progress = QProgressBar()
@@ -211,6 +226,7 @@ class MainWindow(QMainWindow):
         self._register_interactive_controls()
         self._update_output_folder_button_state()
         self._apply_theme()
+        self._refresh_dashboard_state()
 
     # ------------------------------------------------------------------ UI setup
     def _wrap_page(self, page: QWidget) -> QScrollArea:
@@ -224,39 +240,58 @@ class MainWindow(QMainWindow):
         return scroll
 
     def _build_dashboard(self) -> QWidget:
-        """ایجاد کارت داشبورد سبک با وضعیت Policy و میانبرها."""
+        """ایجاد پانل داشبورد با کارت‌های وضعیت، چک‌لیست و میانبرها."""
 
         frame = QFrame(self)
-        frame.setFrameShape(QFrame.StyledPanel)
-        frame.setObjectName("dashboardCard")
+        frame.setObjectName("dashboardPanel")
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(32)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(16)
 
-        policy_display = self._default_policy_path or "config/policy.json"
-        info = QLabel(
-            f"<div class='dashboard-info'>"
-            f"<div class='dashboard-title'>سیاست فعال</div>"
-            f"<div class='dashboard-value'>{policy_display}</div>"
-            "<div class='dashboard-meta'>نسخه Policy: 1.0.3 • نسخه SSoT: 1.0.2</div>"
-            "</div>"
+        files_card = DashboardCard(
+            self._dashboard_texts.files_title,
+            self._dashboard_texts.files_description,
+            self,
         )
-        info.setTextFormat(Qt.RichText)
-        info.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        info.setObjectName("dashboardInfo")
-        layout.addWidget(info, 1)
+        statuses = collect_file_statuses(self._prefs)
+        for status in statuses:
+            files_card.body_layout().addWidget(self._create_file_status_row(status))
+        layout.addWidget(files_card, 1)
 
-        shortcuts = QVBoxLayout()
-        shortcuts.setContentsMargins(0, 0, 0, 0)
-        shortcuts.setSpacing(12)
-        label = QLabel("میان‌بر سناریوها")
-        label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        label.setObjectName("dashboardShortcutsTitle")
-        shortcuts.addWidget(label)
+        checklist_card = DashboardCard(
+            self._dashboard_texts.checklist_title,
+            self._dashboard_texts.checklist_description,
+            self,
+        )
+        if self._dashboard_texts.checklist_items:
+            for item in self._dashboard_texts.checklist_items:
+                label = QLabel(f"• {item.text}")
+                label.setWordWrap(True)
+                label.setObjectName("dashboardChecklistItem")
+                checklist_card.body_layout().addWidget(label)
+        else:
+            placeholder = QLabel("چک‌لیستی تعریف نشده است")
+            placeholder.setObjectName("dashboardChecklistItem")
+            checklist_card.body_layout().addWidget(placeholder)
+        layout.addWidget(checklist_card, 1)
+
+        actions_card = DashboardCard(
+            self._dashboard_texts.actions_title,
+            self._dashboard_texts.actions_description,
+            self,
+        )
+        policy_display = self._default_policy_path or "config/policy.json"
+        policy_label = QLabel(
+            f"<b>سیاست فعال:</b> {policy_display}<br>نسخه Policy: 1.0.3 • نسخه SSoT: 1.0.2"
+        )
+        policy_label.setTextFormat(Qt.RichText)
+        policy_label.setWordWrap(True)
+        policy_label.setObjectName("dashboardPolicyInfo")
+        actions_card.body_layout().addWidget(policy_label)
 
         buttons_row = QHBoxLayout()
         buttons_row.setContentsMargins(0, 0, 0, 0)
-        buttons_row.setSpacing(12)
+        buttons_row.setSpacing(8)
         buttons = [
             (
                 "ساخت ماتریس",
@@ -287,9 +322,8 @@ class MainWindow(QMainWindow):
             QStyle.StandardPixmap.SP_DirHomeIcon,
         )
         buttons_row.addWidget(self._btn_open_output_shortcut)
-        shortcuts.addLayout(buttons_row)
-        shortcuts.addStretch(1)
-        layout.addLayout(shortcuts, 0)
+        actions_card.body_layout().addLayout(buttons_row)
+        layout.addWidget(actions_card, 1)
 
         return frame
 
@@ -312,6 +346,70 @@ class MainWindow(QMainWindow):
         button.clicked.connect(callback)
         self._shortcut_buttons.append(button)
         return button
+
+    def _create_file_status_row(self, model: FileStatusViewModel) -> QWidget:
+        """ساخت ردیف وضعیت فایل بر اساس مدل نمایشی."""
+
+        row = QFrame(self)
+        row.setObjectName("fileStatusRow")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        indicator = QLabel("●", row)
+        indicator.setObjectName("fileStatusIndicator")
+        indicator.setAlignment(Qt.AlignCenter)
+        indicator.setFixedWidth(18)
+        layout.addWidget(indicator, 0, Qt.AlignTop)
+
+        text_label = QLabel(row)
+        text_label.setWordWrap(True)
+        text_label.setObjectName("fileStatusText")
+        layout.addWidget(text_label, 1)
+
+        row.setToolTip(model.description)
+        self._file_status_rows[model.key] = (indicator, text_label)
+        self._apply_file_status_model(model)
+        return row
+
+    def _apply_file_status_model(self, model: FileStatusViewModel) -> None:
+        """به‌روزرسانی نما با توجه به وضعیت فایل."""
+
+        widgets = self._file_status_rows.get(model.key)
+        if widgets is None:
+            return
+        indicator, text_label = widgets
+        color = "#16a34a" if model.level is FileStatusLevel.READY else "#d97706"
+        symbol = "●" if model.level is FileStatusLevel.READY else "▲"
+        indicator.setText(symbol)
+        indicator.setStyleSheet(f"color:{color};font-size:16px;")
+        path_display = model.path if model.path else "تنظیم نشده"
+        state_text = "آماده" if model.exists else "در انتظار اجرا"
+        text_label.setText(
+            f"<b>{model.label}</b><br>"
+            f"<span style='color:#475569'>{path_display}</span><br>"
+            f"<span style='color:#0f172a'>{state_text}</span>"
+        )
+
+    def _refresh_dashboard_state(self) -> None:
+        """به‌روزرسانی کارت وضعیت و برچسب آخرین اجرا."""
+
+        self._apply_file_statuses(collect_file_statuses(self._prefs))
+        self._refresh_last_run_badge()
+
+    def _apply_file_statuses(self, statuses: Iterable[FileStatusViewModel]) -> None:
+        """اعمال وضعیت فایل‌ها روی ویجت‌های کارت."""
+
+        for model in statuses:
+            self._apply_file_status_model(model)
+
+    def _refresh_last_run_badge(self) -> None:
+        """به‌روزرسانی برچسب آخرین اجرای ثبت‌شده."""
+
+        if self._last_run_badge is None:
+            return
+        info = read_last_run_info(self._prefs)
+        self._last_run_badge.setText(format_last_run_label(info))
 
     def _create_page_hero(self, title: str, subtitle: str, badge: str) -> QFrame:
         """ساخت هدر Hero برای صفحات تب‌ها."""
@@ -364,6 +462,19 @@ class MainWindow(QMainWindow):
                 border-radius: 18px;
                 background-color: #ffffff;
             }
+            #dashboardPanel {
+                background-color: transparent;
+            }
+            QLabel#dashboardCardTitle {
+                font-size: 15px;
+                font-weight: 600;
+                color: #12263f;
+            }
+            QLabel#dashboardCardDescription,
+            QLabel#dashboardPolicyInfo,
+            QLabel#dashboardChecklistItem {
+                color: #4f5d75;
+            }
             QLabel#heroTitle {
                 font-size: 16px;
                 font-weight: 600;
@@ -390,6 +501,10 @@ class MainWindow(QMainWindow):
             QLabel#progressCaption {
                 color: #1f2937;
                 font-weight: 500;
+            }
+            QLabel#lastRunBadge {
+                color: #0f766e;
+                font-weight: 600;
             }
             QProgressBar#progressBar {
                 background-color: #e9edf7;
@@ -1095,6 +1210,8 @@ class MainWindow(QMainWindow):
             output_path = self._picker_output_matrix.text().strip()
             if output_path:
                 self._prefs.last_matrix_path = output_path
+            self._prefs.record_last_run("build")
+            self._refresh_dashboard_state()
 
         self._launch_cli(argv, "ساخت ماتریس", on_success=_remember_build_output)
 
@@ -1170,6 +1287,8 @@ class MainWindow(QMainWindow):
             if sabt_config:
                 self._prefs.last_sabt_config_path = sabt_config
             self._update_output_folder_button_state()
+            self._prefs.record_last_run("allocate")
+            self._refresh_dashboard_state()
 
         self._launch_cli(
             argv,
@@ -1250,6 +1369,8 @@ class MainWindow(QMainWindow):
             if sabt_config:
                 self._prefs.last_sabt_config_path = sabt_config
             self._update_output_folder_button_state()
+            self._prefs.record_last_run("rule-engine")
+            self._refresh_dashboard_state()
 
         self._launch_cli(
             argv,
