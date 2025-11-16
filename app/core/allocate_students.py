@@ -85,6 +85,14 @@ _MENTOR_ALIAS_KEYS: Tuple[str, ...] = (
     "کد پستی",
 )
 
+_ALLOCATION_OUTPUT_COLUMNS: Tuple[str, ...] = (
+    "student_id",
+    "student_national_code",
+    "mentor",
+    "mentor_id",
+    "mentor_alias_code",
+)
+
 _JOIN_STAGE_FAILURE_ORDER: Tuple[TraceStageLiteral, ...] = (
     "type",
     "group",
@@ -1780,7 +1788,7 @@ def allocate_batch(
 
     progress(100, "done")
 
-    allocations_df = pd.DataFrame(allocations)
+    allocations_df = pd.DataFrame(allocations, columns=_ALLOCATION_OUTPUT_COLUMNS)
     logs_df = pd.DataFrame(logs)
     trace_df = pd.DataFrame(trace_rows)
 
