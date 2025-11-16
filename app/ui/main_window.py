@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -294,9 +295,13 @@ class MainWindow(QMainWindow):
         policy_label.setObjectName("dashboardPolicyInfo")
         actions_card.body_layout().addWidget(policy_label)
 
-        buttons_row = QHBoxLayout()
+        buttons_container = QWidget(self)
+        buttons_row = QGridLayout(buttons_container)
         buttons_row.setContentsMargins(0, 0, 0, 0)
-        buttons_row.setSpacing(6)
+        buttons_row.setHorizontalSpacing(6)
+        buttons_row.setVerticalSpacing(6)
+        buttons_row.setColumnStretch(0, 1)
+        buttons_row.setColumnStretch(1, 1)
         buttons = [
             (
                 "ساخت ماتریس",
@@ -317,17 +322,17 @@ class MainWindow(QMainWindow):
                 QStyle.StandardPixmap.SP_BrowserReload,
             ),
         ]
-        for text, tooltip, callback, icon_role in buttons:
+        for idx, (text, tooltip, callback, icon_role) in enumerate(buttons):
             button = self._create_dashboard_shortcut(text, tooltip, callback, icon_role)
-            buttons_row.addWidget(button)
+            buttons_row.addWidget(button, idx // 2, idx % 2)
         self._btn_open_output_shortcut = self._create_dashboard_shortcut(
             "پوشه خروجی",
             "آخرین پوشه خروجی تولید شده را باز می‌کند",
             self._open_last_output_folder,
             QStyle.StandardPixmap.SP_DirHomeIcon,
         )
-        buttons_row.addWidget(self._btn_open_output_shortcut)
-        actions_card.body_layout().addLayout(buttons_row)
+        buttons_row.addWidget(self._btn_open_output_shortcut, len(buttons) // 2, len(buttons) % 2)
+        actions_card.body_layout().addWidget(buttons_container)
         layout.addWidget(actions_card, 1)
 
         return frame
