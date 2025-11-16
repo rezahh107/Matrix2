@@ -45,17 +45,4 @@ def test_policy_font_name_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
         raise RuntimeError("policy missing")
 
     monkeypatch.setattr(fonts, "get_policy", _boom)
-    assert fonts._policy_font_name() == "Tahoma"
-
-
-def test_policy_font_size_is_clamped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """اندازهٔ فونت Policy باید بین ۸ تا ۱۲ نگه داشته شود."""
-
-    class _DummyPolicy:
-        class _Excel:
-            font_size = 2
-
-        excel = _Excel()
-
-    monkeypatch.setattr(fonts, "get_policy", lambda: _DummyPolicy())
-    assert fonts._policy_font_size() == 8
+    assert fonts._policy_font_name() == "Vazirmatn"

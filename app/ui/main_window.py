@@ -343,157 +343,114 @@ class MainWindow(QMainWindow):
     def _apply_theme(self) -> None:
         """اعمال استایل‌شیت سراسری برای ایجاد هماهنگی بصری."""
 
-        colors = {
-            "window_bg": "#f3f3f3",
-            "surface_bg": "#ffffff",
-            "subtle_bg": "#f8f9fc",
-            "border": "#d1d9e6",
-            "border_subtle": "#e5e9f2",
-            "text_primary": "#1f2328",
-            "text_secondary": "#444d5c",
-            "text_muted": "#5f6b7a",
-            "accent": "#0f6cbd",
-            "accent_dark": "#0c4a85",
-            "accent_soft": "#d6e9ff",
-            "accent_border": "#8ec5ff",
-        }
-        stylesheet = f"""
-            QMainWindow {{
-                background-color: {colors["window_bg"]};
-                color: {colors["text_primary"]};
-            }}
-            QWidget {{
-                color: {colors["text_primary"]};
-            }}
-            QScrollArea {{
-                background: transparent;
-            }}
-            QGroupBox {{
-                border: 1px solid {colors["border"]};
+        stylesheet = """
+            QMainWindow {
+                background-color: #f5f7fb;
+            }
+            QGroupBox {
+                border: 1px solid #e1e7f0;
                 border-radius: 12px;
                 margin-top: 12px;
                 padding: 12px;
-                background-color: {colors["surface_bg"]};
-            }}
-            QGroupBox::title {{
+            }
+            QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top right;
                 padding: 0 4px;
-                color: {colors["text_secondary"]};
-                font-weight: 600;
-            }}
-            #dashboardCard, #heroCard {{
-                border: 1px solid {colors["border"]};
+                color: #344767;
+            }
+            #dashboardCard, #heroCard {
+                border: 1px solid #d8e2f1;
                 border-radius: 18px;
-                background-color: {colors["surface_bg"]};
-            }}
-            QLabel#dashboardInfo {{
-                color: {colors["text_secondary"]};
-            }}
-            QLabel#dashboardShortcutsTitle {{
-                color: {colors["text_primary"]};
+                background-color: #ffffff;
+            }
+            QLabel#heroTitle {
+                font-size: 16px;
                 font-weight: 600;
-            }}
-            QLabel#heroTitle {{
-                font-size: 15px;
-                font-weight: 600;
-                color: {colors["text_primary"]};
-            }}
-            QLabel#heroSubtitle {{
-                color: {colors["text_secondary"]};
-            }}
-            QLabel#heroBadge {{
+                color: #12263f;
+            }
+            QLabel#heroSubtitle {
+                color: #4f5d75;
+            }
+            QLabel#heroBadge {
                 padding: 6px 18px;
                 border-radius: 16px;
-                background-color: {colors["accent_soft"]};
-                color: {colors["accent_dark"]};
+                background-color: #e8f0ff;
+                color: #0d47a1;
                 font-weight: 600;
-            }}
-            QLabel#labelStageBadge {{
-                font-size: 13px;
+            }
+            QLabel#labelStageBadge {
+                font-size: 14px;
                 font-weight: 600;
-                color: {colors["accent_dark"]};
-            }}
-            QLabel#labelStageDetail {{
-                color: {colors["text_secondary"]};
-            }}
-            QLabel#labelStatus, QLabel#progressCaption {{
-                color: {colors["text_primary"]};
-            }}
-            QProgressBar#progressBar {{
-                background-color: {colors["subtle_bg"]};
+                color: #0d47a1;
+            }
+            QLabel#labelStageDetail {
+                color: #4f5d75;
+            }
+            QLabel#progressCaption {
+                color: #1f2937;
+                font-weight: 500;
+            }
+            QProgressBar#progressBar {
+                background-color: #e9edf7;
                 border-radius: 8px;
-                height: 18px;
-                border: 1px solid {colors["border_subtle"]};
-            }}
-            QProgressBar#progressBar::chunk {{
-                background-color: {colors["accent"]};
-                border-radius: 7px;
-            }}
-            QTextEdit#textLog {{
-                background-color: {colors["surface_bg"]};
-                color: {colors["text_primary"]};
+                height: 20px;
+            }
+            QProgressBar#progressBar::chunk {
+                background-color: #2563eb;
+                border-radius: 8px;
+            }
+            QTextEdit#textLog {
+                background-color: #0f172a;
+                color: #f8fafc;
                 border-radius: 12px;
-                border: 1px solid {colors["border"]};
-                padding: 12px;
-            }}
-            #logPanel {{
-                border-radius: 14px;
-                background-color: {colors["surface_bg"]};
-            }}
-            #logPlaceholder {{
-                color: {colors["text_muted"]};
-                border: 1px dashed {colors["border"]};
+                padding: 8px;
+            }
+            #logPlaceholder {
+                color: #64748b;
+                border: 1px dashed #cbd5f5;
                 border-radius: 12px;
-                padding: 20px;
-                background-color: {colors["subtle_bg"]};
-            }}
-            QPushButton {{
-                background-color: {colors["accent"]};
+                padding: 16px;
+                background-color: rgba(148, 163, 184, 0.15);
+            }
+            QPushButton {
+                background-color: #2563eb;
                 color: white;
                 padding: 8px 20px;
                 border-radius: 10px;
-                border: 1px solid {colors["accent_border"]};
+                border: none;
                 font-weight: 600;
-            }}
-            QPushButton:hover:!disabled {{
-                background-color: {colors["accent_dark"]};
-            }}
-            QPushButton:disabled {{
-                background-color: {colors["border_subtle"]};
-                color: {colors["text_muted"]};
-                border-color: {colors["border_subtle"]};
-            }}
-            QToolButton#dashboardShortcut {{
-                border-radius: 14px;
+            }
+            QPushButton:hover:!disabled {
+                background-color: #1d4ed8;
+            }
+            QPushButton:disabled {
+                background-color: #94a3b8;
+                color: #e2e8f0;
+            }
+            QToolButton#dashboardShortcut {
+                border-radius: 16px;
                 padding: 12px 18px;
                 min-width: 120px;
-                background-color: {colors["subtle_bg"]};
-                color: {colors["text_primary"]};
-                border: 1px solid {colors["border_subtle"]};
-            }}
-            QToolButton#dashboardShortcut:hover:!disabled {{
-                background-color: {colors["accent_soft"]};
-                border-color: {colors["accent_border"]};
-            }}
-            QToolButton#dashboardShortcut:disabled {{
-                background-color: {colors["border_subtle"]};
-                color: {colors["text_muted"]};
-            }}
-            QTabBar::tab {{
+                background-color: rgba(37, 99, 235, 0.08);
+                color: #0f172a;
+            }
+            QToolButton#dashboardShortcut:hover:!disabled {
+                background-color: rgba(37, 99, 235, 0.18);
+            }
+            QToolButton#dashboardShortcut:disabled {
+                background-color: rgba(148, 163, 184, 0.4);
+                color: #475569;
+            }
+            QTabBar::tab {
                 padding: 10px 16px;
                 margin: 2px;
-                border: none;
-                color: {colors["text_secondary"]};
-            }}
-            QTabBar::tab:selected {{
-                color: {colors["accent_dark"]};
+            }
+            QTabBar::tab:selected {
+                color: #0d47a1;
                 font-weight: 600;
-                border-bottom: 2px solid {colors["accent"]};
-            }}
-            QTabWidget::pane {{
-                border: none;
-            }}
+                border-bottom: 2px solid #0d47a1;
+            }
         """
         self.setStyleSheet(stylesheet)
 
