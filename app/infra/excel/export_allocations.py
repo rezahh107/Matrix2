@@ -10,14 +10,14 @@ from typing import Iterable, Literal, Sequence
 
 import pandas as pd
 
-from app.core.common.columns import CANON_EN_TO_FA, canonicalize_headers, ensure_series
+from app.core.common.columns import canonicalize_headers, ensure_series
 from app.core.common.normalization import normalize_fa
-from app.core.pipeline import (
-    CONTACT_POLICY_ALIAS_GROUPS,
-    CONTACT_POLICY_COLUMNS,
-    enrich_student_contacts,
+from app.core.pipeline import enrich_student_contacts
+from app.infra.excel.common import (
+    attach_contact_columns,
+    enforce_text_columns,
+    identify_code_headers,
 )
-from app.infra.excel.common import enforce_text_columns, identify_code_headers
 from app.infra.io_utils import write_xlsx_atomic
 
 __all__ = [
@@ -44,24 +44,6 @@ _ALLOCATION_HEADER_MAP = {
     normalize_fa("کپی کد جایگزین 39"): "mentor_alias_code",
 }
 _SPLIT_PATTERN = re.compile(r"[|،,/]+")
-
-
-def _attach_contact_columns(
-    target: pd.DataFrame, contacts: pd.DataFrame
-) -> pd.DataFrame:
-    """افزودن ستون‌های تماس نرمال‌شده و همهٔ نام‌های فارسی متناظر."""
-
-    for column in CONTACT_POLICY_COLUMNS:
-        if column not in contacts.columns:
-            continue
-        series = ensure_series(contacts[column]).reindex(target.index)
-        target[column] = series
-        alias = CANON_EN_TO_FA.get(column)
-        if alias:
-            target[alias] = series
-        for extra in CONTACT_POLICY_ALIAS_GROUPS.get(column, ()):
-            target[extra] = series
-    return target
 
 
 def _clean_text(value: object) -> str:
@@ -237,7 +219,7 @@ def build_sabt_export_frame(
     alloc_en = canonicalize_headers(allocation_df, header_mode="en").copy()
     students_contacts = enrich_student_contacts(students_df)
     students_en = canonicalize_headers(students_df, header_mode="en").copy()
-    students_en = _attach_contact_columns(students_en, students_contacts)
+    students_en = attach_contact_columns(students_en, students_contacts)
 
     if "student_id" not in alloc_en.columns:
         raise KeyError("allocation_df must include 'student_id' column")
