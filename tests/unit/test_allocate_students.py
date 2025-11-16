@@ -580,6 +580,13 @@ def test_allocate_batch_no_match_sets_error(_base_pool: pd.DataFrame) -> None:
     allocations, updated_pool, logs, _ = allocate_batch(students, _base_pool)
 
     assert allocations.empty
+    assert list(allocations.columns) == [
+        "student_id",
+        "student_national_code",
+        "mentor",
+        "mentor_id",
+        "mentor_alias_code",
+    ]
     pd.testing.assert_frame_equal(
         updated_pool[_base_pool.columns], _base_pool, check_dtype=False
     )
