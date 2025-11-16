@@ -27,6 +27,8 @@ __all__ = [
     "normalize_digits_series",
     "fix_guardian_phones",
     "fix_guardian_phone_columns",
+    "apply_hekmat_contact_policy",
+    "apply_hekmat_contact_policy_series",
 ]
 
 
@@ -212,5 +214,82 @@ def fix_guardian_phone_columns(
 
     _assign_series(result, target1, col1, first_series)
     _assign_series(result, target2, col2, second_series)
+
+    return result
+
+
+def _to_int64(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    return pd.Series(numeric, index=series.index, dtype="Int64")
+
+
+def _ensure_string_series(series: pd.Series) -> pd.Series:
+    if series.dtype == "string":
+        return series
+    return series.astype("string")
+
+
+def _blank_mask(series: pd.Series) -> pd.Series:
+    stripped = series.str.strip()
+    stripped_na = stripped.isna()
+    return stripped_na | (stripped == "")
+
+
+def apply_hekmat_contact_policy_series(
+    status: pd.Series,
+    landline: pd.Series,
+    tracking: pd.Series | None = None,
+) -> tuple[pd.Series, pd.Series | None]:
+    """اعمال قانون حکمت روی سری‌های وضعیت، تلفن ثابت و کد رهگیری."""
+
+    status_int = _to_int64(status)
+    landline_series = _ensure_string_series(landline)
+    hekmat_mask = (status_int == HEKMAT_STATUS_CODE).fillna(False)
+    empty_landline = _blank_mask(landline_series)
+    updated_landline = landline_series.mask(
+        hekmat_mask & empty_landline, HEKMAT_LANDLINE_FALLBACK
+    )
+
+    updated_tracking: pd.Series | None = None
+    if tracking is not None:
+        tracking_series = _ensure_string_series(tracking)
+        updated_tracking = tracking_series.mask(hekmat_mask, HEKMAT_TRACKING_CODE)
+        updated_tracking = updated_tracking.mask(~hekmat_mask, "")
+
+    return updated_landline, updated_tracking
+
+
+def apply_hekmat_contact_policy(
+    df: pd.DataFrame,
+    *,
+    status_column: str,
+    landline_column: str,
+    tracking_code_column: str | None = None,
+) -> pd.DataFrame:
+    """اعمال قوانین تلفن ثابت و کد رهگیری حکمت روی دیتافریم."""
+
+    if status_column not in df.columns or landline_column not in df.columns:
+        return df.copy()
+
+    result = df.copy()
+    result.attrs.update(df.attrs)
+
+    tracking_series = None
+    if tracking_code_column is not None:
+        if tracking_code_column not in result.columns:
+            result[tracking_code_column] = pd.Series(
+                [pd.NA] * len(result), dtype="string", index=result.index
+            )
+        tracking_series = result[tracking_code_column]
+
+    updated_landline, updated_tracking = apply_hekmat_contact_policy_series(
+        result[status_column],
+        result[landline_column],
+        tracking_series,
+    )
+    result[landline_column] = updated_landline
+
+    if tracking_code_column is not None and updated_tracking is not None:
+        result[tracking_code_column] = updated_tracking
 
     return result

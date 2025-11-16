@@ -155,7 +155,7 @@ class TestHekmatConditionalLogic:
         sheet2 = build_sheet2_frame(sample_allocation_df, exporter_config)
         assert sheet2.loc[0, "کد رهگیری حکمت"] == ""
         assert sheet2.loc[1, "کد رهگیری حکمت"] == ""
-        assert sheet2.loc[2, "کد رهگیری حکمت"] == "1234567890123456"
+        assert sheet2.loc[2, "کد رهگیری حکمت"] == "1111111111111111"
 
     def test_hekmat_code_normalized(self, sample_allocation_df: pd.DataFrame, exporter_config: dict) -> None:
         sheet2 = build_sheet2_frame(sample_allocation_df, exporter_config)

@@ -10,6 +10,10 @@ for candidate in _HERE.parents:
         break
 
 from app.core.common.phone_rules import (
+    HEKMAT_LANDLINE_FALLBACK,
+    HEKMAT_STATUS_CODE,
+    HEKMAT_TRACKING_CODE,
+    apply_hekmat_contact_policy,
     fix_guardian_phones,
     normalize_digits,
     normalize_digits_series,
@@ -81,3 +85,51 @@ def test_normalize_landline_series_handles_special_zero() -> None:
     normalized_with_special = normalize_landline_series(series, allow_special_zero=True)
     assert normalized_with_special.loc[1] == "00000000000"
     assert normalized_with_special.isna().tolist() == [False, False, True]
+
+
+def test_apply_hekmat_contact_policy_fills_landline_and_tracking() -> None:
+    df = pd.DataFrame(
+        {
+            "student_registration_status": [HEKMAT_STATUS_CODE, HEKMAT_STATUS_CODE],
+            "student_landline": [pd.NA, "  "],
+            "hekmat_tracking": ["", None],
+        }
+    )
+    enriched = apply_hekmat_contact_policy(
+        df,
+        status_column="student_registration_status",
+        landline_column="student_landline",
+        tracking_code_column="hekmat_tracking",
+    )
+    assert enriched["student_landline"].tolist() == [
+        HEKMAT_LANDLINE_FALLBACK,
+        HEKMAT_LANDLINE_FALLBACK,
+    ]
+    assert enriched["hekmat_tracking"].tolist() == [
+        HEKMAT_TRACKING_CODE,
+        HEKMAT_TRACKING_CODE,
+    ]
+
+
+def test_apply_hekmat_contact_policy_respects_non_hekmat_rows() -> None:
+    df = pd.DataFrame(
+        {
+            "student_registration_status": [HEKMAT_STATUS_CODE, 0],
+            "student_landline": [None, "51234567"],
+            "hekmat_tracking": ["", "custom"],
+        }
+    )
+    enriched = apply_hekmat_contact_policy(
+        df,
+        status_column="student_registration_status",
+        landline_column="student_landline",
+        tracking_code_column="hekmat_tracking",
+    )
+    assert enriched["student_landline"].tolist() == [
+        HEKMAT_LANDLINE_FALLBACK,
+        "51234567",
+    ]
+    assert enriched["hekmat_tracking"].tolist() == [
+        HEKMAT_TRACKING_CODE,
+        "",
+    ]

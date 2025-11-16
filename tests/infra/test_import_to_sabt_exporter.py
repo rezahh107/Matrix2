@@ -293,7 +293,7 @@ def test_hekmat_rule_resets_non_matching_rows() -> None:
     df_sheet2 = build_sheet2_frame(df_alloc, cfg)
     assert df_sheet2.loc[0, "کد رهگیری حکمت"] == "1111111111111111"
     assert df_sheet2.loc[1, "کد رهگیری حکمت"] == ""
-    assert df_sheet2.loc[1, "نوع بسته حکمت"] == ""
+    assert df_sheet2.loc[1, "نوع بسته حکمت"] == "نقره‌ای"
 
 
 def test_mobile_normalizer_handles_various_inputs() -> None:
