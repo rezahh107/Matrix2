@@ -800,6 +800,7 @@ def _inject_student_ids(
     """ساخت ستون student_id با رعایت Policy و ورودی‌های UI/CLI."""
 
     overrides = getattr(args, "_ui_overrides", {}) or {}
+    is_ui_mode = bool(getattr(args, "_ui_mode", False))
 
     def _resolve_path(name: str) -> str | None:
         value = overrides.get(name)
@@ -817,6 +818,8 @@ def _inject_student_ids(
     current_df = _read_optional_first_sheet(current_path)
 
     strategy_override = overrides.get("counter_duplicate_strategy")
+    if strategy_override in (None, "") and is_ui_mode:
+        strategy_override = "assign-new"
     strategy_value = None
     if isinstance(strategy_override, str) and strategy_override.strip():
         strategy_value = strategy_override.strip()
@@ -870,7 +873,7 @@ def _inject_student_ids(
                 policy=policy,
                 academic_year=year_value,
                 strategy=strategy_value,
-                interactive=sys.stdin.isatty(),
+                interactive=(sys.stdin.isatty() and not is_ui_mode),
             )
             if retry_required:
                 if drop_indexes:
@@ -1599,6 +1602,7 @@ def main(
     args = parser.parse_args(argv)
 
     args._ui_overrides = ui_overrides or {}
+    args._ui_mode = ui_overrides is not None
 
     policy_path = Path(args.policy)
     policy = load_policy(policy_path)
