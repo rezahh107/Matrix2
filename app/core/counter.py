@@ -237,6 +237,25 @@ def _pick_nat_id_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+def _normalized_counter_series(df: pd.DataFrame, column: str) -> pd.Series:
+    """تهیهٔ سری شمارنده با strip و تبدیل ارقام به لاتین.
+
+    مثال::
+
+        >>> frame = pd.DataFrame({"counter": [" ۱۲۳۴۵۶۷۸۹ "]})
+        >>> _normalized_counter_series(frame, "counter").iloc[0]
+        '123456789'
+    """
+
+    return (
+        ensure_series(df[column])
+        .astype("string")
+        .fillna("")
+        .str.strip()
+        .map(normalize_digits)
+    )
+
+
 def detect_academic_year_from_counters(
     current_roster_df: pd.DataFrame | None,
 ) -> Optional[int]:
@@ -249,11 +268,7 @@ def detect_academic_year_from_counters(
     if column is None:
         return None
 
-    series = (
-        current_roster_df[column]
-        .astype("string")
-        .map(lambda value: normalize_digits((value or "").strip()))
-    )
+    series = _normalized_counter_series(current_roster_df, column)
     for value in series:
         if value and re.fullmatch(r"\d{9}", value):
             return int(value[:2]) + 1350
@@ -270,11 +285,7 @@ def infer_year_strict(current_roster_df: pd.DataFrame | None) -> Optional[int]:
     if column is None:
         return None
 
-    series = (
-        current_roster_df[column]
-        .astype("string")
-        .map(lambda value: normalize_digits((value or "").strip()))
-    )
+    series = _normalized_counter_series(current_roster_df, column)
 
     prefixes = {
         value[:2]
@@ -304,11 +315,7 @@ def find_max_sequence_by_prefix(current_roster_df: pd.DataFrame | None, prefix: 
     column = _pick_counter_column(current_roster_df)
     if column is None:
         return 0
-    series = (
-        current_roster_df[column]
-        .astype("string")
-        .map(lambda value: normalize_digits((value or "").strip()))
-    )
+    series = _normalized_counter_series(current_roster_df, column)
     mask = series.str.startswith(prefix, na=False)
     sequences = [seq for seq in series[mask].map(_extract_sequence) if seq is not None]
     return max(sequences) if sequences else 0
