@@ -739,6 +739,13 @@ class MainWindow(QMainWindow):
         safe_message = message or self._status.text() or "در حال پردازش"
         self._progress_caption.setText(f"{pct}% | {safe_message}")
 
+    def _set_picker_button_text(self, *pickers: FilePicker) -> None:
+        """تنظیم متن دکمهٔ انتخاب برای مجموعه‌ای از FilePicker ها."""
+
+        browse_text = self._t("action.browse", "انتخاب…")
+        for picker in pickers:
+            picker.set_button_text(browse_text)
+
     def _build_build_page(self) -> QWidget:
         """فرم ورودی‌های سناریوی ساخت ماتریس."""
 
@@ -777,6 +784,12 @@ class MainWindow(QMainWindow):
         self._picker_crosswalk.setToolTip(self._t("files.crosswalk", "جدول Crosswalk جهت نگاشت رشته‌ها و گروه‌ها"))
         inputs_layout.addRow(self._t("files.crosswalk", "Crosswalk"), self._picker_crosswalk)
 
+        self._set_picker_button_text(
+            self._picker_inspactor,
+            self._picker_schools,
+            self._picker_crosswalk,
+        )
+
         outer.addWidget(inputs_group)
 
         policy_group = QGroupBox(self._t("files.policy", "سیاست"), page)
@@ -791,6 +804,7 @@ class MainWindow(QMainWindow):
         if self._default_policy_path:
             self._picker_policy_build.setText(self._default_policy_path)
         policy_layout.addRow("سیاست", self._picker_policy_build)
+        self._set_picker_button_text(self._picker_policy_build)
         outer.addWidget(policy_group)
 
         output_group = QGroupBox("خروجی", page)
@@ -805,6 +819,7 @@ class MainWindow(QMainWindow):
         self._picker_output_matrix.setToolTip("مسیر ذخیرهٔ فایل خروجی ماتریس اهلیت")
         self._apply_pref_default(self._picker_output_matrix, self._prefs.last_matrix_path)
         output_layout.addRow("خروجی ماتریس", self._picker_output_matrix)
+        self._set_picker_button_text(self._picker_output_matrix)
         outer.addWidget(output_group)
 
         self._btn_build = QPushButton("ساخت ماتریس")
@@ -853,6 +868,8 @@ class MainWindow(QMainWindow):
         )
         inputs_layout.addRow("استخر منتورها", self._picker_pool)
 
+        self._set_picker_button_text(self._picker_students, self._picker_pool)
+
         outer.addWidget(inputs_group)
 
         advanced_group = QGroupBox("تنظیمات پیشرفته", page)
@@ -874,6 +891,8 @@ class MainWindow(QMainWindow):
         self._picker_alloc_out.setObjectName("editAllocOut")
         self._picker_alloc_out.setToolTip("مسیر ذخیرهٔ نتیجه نهایی تخصیص دانش‌آموز-منتور")
         self._apply_pref_default(self._picker_alloc_out, self._prefs.last_alloc_output)
+
+        self._set_picker_button_text(self._picker_policy_allocate, self._picker_alloc_out)
 
         self._edit_capacity = QLineEdit(page)
         self._edit_capacity.setPlaceholderText("remaining_capacity")
@@ -919,6 +938,11 @@ class MainWindow(QMainWindow):
         self._picker_current_roster.setToolTip("برای کشف آخرین شمارنده‌های سال جاری")
         register_layout.addRow("روستر سال جاری", self._picker_current_roster)
 
+        self._set_picker_button_text(
+            self._picker_prior_roster,
+            self._picker_current_roster,
+        )
+
         self._btn_autodetect = QPushButton("پیشنهاد خودکار", register_box)
         self._btn_autodetect.setObjectName("autodetectCountersBtn")
         self._btn_autodetect.clicked.connect(self._autodetect_counters)
@@ -953,6 +977,8 @@ class MainWindow(QMainWindow):
         )
         sabt_layout.addRow("فایل خروجی", self._picker_sabt_output_alloc)
 
+        self._set_picker_button_text(self._picker_sabt_output_alloc)
+
         self._picker_sabt_config_alloc = FilePicker(
             page,
             placeholder="SmartAlloc_Exporter_Config_v1.json",
@@ -970,6 +996,8 @@ class MainWindow(QMainWindow):
         )
         sabt_layout.addRow("فایل تنظیمات", self._picker_sabt_config_alloc)
 
+        self._set_picker_button_text(self._picker_sabt_config_alloc)
+
         self._picker_sabt_template_alloc = FilePicker(
             page,
             placeholder="قالب اختیاری ImportToSabt",
@@ -980,6 +1008,8 @@ class MainWindow(QMainWindow):
             "قالب اختیاری؛ در صورت خالی ساخت خودکار انجام می‌شود"
         )
         sabt_layout.addRow("فایل قالب", self._picker_sabt_template_alloc)
+
+        self._set_picker_button_text(self._picker_sabt_template_alloc)
 
         sabt_hint = QLabel(
             "اگر فایل قالب خالی بماند، ensure_template_workbook براساس"
@@ -1041,6 +1071,11 @@ class MainWindow(QMainWindow):
         self._picker_rule_students.setToolTip("لیست دانش‌آموزان برای ارزیابی مجدد با موتور قواعد")
         inputs_layout.addRow("فایل دانش‌آموزان", self._picker_rule_students)
 
+        self._set_picker_button_text(
+            self._picker_rule_matrix,
+            self._picker_rule_students,
+        )
+
         outer.addWidget(inputs_group)
 
         register_box = QGroupBox("شناسهٔ ثبت‌نام", page)
@@ -1075,6 +1110,11 @@ class MainWindow(QMainWindow):
         self._picker_rule_current_roster.setObjectName("ruleCurrentRosterPicker")
         register_layout.addRow("روستر سال جاری", self._picker_rule_current_roster)
 
+        self._set_picker_button_text(
+            self._picker_rule_prior_roster,
+            self._picker_rule_current_roster,
+        )
+
         self._btn_rule_autodetect = QPushButton("پیشنهاد خودکار", register_box)
         self._btn_rule_autodetect.setObjectName("ruleAutodetectBtn")
         self._btn_rule_autodetect.clicked.connect(self._autodetect_rule_engine_counters)
@@ -1094,6 +1134,7 @@ class MainWindow(QMainWindow):
         if self._default_policy_path:
             self._picker_policy_rule.setText(self._default_policy_path)
         advanced_layout.addRow("سیاست", self._picker_policy_rule)
+        self._set_picker_button_text(self._picker_policy_rule)
 
         self._edit_rule_capacity = QLineEdit(page)
         self._edit_rule_capacity.setPlaceholderText("remaining_capacity")
@@ -1113,6 +1154,7 @@ class MainWindow(QMainWindow):
         self._picker_rule_output.setObjectName("editRuleOutput")
         self._picker_rule_output.setToolTip("فایل خروجی موتور قواعد برای ذخیره گزارش جدید")
         output_layout.addRow("خروجی", self._picker_rule_output)
+        self._set_picker_button_text(self._picker_rule_output)
         outer.addWidget(output_group)
 
         sabt_group = QGroupBox("خروجی Sabt (ImportToSabt)", page)
@@ -1135,6 +1177,8 @@ class MainWindow(QMainWindow):
         )
         sabt_layout.addRow("فایل خروجی", self._picker_sabt_output_rule)
 
+        self._set_picker_button_text(self._picker_sabt_output_rule)
+
         self._picker_sabt_config_rule = FilePicker(
             page,
             placeholder="SmartAlloc_Exporter_Config_v1.json",
@@ -1152,6 +1196,8 @@ class MainWindow(QMainWindow):
         )
         sabt_layout.addRow("فایل تنظیمات", self._picker_sabt_config_rule)
 
+        self._set_picker_button_text(self._picker_sabt_config_rule)
+
         self._picker_sabt_template_rule = FilePicker(
             page,
             placeholder="قالب اختیاری ImportToSabt",
@@ -1162,6 +1208,8 @@ class MainWindow(QMainWindow):
             "قالب اختیاری؛ در صورت خالی همان ساخت خودکار اعمال می‌شود"
         )
         sabt_layout.addRow("فایل قالب", self._picker_sabt_template_rule)
+
+        self._set_picker_button_text(self._picker_sabt_template_rule)
 
         sabt_hint = QLabel(
             "خالی‌گذاشتن قالب باعث می‌شود ensure_template_workbook از تنظیمات"
@@ -2228,26 +2276,33 @@ class MainWindow(QMainWindow):
             else:
                 color = "#c00"
                 QMessageBox.critical(self, "خطای ناشناخته", msg)
-            self._status.setText("خطا")
-            self._set_stage("خطا", msg)
-            self._update_progress_caption(self._progress.value(), "خطا")
+            self._status.setText(self._t("status.error", "خطا"))
+            self._set_stage(self._t("status.error", "خطا"), msg)
+            self._update_progress_caption(self._progress.value(), self._t("status.error", "خطا"))
             self._append_log(f'<span style="color:{color}">❌ {msg}</span>')
             self._update_status_bar_state("error")
             return
 
         if not success:
-            self._status.setText("لغو شد")
-            self._set_stage("لغو شد", "عملیات متوقف شد")
-            self._update_progress_caption(self._progress.value(), "لغو شد")
-            self._append_log("⚠️ عملیات متوقف شد")
+            self._status.setText(self._t("status.cancelled", "لغو شد"))
+            self._set_stage(
+                self._t("status.cancelled", "لغو شد"),
+                self._t("status.cancelled.detail", "عملیات متوقف شد"),
+            )
+            self._update_progress_caption(
+                self._progress.value(), self._t("status.cancelled", "لغو شد")
+            )
+            self._append_log(f'⚠️ {self._t("status.cancelled.detail", "عملیات متوقف شد")}')
             self._update_status_bar_state("ready")
             return
 
         self._progress.setValue(100)
-        self._status.setText("کامل")
-        self._set_stage(self._current_action, "عملیات با موفقیت پایان یافت")
-        self._update_progress_caption(100, "کامل")
-        self._append_log('<span style="color:#2e7d32">✅ عملیات با موفقیت پایان یافت</span>')
+        self._status.setText(self._t("status.complete", "کامل"))
+        self._set_stage(self._current_action, self._t("status.complete.detail", "عملیات با موفقیت پایان یافت"))
+        self._update_progress_caption(100, self._t("status.complete", "کامل"))
+        self._append_log(
+            f'<span style="color:#2e7d32">✅ {self._t("status.complete.detail", "عملیات با موفقیت پایان یافت")}</span>'
+        )
         self._update_status_bar_state("ready")
         if hook is not None:
             try:
