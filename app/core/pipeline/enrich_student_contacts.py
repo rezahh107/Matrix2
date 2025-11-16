@@ -32,7 +32,7 @@ CONTACT_POLICY_ALIAS_GROUPS: Mapping[str, tuple[str, ...]] = {
     "contact1_mobile": ("تلفن رابط 1", "موبایل رابط 1"),
     "contact2_mobile": ("تلفن رابط 2", "موبایل رابط 2"),
     "student_landline": ("تلفن ثابت", "تلفن"),
-    "student_registration_status": ("وضعیت ثبت نام",),
+    "student_registration_status": ("وضعیت ثبت نام", "reg_status"),
     "hekmat_tracking": ("کد رهگیری حکمت", "student_hekmat_tracking_code"),
 }
 
@@ -93,6 +93,7 @@ _STATUS_EXTRA: tuple[str, ...] = _optional_names(
     CANON_EN_TO_FA.get("student_registration_status"),
     CANON_EN_TO_FA.get("finance"),
     *_alias_names("student_registration_status"),
+    "registration_status",
 )
 _TRACKING_EXTRA: tuple[str, ...] = _optional_names(
     CANON_EN_TO_FA.get("hekmat_tracking"),
@@ -102,6 +103,7 @@ _STATUS_CANDIDATES: tuple[str, ...] = (
     *_expand_with_student_prefix(
         (
             "student_registration_status",
+            "reg_status",
             "registration_status",
             "student_finance",
             "finance",
@@ -175,11 +177,11 @@ def enrich_student_contacts(df: pd.DataFrame) -> pd.DataFrame:
 
     status_column = _first_existing(result, _STATUS_CANDIDATES, "student_registration_status")
     _ensure_column(result, status_column)
+    status_numeric = pd.to_numeric(result[status_column], errors="coerce")
     canonical_status_column = "student_registration_status"
+    result[canonical_status_column] = status_numeric.astype("Int64")
     if status_column != canonical_status_column:
-        result[canonical_status_column] = result[status_column]
-    else:
-        canonical_status_column = status_column
+        result[status_column] = status_numeric.astype("Int64")
 
     tracking_column = _first_existing(result, _TRACKING_CODE_CANDIDATES, _TRACKING_CODE_CANDIDATES[0])
     _ensure_column(result, tracking_column)
