@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QFrame
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QLabel,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+    QFrame,
+)
 
 __all__ = ["DashboardCard"]
 
@@ -12,15 +20,27 @@ __all__ = ["DashboardCard"]
 class DashboardCard(QFrame):
     """کارت داشبورد با عنوان، توضیح و محتوای سفارشی."""
 
-    def __init__(self, title: str, description: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        description: str,
+        parent: QWidget | None = None,
+        *,
+        max_height: int | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("dashboardCard")
+        policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        if max_height is not None:
+            policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.setMaximumHeight(max_height)
+        self.setSizePolicy(policy)
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(20, 16, 20, 16)
-        self._layout.setSpacing(12)
+        self._layout.setContentsMargins(14, 12, 14, 12)
+        self._layout.setSpacing(8)
 
         header = QVBoxLayout()
-        header.setSpacing(4)
+        header.setSpacing(2)
 
         title_label = QLabel(title)
         title_label.setObjectName("dashboardCardTitle")
@@ -32,9 +52,17 @@ class DashboardCard(QFrame):
         header.addWidget(description_label)
         self._layout.addLayout(header)
 
-        self._body = QVBoxLayout()
-        self._body.setSpacing(8)
-        self._layout.addLayout(self._body)
+        self._body_container = QScrollArea(self)
+        self._body_container.setWidgetResizable(True)
+        self._body_container.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._body_container.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._body_container.setFrameShape(QFrame.NoFrame)
+        self._body_widget = QWidget(self._body_container)
+        self._body = QVBoxLayout(self._body_widget)
+        self._body.setContentsMargins(0, 0, 0, 0)
+        self._body.setSpacing(4)
+        self._body_container.setWidget(self._body_widget)
+        self._layout.addWidget(self._body_container)
 
     def body_layout(self) -> QVBoxLayout:
         """دسترسی به لایهٔ محتوای کارت."""

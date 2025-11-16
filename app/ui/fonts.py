@@ -18,7 +18,7 @@ __all__ = [
     "apply_default_font",
 ]
 
-DEFAULT_UI_POINT_SIZE = 11
+DEFAULT_UI_POINT_SIZE = 8
 
 LOGGER = logging.getLogger(__name__)
 
@@ -124,7 +124,9 @@ def _policy_font_size() -> int:
     return max(8, min(12, size))
 
 
-def prepare_default_font(*, point_size: int | None = None) -> "QFont":
+def prepare_default_font(
+    *, point_size: int | None = None, family_override: str | None = None
+) -> "QFont":
     """ساخت شیء فونت پیش‌فرض با نصب فونت‌های لازم (وزیرمتن/تاهوما).
 
     مثال::
@@ -136,7 +138,7 @@ def prepare_default_font(*, point_size: int | None = None) -> "QFont":
 
     from PySide6.QtGui import QFont, QFontDatabase
 
-    policy_font = _policy_font_name()
+    policy_font = (family_override or "").strip() or _policy_font_name()
     policy_point_size = _policy_font_size()
     resolved_point_size = policy_point_size if point_size is None else point_size
     installed_families = _install_bundled_fonts(policy_font)
@@ -161,7 +163,10 @@ def prepare_default_font(*, point_size: int | None = None) -> "QFont":
 
 
 def apply_default_font(
-    app: "QApplication", *, point_size: int = DEFAULT_UI_POINT_SIZE
+    app: "QApplication",
+    *,
+    point_size: int = DEFAULT_UI_POINT_SIZE,
+    family_override: str | None = None,
 ) -> "QFont":
     """نصب و اعمال فونت پیش‌فرض (تاهوما یا وزیر) بر روی QApplication.
 
@@ -171,6 +176,6 @@ def apply_default_font(
         >>> font = apply_default_font(app, point_size=11)  # doctest: +SKIP
     """
 
-    font = prepare_default_font(point_size=point_size)
+    font = prepare_default_font(point_size=point_size, family_override=family_override)
     app.setFont(font)
     return font

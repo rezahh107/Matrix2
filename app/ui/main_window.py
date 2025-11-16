@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QProgressBar,
     QScrollArea,
+    QSizePolicy,
     QStackedLayout,
     QSplitter,
     QStyle,
@@ -106,8 +107,8 @@ class MainWindow(QMainWindow):
 
         top_pane = QWidget(self._splitter)
         top_layout = QVBoxLayout(top_pane)
-        top_layout.setContentsMargins(16, 16, 16, 8)
-        top_layout.setSpacing(16)
+        top_layout.setContentsMargins(12, 12, 12, 6)
+        top_layout.setSpacing(12)
 
         dashboard = self._build_dashboard()
         top_layout.addWidget(dashboard)
@@ -120,7 +121,7 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._wrap_page(self._build_rule_engine_page()), "موتور قواعد")
         self._tabs.addTab(self._wrap_page(self._build_validate_page()), "اعتبارسنجی")
         self._tabs.addTab(self._wrap_page(self._build_explain_page()), "توضیحات")
-        top_layout.addWidget(self._tabs)
+        top_layout.addWidget(self._tabs, 1)
 
         bottom_pane = QWidget(self._splitter)
         bottom_layout = QVBoxLayout(bottom_pane)
@@ -244,14 +245,17 @@ class MainWindow(QMainWindow):
 
         frame = QFrame(self)
         frame.setObjectName("dashboardPanel")
+        frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        frame.setMaximumHeight(160)
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(16)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(10)
 
         files_card = DashboardCard(
             self._dashboard_texts.files_title,
             self._dashboard_texts.files_description,
             self,
+            max_height=140,
         )
         statuses = collect_file_statuses(self._prefs)
         for status in statuses:
@@ -262,6 +266,7 @@ class MainWindow(QMainWindow):
             self._dashboard_texts.checklist_title,
             self._dashboard_texts.checklist_description,
             self,
+            max_height=140,
         )
         if self._dashboard_texts.checklist_items:
             for item in self._dashboard_texts.checklist_items:
@@ -279,6 +284,7 @@ class MainWindow(QMainWindow):
             self._dashboard_texts.actions_title,
             self._dashboard_texts.actions_description,
             self,
+            max_height=140,
         )
         policy_display = self._default_policy_path or "config/policy.json"
         policy_label = QLabel(
@@ -291,7 +297,7 @@ class MainWindow(QMainWindow):
 
         buttons_row = QHBoxLayout()
         buttons_row.setContentsMargins(0, 0, 0, 0)
-        buttons_row.setSpacing(8)
+        buttons_row.setSpacing(6)
         buttons = [
             (
                 "ساخت ماتریس",
@@ -338,9 +344,11 @@ class MainWindow(QMainWindow):
 
         button = QToolButton(self)
         button.setObjectName("dashboardShortcut")
-        button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         button.setIcon(self.style().standardIcon(icon_role))
-        button.setIconSize(QSize(32, 32))
+        button.setIconSize(QSize(20, 20))
+        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        button.setFixedHeight(40)
         button.setText(text)
         button.setToolTip(tooltip)
         button.clicked.connect(callback)
@@ -443,134 +451,156 @@ class MainWindow(QMainWindow):
 
         stylesheet = """
             QMainWindow {
-                background-color: #020617;
+                background-color: #1f1f23;
             }
             QWidget {
-                color: #e2e8f0;
+                color: #f2f2f2;
+                font-family: "Tahoma";
+                font-size: 8pt;
             }
             QGroupBox {
-                border: 1px solid rgba(148, 163, 184, 0.25);
-                border-radius: 12px;
-                margin-top: 12px;
-                padding: 12px;
-                background-color: rgba(15, 23, 42, 0.75);
+                border: 1px solid #3c3f45;
+                border-radius: 10px;
+                margin-top: 10px;
+                padding: 10px;
+                background-color: #25262b;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top right;
-                padding: 0 4px;
-                color: #e2e8f0;
+                padding: 0 6px;
+                color: #d6d6d6;
             }
             #dashboardCard, #heroCard {
-                border: 1px solid rgba(148, 163, 184, 0.35);
-                border-radius: 18px;
-                background-color: #0b1220;
+                border: 1px solid #3c3f45;
+                border-radius: 10px;
+                background-color: #2d2f36;
             }
             #dashboardPanel {
                 background-color: transparent;
             }
+            #dashboardCard QScrollArea {
+                border: none;
+            }
             QLabel#dashboardCardTitle {
-                font-size: 15px;
+                font-size: 9pt;
                 font-weight: 600;
-                color: #12263f;
+                color: #f7f7f7;
             }
             QLabel#dashboardCardDescription,
             QLabel#dashboardPolicyInfo,
             QLabel#dashboardChecklistItem {
-                color: #4f5d75;
+                color: #b6b8bd;
             }
             QLabel#heroTitle {
-                font-size: 16px;
+                font-size: 10pt;
                 font-weight: 600;
-                color: #f1f5f9;
+                color: #ffffff;
             }
             QLabel#heroSubtitle {
-                color: #a5b4fc;
+                color: #ced0d6;
             }
             QLabel#heroBadge {
-                padding: 6px 18px;
-                border-radius: 16px;
-                background-color: rgba(14, 165, 233, 0.15);
-                color: #38bdf8;
-                font-weight: 600;
+                padding: 4px 12px;
+                border-radius: 12px;
+                background-color: #323439;
+                color: #8ad0ff;
+                border: 1px solid #0078d4;
             }
             QLabel#labelStageBadge {
-                font-size: 14px;
                 font-weight: 600;
-                color: #38bdf8;
+                color: #8ad0ff;
             }
             QLabel#labelStageDetail {
-                color: #94a3b8;
+                color: #d5d7db;
             }
             QLabel#progressCaption {
-                color: #cbd5f5;
+                color: #d5d7db;
                 font-weight: 500;
             }
             QLabel#lastRunBadge {
-                color: #0f766e;
+                color: #c2f7ed;
                 font-weight: 600;
             }
             QProgressBar#progressBar {
-                background-color: #1e293b;
+                background-color: #2b2d33;
                 border-radius: 8px;
-                height: 20px;
+                height: 18px;
             }
             QProgressBar#progressBar::chunk {
-                background-color: #0ea5e9;
-                border-radius: 8px;
+                background-color: #0078d4;
+                border-radius: 6px;
+            }
+            QLineEdit,
+            QComboBox,
+            QTextEdit,
+            QPlainTextEdit,
+            QSpinBox,
+            QTableWidget,
+            QTableView,
+            QListView,
+            QTreeView {
+                background-color: #1f2127;
+                border: 1px solid #3c3f45;
+                border-radius: 6px;
+                selection-background-color: #2b5f8c;
+                selection-color: #ffffff;
             }
             QTextEdit#textLog {
-                background-color: #020b1c;
-                color: #f8fafc;
-                border-radius: 12px;
-                padding: 8px;
+                background-color: #1b1d22;
+                color: #f7f7f7;
+                border-radius: 10px;
+                padding: 6px;
+                border: 1px solid #34363c;
             }
             #logPlaceholder {
-                color: #94a3b8;
-                border: 1px dashed rgba(148, 163, 184, 0.4);
-                border-radius: 12px;
-                padding: 16px;
-                background-color: rgba(15, 23, 42, 0.6);
+                color: #a6a8ad;
+                border: 1px dashed #3b3d44;
+                border-radius: 10px;
+                padding: 12px;
+                background-color: #25262b;
             }
             QPushButton {
-                background-color: #1d4ed8;
-                color: #e2e8f0;
-                padding: 8px 20px;
-                border-radius: 10px;
+                background-color: #0078d4;
+                color: #ffffff;
+                padding: 6px 18px;
+                border-radius: 8px;
                 border: none;
                 font-weight: 600;
             }
             QPushButton:hover:!disabled {
-                background-color: #1e40af;
+                background-color: #0b64a0;
             }
             QPushButton:disabled {
-                background-color: rgba(148, 163, 184, 0.45);
-                color: rgba(226, 232, 240, 0.6);
+                background-color: #3a3d44;
+                color: #8e9198;
             }
             QToolButton#dashboardShortcut {
-                border-radius: 16px;
-                padding: 12px 18px;
+                border-radius: 8px;
+                padding: 6px 10px;
                 min-width: 120px;
-                background-color: rgba(37, 99, 235, 0.12);
-                color: #e2e8f0;
+                border: 1px solid #3d4046;
+                background-color: #2f3138;
+                color: #f1f1f1;
             }
             QToolButton#dashboardShortcut:hover:!disabled {
-                background-color: rgba(37, 99, 235, 0.25);
+                background-color: #3a3d44;
             }
             QToolButton#dashboardShortcut:disabled {
-                background-color: rgba(15, 23, 42, 0.5);
-                color: rgba(148, 163, 184, 0.7);
+                background-color: #25262b;
+                color: #7d7f86;
+                border-color: #2b2d33;
             }
             QTabBar::tab {
-                padding: 10px 16px;
-                margin: 2px;
+                padding: 6px 14px;
+                margin: 0 2px;
                 background-color: transparent;
-                color: #94a3b8;
+                color: #a5a7ac;
             }
             QTabBar::tab:selected {
-                color: #f1f5f9;
+                color: #ffffff;
                 font-weight: 600;
-                border-bottom: 2px solid #38bdf8;
+                border-bottom: 2px solid #0078d4;
             }
         """
         self.setStyleSheet(stylesheet)
