@@ -202,6 +202,28 @@ def test_read_crosswalk_workbook_coerces_alt_code_in_all_sheets(tmp_path: Path) 
     assert synonyms_df.loc[0, ALT_CODE_COLUMN] == "333444"
 
 
+@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای بررسی موبایل")
+def test_write_xlsx_atomic_pads_mobile_columns(tmp_path: Path) -> None:
+    df = pd.DataFrame(
+        {
+            "student_mobile": [9171075740],
+            "تلفن همراه": ["9170000000"],
+            "نام": ["الف"],
+        }
+    )
+    out = tmp_path / "phones.xlsx"
+
+    write_xlsx_atomic({"matrix": df}, out)
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(out)
+    ws = wb["matrix"]
+
+    assert ws.cell(row=2, column=1).value == "09171075740"
+    assert ws.cell(row=2, column=2).value == "09170000000"
+
+
 def test_write_xlsx_atomic_cleans_up_temp_file_on_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
