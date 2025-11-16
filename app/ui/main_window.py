@@ -346,8 +346,6 @@ class MainWindow(QMainWindow):
         stylesheet = """
             QMainWindow {
                 background-color: #020617;
-            }
-            QWidget {
                 color: #e2e8f0;
             }
             QGroupBox {
@@ -356,6 +354,7 @@ class MainWindow(QMainWindow):
                 margin-top: 12px;
                 padding: 12px;
                 background-color: rgba(15, 23, 42, 0.75);
+                color: #e2e8f0;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -409,6 +408,41 @@ class MainWindow(QMainWindow):
                 color: #f8fafc;
                 border-radius: 12px;
                 padding: 8px;
+            }
+            QLineEdit,
+            QPlainTextEdit,
+            QSpinBox,
+            QDoubleSpinBox,
+            QComboBox {
+                background-color: #0f172a;
+                color: #e2e8f0;
+                border-radius: 10px;
+                border: 1px solid rgba(148, 163, 184, 0.35);
+                padding: 6px 10px;
+            }
+            QLineEdit:focus,
+            QPlainTextEdit:focus,
+            QSpinBox:focus,
+            QDoubleSpinBox:focus,
+            QComboBox:focus {
+                border: 1px solid #1d4ed8;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #0b1220;
+                color: #e2e8f0;
+                selection-background-color: #1d4ed8;
+                selection-color: #f8fafc;
+            }
+            QTableView,
+            QTreeView,
+            QTableWidget,
+            QListView {
+                background-color: #0b1220;
+                color: #e2e8f0;
+                border: 1px solid rgba(148, 163, 184, 0.25);
+                gridline-color: rgba(148, 163, 184, 0.3);
+                selection-background-color: rgba(37, 99, 235, 0.35);
+                selection-color: #f8fafc;
             }
             #logPlaceholder {
                 color: #94a3b8;
