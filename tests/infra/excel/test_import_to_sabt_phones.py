@@ -140,3 +140,35 @@ def test_phone_rules_in_sheet2_output() -> None:
     assert sheet.loc[3, "کد رهگیری حکمت"] == "1111111111111111"
 
     assert sheet["کد رهگیری حکمت"].dtype == "string"
+
+
+def test_build_sheet2_frame_enriches_raw_allocation_frame() -> None:
+    df_alloc = pd.DataFrame(
+        [
+            {
+                "student_id": "S1",
+                "registration_status": "0",
+                "student_mobile": "9357174851",
+                "contact1_mobile": "۰۹۱۲۳۴۵۶۷۸۰",
+                "contact2_mobile": "09123456780",
+                "student_landline": "3512345678",
+                "hekmat_tracking": "",
+            },
+            {
+                "student_id": "S2",
+                "registration_status": "3",
+                "student_mobile": "9123456789",
+                "contact1_mobile": "",
+                "contact2_mobile": "۰۹۳۵۱۱۱۲۲۳۳",
+                "student_landline": "7123456",
+                "hekmat_tracking": "",
+            },
+        ]
+    )
+
+    sheet = build_sheet2_frame(df_alloc, _EXPORTER_CFG, today=datetime(2024, 1, 1))
+
+    assert sheet["تلفن همراه"].tolist() == ["09357174851", "09123456789"]
+    assert sheet["تلفن رابط 1"].tolist() == ["09123456780", "09351112233"]
+    assert sheet["تلفن رابط 2"].fillna("").tolist() == ["", ""]
+    assert sheet["تلفن ثابت"].tolist() == ["3512345678", "00000000000"]
