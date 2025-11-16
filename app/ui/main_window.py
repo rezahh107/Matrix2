@@ -70,6 +70,8 @@ from .preferences import (
     read_last_run_info,
 )
 from .preferences.language_dialog import LanguageDialog
+from .log_panel import LogPanel
+from .theme import Theme, apply_theme, build_system_light_theme
 from .texts import UiTranslator
 
 __all__ = ["MainWindow", "run_demo", "FilePicker"]
@@ -85,17 +87,24 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(self._translator.text("app.title", "سامانه تخصیص دانشجو-منتور"))
         self.setMinimumSize(960, 640)
         self.setLayoutDirection(Qt.RightToLeft if self._prefs.language == "fa" else Qt.LeftToRight)
+        self._theme: Theme = build_system_light_theme()
+        app = QApplication.instance()
+        if app is not None:
+            apply_theme(app, self._theme)
 
         self._worker: Worker | None = None
         self._success_hook: Callable[[], None] | None = None
         self._dashboard_texts = load_dashboard_texts(self._translator)
+        self._dashboard_frame: QFrame | None = None
         self._btn_open_output_folder: QPushButton | None = None
         self._center_manager_combos: Dict[int, QComboBox] = {}
         self._btn_reset_managers: QPushButton | None = None
         self._shortcut_buttons: List[QToolButton] = []
         self._btn_open_output_shortcut: QToolButton | None = None
-        self._log_placeholder: QLabel | None = None
-        self._log_stack: QStackedLayout | None = None
+        self._files_card: DashboardCard | None = None
+        self._checklist_card: DashboardCard | None = None
+        self._actions_card: DashboardCard | None = None
+        self._toolbar_actions: Dict[str, QAction] = {}
         self._stage_badge: QLabel | None = None
         self._stage_detail: QLabel | None = None
         self._progress_caption: QLabel | None = None
@@ -179,43 +188,11 @@ class MainWindow(QMainWindow):
         status_layout.addLayout(progress_column, 1)
         bottom_layout.addLayout(status_layout)
 
-        self._log = QTextEdit()
-        self._log.setReadOnly(True)
-        self._log.setObjectName("textLog")
-
-        log_container = QHBoxLayout()
-        log_container.setContentsMargins(0, 0, 0, 0)
-        log_container.setSpacing(12)
-        log_panel = QFrame(self)
-        log_panel.setObjectName("logPanel")
-        log_stack = QStackedLayout(log_panel)
-        log_stack.setContentsMargins(0, 0, 0, 0)
-        self._log_placeholder = QLabel(self._t("log.placeholder", "هنوز گزارشی ثبت نشده است."))
-        self._log_placeholder.setAlignment(Qt.AlignCenter)
-        self._log_placeholder.setObjectName("logPlaceholder")
-        self._log_placeholder.setWordWrap(True)
-        log_stack.addWidget(self._log_placeholder)
-        log_stack.addWidget(self._log)
-        self._log_stack = log_stack
-        self._log.textChanged.connect(self._sync_log_placeholder)
-        self._sync_log_placeholder()
-        log_container.addWidget(log_panel, 1)
-
-        log_buttons = QVBoxLayout()
-        log_buttons.setSpacing(8)
-        self._btn_clear_log = QPushButton(self._t("log.clear", "پاک کردن گزارش"))
-        self._btn_clear_log.setObjectName("btnClearLog")
-        self._btn_clear_log.clicked.connect(self._clear_log)
-        log_buttons.addWidget(self._btn_clear_log)
-
-        self._btn_save_log = QPushButton(self._t("log.save", "ذخیره گزارش…"))
-        self._btn_save_log.setObjectName("btnSaveLog")
-        self._btn_save_log.clicked.connect(self._save_log_to_file)
-        log_buttons.addWidget(self._btn_save_log)
-        log_buttons.addStretch(1)
-
-        log_container.addLayout(log_buttons, 0)
-        bottom_layout.addLayout(log_container, 1)
+        self._log_panel = LogPanel(self._translator, self._theme, self)
+        self._log_panel.connect_clear(self._clear_log)
+        self._log_panel.connect_save(self._save_log_to_file)
+        self._log = self._log_panel.text_edit
+        bottom_layout.addWidget(self._log_panel, 1)
 
         controls_layout = QHBoxLayout()
         controls_layout.setContentsMargins(0, 0, 0, 0)
@@ -269,6 +246,7 @@ class MainWindow(QMainWindow):
         )
         build_action.triggered.connect(self._start_build)
         toolbar.addAction(build_action)
+        self._toolbar_actions["build"] = build_action
 
         allocate_action = QAction(
             self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon),
@@ -277,6 +255,7 @@ class MainWindow(QMainWindow):
         )
         allocate_action.triggered.connect(self._start_allocate)
         toolbar.addAction(allocate_action)
+        self._toolbar_actions["allocate"] = allocate_action
 
         rule_action = QAction(
             self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload),
@@ -285,6 +264,7 @@ class MainWindow(QMainWindow):
         )
         rule_action.triggered.connect(self._start_rule_engine)
         toolbar.addAction(rule_action)
+        self._toolbar_actions["rule_engine"] = rule_action
 
         toolbar.addSeparator()
 
@@ -295,6 +275,7 @@ class MainWindow(QMainWindow):
         )
         output_action.triggered.connect(self._open_last_output_folder)
         toolbar.addAction(output_action)
+        self._toolbar_actions["output"] = output_action
 
         toolbar.addSeparator()
         prefs_action = QAction(
@@ -304,8 +285,10 @@ class MainWindow(QMainWindow):
         )
         prefs_action.triggered.connect(self._open_language_dialog)
         toolbar.addAction(prefs_action)
+        self._toolbar_actions["prefs"] = prefs_action
 
         self.addToolBar(toolbar)
+        self._toolbar = toolbar
 
     def _build_status_bar(self) -> None:
         """نوار وضعیت پایین با نمایش زبان و وضعیت جاری."""
@@ -318,6 +301,38 @@ class MainWindow(QMainWindow):
         self._language_label = language_label
         self._status_bar_state = state_label
         self.setStatusBar(status_bar)
+
+    def _refresh_action_texts(self) -> None:
+        """به‌روزرسانی متن و Tooltip اکشن‌های نوار ابزار بر اساس زبان فعال."""
+
+        mapping = {
+            "build": (self._t("action.build", "ساخت ماتریس"), self._t("tooltip.build", "اجرای کامل سناریوی ساخت ماتریس")),
+            "allocate": (self._t("action.allocate", "تخصیص"), self._t("tooltip.allocate", "اجرای تخصیص دانش‌آموز به منتور")),
+            "rule_engine": (self._t("action.rule_engine", "اجرای Rule Engine"), self._t("tooltip.rule_engine", "اجرای Rule Engine برای تست سیاست")),
+            "output": (self._t("dashboard.button.output", "پوشه خروجی"), self._t("tooltip.output_folder", "آخرین پوشه خروجی تولید شده را باز می‌کند")),
+            "prefs": (self._t("action.preferences", "تنظیمات"), ""),
+        }
+        for key, (text, tooltip) in mapping.items():
+            action = self._toolbar_actions.get(key)
+            if action is None:
+                continue
+            action.setText(text)
+            if tooltip:
+                action.setToolTip(tooltip)
+
+    def _refresh_tab_texts(self) -> None:
+        """به‌روزرسانی عنوان تب‌ها با مترجم جدید."""
+
+        labels = [
+            (0, self._t("tabs.build", "ساخت ماتریس")),
+            (1, self._t("tabs.allocate", "تخصیص")),
+            (2, self._t("tabs.rule_engine", "موتور قواعد")),
+            (3, self._t("tabs.validate", "اعتبارسنجی")),
+            (4, self._t("tabs.explain", "توضیحات")),
+        ]
+        for index, text in labels:
+            if index < self._tabs.count():
+                self._tabs.setTabText(index, text)
 
     def _update_status_bar_state(self, key: str) -> None:
         """به‌روزرسانی متن نوار وضعیت بر اساس کلید."""
@@ -341,51 +356,137 @@ class MainWindow(QMainWindow):
         scroll.setWidget(page)
         return scroll
 
+    def _apply_language(self, language: str) -> None:
+        """اعمال زبان جدید و بازسازی متن‌های UI."""
+
+        self._prefs.language = language
+        self._translator = UiTranslator(language)
+        self.setLayoutDirection(Qt.RightToLeft if language == "fa" else Qt.LeftToRight)
+        self.setWindowTitle(self._t("app.title", "سامانه تخصیص دانشجو-منتور"))
+        if hasattr(self, "_language_label"):
+            self._language_label.setText(
+                f"{self._t('status.language', 'زبان فعال')}: {language.upper()}"
+            )
+        self._dashboard_texts = load_dashboard_texts(self._translator)
+        self._populate_dashboard_cards()
+        self._refresh_tab_texts()
+        self._refresh_action_texts()
+        self._refresh_last_run_badge()
+        if hasattr(self, "_log_panel"):
+            self._log_panel.update_translator(self._translator)
+        if self._worker is None or not self._worker.isRunning():
+            if hasattr(self, "_status"):
+                self._status.setText(self._t("status.ready", "آماده"))
+            if hasattr(self, "_stage_badge"):
+                self._stage_badge.setText(self._t("status.ready", "آماده"))
+            if hasattr(self, "_stage_detail"):
+                self._stage_detail.setText(
+                    self._t("stage.pick_scenario", "برای شروع یکی از سناریوها را انتخاب کنید")
+                )
+            if hasattr(self, "_progress_caption"):
+                self._update_progress_caption(
+                    self._progress.value(), self._t("status.ready", "آماده")
+                )
+            self._update_status_bar_state("ready")
+
     def _build_dashboard(self) -> QWidget:
         """ایجاد پانل داشبورد با کارت‌های وضعیت، چک‌لیست و میانبرها."""
 
         frame = QFrame(self)
         frame.setObjectName("dashboardPanel")
         frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        frame.setMaximumHeight(160)
+        frame.setMaximumHeight(180)
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(10)
+        self._dashboard_frame = frame
 
-        files_card = DashboardCard(
+        self._files_card = DashboardCard(
             self._dashboard_texts.files_title,
             self._dashboard_texts.files_description,
             self,
             max_height=140,
+            theme=self._theme,
         )
-        statuses = collect_file_statuses(self._prefs, self._translator)
-        for status in statuses:
-            files_card.body_layout().addWidget(self._create_file_status_row(status))
-        layout.addWidget(files_card, 1)
+        layout.addWidget(self._files_card, 1)
 
-        checklist_card = DashboardCard(
+        self._checklist_card = DashboardCard(
             self._dashboard_texts.checklist_title,
             self._dashboard_texts.checklist_description,
             self,
             max_height=140,
+            theme=self._theme,
         )
+        layout.addWidget(self._checklist_card, 1)
+
+        self._actions_card = DashboardCard(
+            self._dashboard_texts.actions_title,
+            self._dashboard_texts.actions_description,
+            self,
+            theme=self._theme,
+        )
+        layout.addWidget(self._actions_card, 1)
+
+        self._populate_dashboard_cards()
+        return frame
+
+    def _create_dashboard_shortcut(
+        self,
+        text: str,
+        tooltip: str,
+        callback: Callable[[], None],
+        icon_role: QStyle.StandardPixmap,
+    ) -> QToolButton:
+        """ساخت دکمه میان‌بر داشبورد با آیکون استاندارد."""
+
+        button = QToolButton(self)
+        button.setObjectName("dashboardShortcut")
+        button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        button.setIcon(self.style().standardIcon(icon_role))
+        icon_size = self.style().pixelMetric(QStyle.PM_SmallIconSize) or 16
+        button.setIconSize(QSize(icon_size, icon_size))
+        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        button.setFixedHeight(32)
+        button.setText(text)
+        button.setToolTip(tooltip)
+        button.clicked.connect(callback)
+        self._shortcut_buttons.append(button)
+        return button
+
+    def _populate_dashboard_cards(self) -> None:
+        """بازسازی محتوا و ترجمه کارت‌های داشبورد."""
+
+        self._dashboard_texts = load_dashboard_texts(self._translator)
+        if self._files_card is None or self._checklist_card is None or self._actions_card is None:
+            return
+
+        self._file_status_rows = {}
+        self._files_card.set_header(
+            self._dashboard_texts.files_title, self._dashboard_texts.files_description
+        )
+        self._files_card.clear_body()
+        for status in collect_file_statuses(self._prefs, self._translator):
+            self._files_card.body_layout().addWidget(self._create_file_status_row(status))
+
+        self._checklist_card.set_header(
+            self._dashboard_texts.checklist_title, self._dashboard_texts.checklist_description
+        )
+        self._checklist_card.clear_body()
         if self._dashboard_texts.checklist_items:
             for item in self._dashboard_texts.checklist_items:
                 label = QLabel(f"• {item.text}")
                 label.setWordWrap(True)
                 label.setObjectName("dashboardChecklistItem")
-                checklist_card.body_layout().addWidget(label)
+                self._checklist_card.body_layout().addWidget(label)
         else:
             placeholder = QLabel(self._t("dashboard.no_checklist", "چک‌لیستی تعریف نشده است"))
             placeholder.setObjectName("dashboardChecklistItem")
-            checklist_card.body_layout().addWidget(placeholder)
-        layout.addWidget(checklist_card, 1)
+            self._checklist_card.body_layout().addWidget(placeholder)
 
-        actions_card = DashboardCard(
-            self._dashboard_texts.actions_title,
-            self._dashboard_texts.actions_description,
-            self,
+        self._actions_card.set_header(
+            self._dashboard_texts.actions_title, self._dashboard_texts.actions_description
         )
+        self._actions_card.clear_body()
         policy_display = self._default_policy_path or "config/policy.json"
         policy_label = QLabel(
             f"<b>{self._t('dashboard.policy.info', 'سیاست فعال:')}</b> {policy_display}<br>"
@@ -394,8 +495,9 @@ class MainWindow(QMainWindow):
         policy_label.setTextFormat(Qt.RichText)
         policy_label.setWordWrap(True)
         policy_label.setObjectName("dashboardPolicyInfo")
-        actions_card.body_layout().addWidget(policy_label)
+        self._actions_card.body_layout().addWidget(policy_label)
 
+        self._shortcut_buttons.clear()
         buttons_container = QWidget(self)
         buttons_row = QGridLayout(buttons_container)
         buttons_row.setContentsMargins(0, 0, 0, 0)
@@ -432,34 +534,10 @@ class MainWindow(QMainWindow):
             self._open_last_output_folder,
             QStyle.StandardPixmap.SP_DirHomeIcon,
         )
-        buttons_row.addWidget(self._btn_open_output_shortcut, len(buttons) // 2, len(buttons) % 2)
-        actions_card.body_layout().addWidget(buttons_container)
-        layout.addWidget(actions_card, 1)
-
-        return frame
-
-    def _create_dashboard_shortcut(
-        self,
-        text: str,
-        tooltip: str,
-        callback: Callable[[], None],
-        icon_role: QStyle.StandardPixmap,
-    ) -> QToolButton:
-        """ساخت دکمه میان‌بر داشبورد با آیکون استاندارد."""
-
-        button = QToolButton(self)
-        button.setObjectName("dashboardShortcut")
-        button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        button.setIcon(self.style().standardIcon(icon_role))
-        icon_size = self.style().pixelMetric(QStyle.PM_SmallIconSize) or 16
-        button.setIconSize(QSize(icon_size, icon_size))
-        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        button.setFixedHeight(32)
-        button.setText(text)
-        button.setToolTip(tooltip)
-        button.clicked.connect(callback)
-        self._shortcut_buttons.append(button)
-        return button
+        buttons_row.addWidget(
+            self._btn_open_output_shortcut, len(buttons) // 2, len(buttons) % 2
+        )
+        self._actions_card.body_layout().addWidget(buttons_container)
 
     def _create_file_status_row(self, model: FileStatusViewModel) -> QWidget:
         """ساخت ردیف وضعیت فایل بر اساس مدل نمایشی."""
@@ -493,7 +571,11 @@ class MainWindow(QMainWindow):
         if widgets is None:
             return
         indicator, text_label = widgets
-        color = "#16a34a" if model.level is FileStatusLevel.READY else "#d97706"
+        color = (
+            self._theme.success.name()
+            if model.level is FileStatusLevel.READY
+            else self._theme.warning.name()
+        )
         symbol = "●" if model.level is FileStatusLevel.READY else "▲"
         indicator.setText(symbol)
         indicator.setStyleSheet(f"color:{color};font-size:16px;")
@@ -501,8 +583,8 @@ class MainWindow(QMainWindow):
         state_text = self._t("status.ready", "آماده") if model.exists else self._t("status.waiting", "در انتظار اجرا")
         text_label.setText(
             f"<b>{model.label}</b><br>"
-            f"<span style='color:#475569'>{path_display}</span><br>"
-            f"<span style='color:#0f172a'>{state_text}</span>"
+            f"<span style='color:{self._theme.text_muted.name()}'>{path_display}</span><br>"
+            f"<span style='color:{self._theme.text_primary.name()}'>{state_text}</span>"
         )
 
     def _refresh_dashboard_state(self) -> None:
@@ -553,175 +635,34 @@ class MainWindow(QMainWindow):
         return frame
 
     def _apply_theme(self) -> None:
-        """اعمال استایل‌شیت سراسری برای ایجاد هماهنگی بصری."""
-
-        stylesheet = """
-            QMainWindow {
-                background-color: #f5f7fb;
-            }
-            QWidget {
-                color: #0f172a;
-                font-family: "Segoe UI";
-                font-size: 9pt;
-            }
-            QToolBar {
-                background: #e9eef9;
-                spacing: 8px;
-                padding: 6px;
-            }
-            QStatusBar {
-                background: #e9eef9;
-                padding: 4px 8px;
-            }
-            QGroupBox {
-                border: 1px solid #cfd6e6;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 10px;
-                background-color: #ffffff;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 6px;
-                color: #1d3a70;
-                font-weight: 600;
-            }
-            #dashboardCard, #heroCard {
-                border: 1px solid #cfd6e6;
-                border-radius: 10px;
-                background-color: #ffffff;
-            }
-            #dashboardPanel {
-                background-color: transparent;
-            }
-            #dashboardCard QScrollArea {
-                border: none;
-            }
-            QLabel#dashboardCardTitle {
-                font-size: 10pt;
-                font-weight: 600;
-                color: #0f172a;
-            }
-            QLabel#dashboardCardDescription,
-            QLabel#dashboardPolicyInfo,
-            QLabel#dashboardChecklistItem {
-                color: #475569;
-            }
-            QLabel#heroTitle {
-                font-size: 11pt;
-                font-weight: 600;
-                color: #0f172a;
-            }
-            QLabel#heroSubtitle {
-                color: #475569;
-            }
-            QLabel#heroBadge {
-                padding: 4px 12px;
-                border-radius: 12px;
-                background-color: #e9eef9;
-                color: #1d3a70;
-                border: 1px solid #2b88d8;
-            }
-            QLabel#labelStageBadge {
-                font-weight: 600;
-                color: #1d3a70;
-            }
-            QLabel#labelStageDetail {
-                color: #334155;
-            }
-            QLabel#progressCaption {
-                color: #1d3a70;
-                font-weight: 500;
-            }
-            QLabel#lastRunBadge {
-                color: #0f172a;
-                font-weight: 600;
-            }
-            QProgressBar#progressBar {
-                background-color: #f8fafc;
-                border: 1px solid #cfd6e6;
-                border-radius: 8px;
-                height: 18px;
-            }
-            QProgressBar#progressBar::chunk {
-                background-color: #2b88d8;
-                border-radius: 6px;
-            }
-            QLineEdit,
-            QComboBox,
-            QTextEdit,
-            QPlainTextEdit,
-            QSpinBox,
-            QTableWidget,
-            QTableView,
-            QListView,
-            QTreeView {
-                background-color: #ffffff;
-                border: 1px solid #cfd6e6;
-                border-radius: 6px;
-                padding: 4px;
-                selection-background-color: #e2e8f0;
-                selection-color: #0f172a;
-            }
-            QTabWidget::pane {
-                border: 1px solid #cfd6e6;
-                border-radius: 6px;
-            }
-            QTabBar::tab {
-                background: #eef2fb;
-                color: #0f172a;
-                padding: 8px 12px;
-                border: 1px solid #cfd6e6;
-                border-bottom: none;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-            }
-            QTabBar::tab:selected {
-                background: #ffffff;
-                color: #0f172a;
-            }
-            #dashboardShortcut {
-                background: #f3f6fb;
-                border: 1px solid #c3d3f5;
-                border-radius: 6px;
-                padding: 6px 10px;
-            }
-            #dashboardShortcut:hover {
-                background: #e8f0fe;
-            }
-            #fileStatusRow {
-                border-bottom: 1px solid #cfd6e6;
-            }
-            #fileStatusIndicator {
-                font-size: 16px;
-            }
-            #fileStatusText {
-                color: #0f172a;
-            }
-            #logPanel {
-                border: 1px solid #cfd6e6;
-                border-radius: 6px;
-                background: #ffffff;
-            }
-            #logPlaceholder {
-                color: #94a3b8;
-            }
-            QTextEdit#textLog {
-                border: none;
-                background: transparent;
-            }
-            QPushButton#btnDemo {
-                background-color: #2b88d8;
-                border: 1px solid #1d6fb8;
-                color: #ffffff;
-            }
-            QPushButton#btnDemo:hover {
-                background-color: #1d6fb8;
-            }
-        """
-
-        self.setStyleSheet(stylesheet)
+        app = QApplication.instance()
+        if app is not None:
+            apply_theme(app, self._theme)
+        if self._files_card is not None:
+            self._files_card.apply_theme(self._theme)
+        if self._checklist_card is not None:
+            self._checklist_card.apply_theme(self._theme)
+        if self._actions_card is not None:
+            self._actions_card.apply_theme(self._theme)
+        if hasattr(self, "_log_panel"):
+            self._log_panel.apply_theme(self._theme)
+        extra = (
+            f"#heroCard{{background:{self._theme.card.name()};border:1px solid {self._theme.border.name()};"
+            f"border-radius:{self._theme.radius}px;}}"
+            f"#heroTitle{{color:{self._theme.text_primary.name()};font-weight:700;font-size:12pt;}}"
+            f"#heroSubtitle{{color:{self._theme.text_muted.name()};}}"
+            f"#heroBadge{{background:{self._theme.accent_soft.name()};"
+            f"border:1px solid {self._theme.border.name()};color:{self._theme.text_primary.name()};"
+            f"padding:6px 10px;border-radius:{self._theme.radius - 2}px;}}"
+            f"#progressCaption{{color:{self._theme.text_muted.name()};}}"
+            f"#dashboardPolicyInfo{{color:{self._theme.text_muted.name()};}}"
+            f"#labelStageBadge{{background:{self._theme.accent_soft.name()};padding:4px 8px;"
+            f"border-radius:{self._theme.radius - 2}px;}}"
+            f"#labelStageDetail, #labelStatus, #lastRunBadge{{color:{self._theme.text_muted.name()};}}"
+            f"QToolBar{{padding:6px;}}"
+            f"QStatusBar{{padding:4px 8px;}}"
+        )
+        self.setStyleSheet(extra)
 
     def _set_stage(self, title: str | None, detail: str | None = None) -> None:
         """به‌روزرسانی عنوان و توضیح مرحلهٔ فعال."""
@@ -1374,16 +1315,7 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             chosen = dialog.selected_language()
             if chosen != self._prefs.language:
-                self._prefs.language = chosen
-                if hasattr(self, "_language_label"):
-                    self._language_label.setText(
-                        f"{self._t('status.language', 'زبان فعال')}: {chosen.upper()}"
-                    )
-                QMessageBox.information(
-                    self,
-                    self._t("dialog.language.title", "تنظیمات زبان"),
-                    self._t("status.restart_required", "برای اعمال زبان باید برنامه را مجدد اجرا کنید."),
-                )
+                self._apply_language(chosen)
 
     def _start_build(self) -> None:
         """اجرای سناریوی ساخت ماتریس با فراخوانی CLI."""
@@ -2149,7 +2081,7 @@ class MainWindow(QMainWindow):
         message = str(text or "")
         lowered = message.lower()
         if ("error" in lowered or "خطا" in message) and "<span" not in message:
-            html = f'<span style="color:#c62828">{message}</span>'
+            html = f'<span style="color:{self._theme.error.name()}">{message}</span>'
         else:
             html = message
         self._log.append(html)
@@ -2158,10 +2090,8 @@ class MainWindow(QMainWindow):
     def _sync_log_placeholder(self) -> None:
         """به‌روزرسانی وضعیت نمایش placeholder لاگ."""
 
-        if self._log_stack is None or self._log_placeholder is None:
-            return
-        target = self._log if self._log.toPlainText().strip() else self._log_placeholder
-        self._log_stack.setCurrentWidget(target)
+        if hasattr(self, "_log_panel"):
+            self._log_panel.sync_placeholder()
 
     def _determine_last_output_path(self) -> str:
         """بررسی آخرین خروجی‌های ذخیره شده در تنظیمات."""
@@ -2256,16 +2186,16 @@ class MainWindow(QMainWindow):
         if error is not None:
             msg = str(error)
             if isinstance(error, FileNotFoundError):
-                color = "#c00"
+                color = self._theme.error.name()
                 QMessageBox.critical(self, self._t("status.error", "خطا"), msg)
             elif isinstance(error, PermissionError):
-                color = "#c00"
+                color = self._theme.error.name()
                 QMessageBox.critical(self, self._t("status.error", "خطا"), msg)
             elif isinstance(error, ValueError):
-                color = "#b58900"
+                color = self._theme.warning.name()
                 QMessageBox.warning(self, self._t("status.error", "خطا"), msg)
             else:
-                color = "#c00"
+                color = self._theme.error.name()
                 QMessageBox.critical(self, self._t("status.error", "خطا"), msg)
             self._status.setText(self._t("status.error", "خطا"))
             self._set_stage(self._t("status.error", "خطا"), msg)
@@ -2294,7 +2224,7 @@ class MainWindow(QMainWindow):
         )
         self._update_progress_caption(100, self._t("status.complete", "کامل"))
         self._append_log(
-            f'<span style="color:#2e7d32">✅ {self._t("status.complete.detail", "عملیات با موفقیت پایان یافت")}</span>'
+            f'<span style="color:{self._theme.success.name()}">✅ {self._t("status.complete.detail", "عملیات با موفقیت پایان یافت")}</span>'
         )
         self._update_status_bar_state("ready")
         if hook is not None:
