@@ -9,6 +9,7 @@ from pandas import testing as pd_testing
 from app.core.counter import (
     assert_unique_student_ids,
     assign_counters,
+    find_duplicate_student_id_groups,
     infer_year_strict,
 )
 
@@ -100,6 +101,9 @@ def test_assign_counters_duplicate_rows_raise_on_assert() -> None:
     )
 
     assert counters.iloc[0] == counters.iloc[1]
+    groups = find_duplicate_student_id_groups(counters)
+    assert list(groups.keys()) == [counters.iloc[0]]
+    assert groups[counters.iloc[0]] == [0, 1]
     summary = counters.attrs.get("counter_summary", {})
     assert summary.get("reused_count") == 1
     with pytest.raises(ValueError):

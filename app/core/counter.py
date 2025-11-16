@@ -18,6 +18,7 @@ __all__ = [
     "assign_counters",
     "build_registration_id",
     "detect_academic_year_from_counters",
+    "find_duplicate_student_id_groups",
     "find_max_sequence_by_prefix",
     "gender_to_mid3",
     "infer_year_strict",
@@ -84,21 +85,39 @@ def _normalize_nat_id(value: object) -> str:
     return digits.zfill(10) if digits else ""
 
 
+def find_duplicate_student_id_groups(series: pd.Series) -> dict[str, list[object]]:
+    """گروه‌بندی ردیف‌های دارای student_id تکراری بر اساس مقدار."""
+
+    if series.empty:
+        return {}
+
+    series_string = series.astype("string")
+    mask = series_string.duplicated(keep=False)
+    duplicates = series_string[mask & series_string.notna()]
+    if duplicates.empty:
+        return {}
+
+    groups: dict[str, list[object]] = {}
+    for index_label, value in duplicates.items():
+        groups.setdefault(str(value), []).append(index_label)
+    return groups
+
+
 def assert_unique_student_ids(series: pd.Series) -> None:
     """اعتبارسنجی یکتایی شناسه‌ها و ارائهٔ نمونه در صورت تکرار."""
 
-    if series.empty:
+    groups = find_duplicate_student_id_groups(series)
+    if not groups:
         return
 
-    series_string = series.astype("string")
-    duplicates = series_string[series_string.duplicated(keep=False)].dropna()
-    if duplicates.empty:
-        return
-
-    samples = [
-        f"index={idx}, student_id={value}"
-        for idx, value in zip(duplicates.index.tolist(), duplicates.tolist())
-    ][:3]
+    samples: list[str] = []
+    for student_id, index_list in groups.items():
+        for index_label in index_list:
+            samples.append(f"index={index_label}, student_id={student_id}")
+            if len(samples) >= 3:
+                break
+        if len(samples) >= 3:
+            break
     sample_text = "; ".join(samples)
     raise ValueError(
         "student_id تکراری در خروجی شمارنده یافت شد؛ نمونه‌ها: " + sample_text

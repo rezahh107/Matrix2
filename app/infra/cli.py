@@ -65,9 +65,12 @@ from app.core.common.columns import (
 from app.core.counter import (
     assert_unique_student_ids,
     assign_counters,
+    build_registration_id,
     detect_academic_year_from_counters,
+    find_duplicate_student_id_groups,
     infer_year_strict,
     pick_counter_sheet_name,
+    year_to_yy,
 )
 # --- پایان واردات اصلاح شده ---
 
@@ -564,11 +567,229 @@ def _maybe_export_import_to_sabt(
     )
 
 
+def _compose_duplicate_display_name(row: pd.Series) -> str:
+    """تولید نام قابل‌خواندن برای گزارش ردیف تکراری."""
+
+    if row is None:
+        return ""
+    candidates = [
+        row.get("full_name"),
+        row.get("student_name"),
+        row.get("name"),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    first = str(row.get("first_name", "")).strip()
+    last = str(row.get("last_name", "")).strip()
+    return " ".join(part for part in (first, last) if part).strip()
+
+
+def _build_duplicate_row_report(
+    students_df: pd.DataFrame,
+    students_en: pd.DataFrame,
+    duplicate_groups: dict[str, list[object]],
+) -> list[dict[str, object]]:
+    """ساخت ساختار قابل‌نمایش برای شناسه‌های تکراری."""
+
+    position_map = {index: pos for pos, index in enumerate(students_df.index)}
+    report: list[dict[str, object]] = []
+    for student_id, index_list in duplicate_groups.items():
+        rows: list[dict[str, object]] = []
+        ordered = sorted(index_list, key=lambda idx: position_map.get(idx, 10**9))
+        for index_label in ordered:
+            position = position_map.get(index_label)
+            row = students_en.loc[index_label] if index_label in students_en.index else None
+            national_id = str(row.get("national_id", "").strip()) if row is not None else ""
+            rows.append(
+                {
+                    "index": index_label,
+                    "position": None if position is None else position + 1,
+                    "national_id": national_id,
+                    "name": _compose_duplicate_display_name(row),
+                }
+            )
+        report.append({"student_id": student_id, "rows": rows})
+    return report
+
+
+def _format_duplicate_report(report: list[dict[str, object]]) -> str:
+    """تبدیل ساختار تکراری‌ها به متن فشرده برای چاپ."""
+
+    lines: list[str] = []
+    for payload in report:
+        student_id = payload.get("student_id")
+        row_items: list[str] = []
+        for row in payload.get("rows", []):
+            name = row.get("name") or "-"
+            national_id = row.get("national_id") or "-"
+            position = row.get("position")
+            index_label = row.get("index")
+            label_parts = []
+            if position is not None:
+                label_parts.append(f"ردیف داده {position}")
+            label_parts.append(f"index={index_label}")
+            label_parts.append(f"کدملی={national_id}")
+            if name and name != "-":
+                label_parts.append(f"نام={name}")
+            row_items.append("، ".join(label_parts))
+        joined = " | ".join(row_items)
+        lines.append(f"student_id {student_id} در ردیف‌های زیر تکراری است → {joined}")
+    return "\n".join(lines)
+
+
+def _prompt_duplicate_resolution(report_text: str) -> str:
+    """نمایش گزارش و دریافت تصمیم کاربر برای رفع تکرار."""
+
+    print("❌ student_id تکراری در خروجی شمارنده یافت شد:")
+    print(report_text)
+    print("گزینه‌ها:")
+    print("  [R] تخصیص شمارندهٔ جدید به ردیف‌های تکراری")
+    print("  [D] حذف ردیف‌های تکراری و نگهداشت اولین رخداد")
+    print("  [A] انصراف و اصلاح دستی (خروج با خطا)")
+    while True:
+        choice = input("گزینهٔ موردنظر (R/D/A): ").strip().lower()
+        mapping = {"r": "assign-new", "d": "drop", "a": "abort"}
+        if choice in mapping:
+            return mapping[choice]
+        print("گزینهٔ نامعتبر است؛ یکی از R/D/A را انتخاب کنید.")
+
+
+def _assign_new_counters_for_duplicates(
+    counters: pd.Series,
+    duplicate_groups: dict[str, list[object]],
+    students_en: pd.DataFrame,
+    policy: PolicyConfig,
+    academic_year: int,
+) -> tuple[pd.Series, int]:
+    """تخصیص شمارندهٔ جدید برای ردیف‌های تکراری بدون حذف داده."""
+
+    gender_codes = policy.gender_codes
+    male_value = int(gender_codes.male.value)
+    female_value = int(gender_codes.female.value)
+    male_mid3 = str(gender_codes.male.counter_code).zfill(3)
+    female_mid3 = str(gender_codes.female.counter_code).zfill(3)
+    summary = {
+        "reused_count": 0,
+        "new_male_count": 0,
+        "new_female_count": 0,
+        "next_male_start": 1,
+        "next_female_start": 1,
+    }
+    summary.update(counters.attrs.get("counter_summary", {}))
+    next_male = int(summary.get("next_male_start", 1))
+    next_female = int(summary.get("next_female_start", 1))
+    yy = year_to_yy(academic_year)
+    resolved_rows = 0
+
+    position_map = {index: pos for pos, index in enumerate(students_en.index)}
+
+    for index_list in duplicate_groups.values():
+        ordered = sorted(index_list, key=lambda idx: position_map.get(idx, 10**9))
+        for index_label in ordered[1:]:
+            if index_label not in students_en.index:
+                continue
+            row = students_en.loc[index_label]
+            gender_value = pd.to_numeric(row.get("gender"), errors="coerce")
+            if pd.isna(gender_value):
+                raise ValueError(
+                    "gender نامعتبر برای ردیف تکراری یافت شد؛ امکان تخصیص شمارندهٔ جدید نیست."
+                )
+            gender_value = int(gender_value)
+            if gender_value == male_value:
+                sequence = next_male
+                next_male += 1
+                summary["new_male_count"] = int(summary.get("new_male_count", 0)) + 1
+                mid3 = male_mid3
+            elif gender_value == female_value:
+                sequence = next_female
+                next_female += 1
+                summary["new_female_count"] = int(summary.get("new_female_count", 0)) + 1
+                mid3 = female_mid3
+            else:
+                raise ValueError(
+                    "مقدار gender برای ردیف تکراری با policy هم‌خوانی ندارد؛ شمارندهٔ جدید قابل تولید نیست."
+                )
+            counters.at[index_label] = build_registration_id(yy, mid3, sequence)
+            resolved_rows += 1
+
+    if resolved_rows:
+        summary["next_male_start"] = next_male
+        summary["next_female_start"] = next_female
+        summary["duplicate_resolution_mode"] = "assign-new"
+        summary["duplicate_resolution_count"] = int(
+            summary.get("duplicate_resolution_count", 0)
+        ) + resolved_rows
+        counters.attrs["counter_summary"] = summary
+    return counters, resolved_rows
+
+
+def _apply_counter_duplicate_strategy(
+    *,
+    counters: pd.Series,
+    duplicate_groups: dict[str, list[object]],
+    students_df: pd.DataFrame,
+    students_en: pd.DataFrame,
+    policy: PolicyConfig,
+    academic_year: int,
+    strategy: str,
+    interactive: bool,
+) -> tuple[pd.Series, bool, tuple[object, ...]]:
+    """اجرای استراتژی انتخاب‌شده برای رفع تکرار شناسه‌ها."""
+
+    report = _build_duplicate_row_report(students_df, students_en, duplicate_groups)
+    report_text = _format_duplicate_report(report)
+
+    normalized_strategy = (strategy or "prompt").strip().lower()
+    valid_strategies = {"prompt", "abort", "drop", "assign-new"}
+    if normalized_strategy not in valid_strategies:
+        normalized_strategy = "prompt"
+
+    if normalized_strategy == "prompt":
+        if not interactive:
+            raise ValueError(
+                "student_id تکراری یافت شد و ورودی تعاملی در دسترس نیست؛ "
+                "یکی از گزینه‌های --counter-duplicate-strategy={drop|assign-new|abort} را مشخص کنید."
+            )
+        normalized_strategy = _prompt_duplicate_resolution(report_text)
+    elif normalized_strategy == "abort":
+        print("❌ student_id تکراری در خروجی شمارنده یافت شد:")
+        print(report_text)
+
+    if normalized_strategy == "abort":
+        raise ValueError(
+            "student_id تکراری یافت شد؛ اجرای شمارنده متوقف شد تا ورودی اصلاح شود."
+        )
+
+    if normalized_strategy == "drop":
+        drop_indexes: list[object] = []
+        for payload in report:
+            rows = payload.get("rows", [])
+            drop_indexes.extend(row.get("index") for row in rows[1:])
+        drop_indexes = [idx for idx in drop_indexes if idx in students_df.index]
+        if not drop_indexes:
+            return counters, False, tuple()
+        print(
+            f"ℹ️  {len(drop_indexes)} ردیف تکراری حذف می‌شود؛ شمارنده برای ردیف‌های باقی‌مانده بازتولید خواهد شد."
+        )
+        return counters, True, tuple(drop_indexes)
+
+    updated, resolved_rows = _assign_new_counters_for_duplicates(
+        counters,
+        duplicate_groups,
+        students_en,
+        policy,
+        academic_year,
+    )
+    print(f"ℹ️  شمارندهٔ جدید برای {resolved_rows} ردیف تکراری ساخته شد.")
+    return updated, False, tuple()
+
+
 def _inject_student_ids(
     students_df: pd.DataFrame,
     args: argparse.Namespace,
     policy: PolicyConfig,
-) -> tuple[pd.Series, Dict[str, int]]:
+) -> tuple[pd.Series, Dict[str, int], pd.DataFrame]:
     """ساخت ستون student_id با رعایت Policy و ورودی‌های UI/CLI."""
 
     overrides = getattr(args, "_ui_overrides", {}) or {}
@@ -588,26 +809,13 @@ def _inject_student_ids(
     prior_df = _read_optional_first_sheet(prior_path)
     current_df = _read_optional_first_sheet(current_path)
 
-    students_en = canonicalize_headers(students_df, header_mode="en")
-    students_en = enrich_school_columns_en(
-        students_en, empty_as_zero=policy.school_code_empty_as_zero
-    )
-    students_fa = canonicalize_headers(students_en, header_mode="fa")
-    school_fa = CANON_EN_TO_FA.get("school_code", "کد مدرسه")
-    if school_fa in students_fa.columns:
-        school_series = students_fa[school_fa]
-        if isinstance(school_series, pd.DataFrame):
-            school_series = school_series.iloc[:, 0]
-        students_df[school_fa] = school_series
-    for column_name in ("school_code_raw", "school_code_norm", "school_status_resolved"):
-        if column_name in students_en.columns:
-            students_df[column_name] = students_en[column_name]
-    required = {"national_id", "gender"}
-    missing = sorted(required - set(students_en.columns))
-    if missing:
-        raise ValueError(
-            "ستون‌های لازم برای شمارنده یافت نشدند؛ ستون‌های مورد انتظار: 'national_id' و 'gender'."
-        )
+    strategy_override = overrides.get("counter_duplicate_strategy")
+    strategy_value = None
+    if isinstance(strategy_override, str) and strategy_override.strip():
+        strategy_value = strategy_override.strip()
+    elif isinstance(getattr(args, "counter_duplicate_strategy", None), str):
+        strategy_value = getattr(args, "counter_duplicate_strategy").strip()
+    strategy_value = (strategy_value or "prompt").strip().lower()
 
     academic_year = overrides.get("academic_year") or getattr(args, "academic_year", None)
     if academic_year in ("", None):
@@ -622,12 +830,60 @@ def _inject_student_ids(
     except (TypeError, ValueError) as exc:  # pragma: no cover - نگهبان مهاجرت
         raise ValueError(f"سال تحصیلی نامعتبر است: {academic_year}") from exc
 
-    counters = assign_counters(
-        students_en,
-        prior_roster_df=prior_df,
-        current_roster_df=current_df,
-        academic_year=year_value,
+    final_students_en: pd.DataFrame | None = None
+
+    while True:
+        students_en = canonicalize_headers(students_df, header_mode="en")
+        students_en = enrich_school_columns_en(
+            students_en, empty_as_zero=policy.school_code_empty_as_zero
+        )
+        final_students_en = students_en
+
+        required = {"national_id", "gender"}
+        missing = sorted(required - set(students_en.columns))
+        if missing:
+            raise ValueError(
+                "ستون‌های لازم برای شمارنده یافت نشدند؛ ستون‌های مورد انتظار: 'national_id' و 'gender'."
+            )
+
+        counters = assign_counters(
+            students_en,
+            prior_roster_df=prior_df,
+            current_roster_df=current_df,
+            academic_year=year_value,
+        )
+
+        duplicate_groups = find_duplicate_student_id_groups(counters)
+        if duplicate_groups:
+            counters, retry_required, drop_indexes = _apply_counter_duplicate_strategy(
+                counters=counters,
+                duplicate_groups=duplicate_groups,
+                students_df=students_df,
+                students_en=students_en,
+                policy=policy,
+                academic_year=year_value,
+                strategy=strategy_value,
+                interactive=sys.stdin.isatty(),
+            )
+            if retry_required:
+                if drop_indexes:
+                    students_df = students_df.drop(index=list(drop_indexes))
+                continue
+        break
+
+    students_en = final_students_en if final_students_en is not None else canonicalize_headers(
+        students_df, header_mode="en"
     )
+    students_fa = canonicalize_headers(students_en, header_mode="fa")
+    school_fa = CANON_EN_TO_FA.get("school_code", "کد مدرسه")
+    if school_fa in students_fa.columns:
+        school_series = students_fa[school_fa]
+        if isinstance(school_series, pd.DataFrame):
+            school_series = school_series.iloc[:, 0]
+        students_df[school_fa] = school_series
+    for column_name in ("school_code_raw", "school_code_norm", "school_status_resolved"):
+        if column_name in students_en.columns:
+            students_df[column_name] = students_en[column_name]
 
     assert_unique_student_ids(counters)
 
@@ -646,7 +902,7 @@ def _inject_student_ids(
         "next_female_start={next_female_start}".format(**summary)
     )
 
-    return counters, summary
+    return counters, summary, students_df
 
 
 
@@ -853,7 +1109,9 @@ def _allocate_and_write(
 ) -> int:
     """اجرای تخصیص، الصاق شناسه‌ها و نوشتن خروجی‌های Excel."""
 
-    student_ids, counter_summary = _inject_student_ids(students_base, args, policy)
+    student_ids, counter_summary, students_base = _inject_student_ids(
+        students_base, args, policy
+    )
     setattr(args, "_counter_summary", counter_summary)
 
     ui_center_map, cli_center_map, center_priority, strict_validation = _resolve_center_preferences(
@@ -1214,6 +1472,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="اجرای دوباره تخصیص برای تضمین دترمینیسم",
     )
+    alloc_cmd.add_argument(
+        "--counter-duplicate-strategy",
+        choices=("prompt", "abort", "drop", "assign-new"),
+        default="prompt",
+        help="نحوهٔ مدیریت student_id تکراری: prompt=سوال تعاملی، drop=حذف، assign-new=شمارندهٔ جدید",
+    )
 
     rule_cmd = sub.add_parser(
         "rule-engine",
@@ -1303,6 +1567,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--export-profile-path",
         default=str(_DEFAULT_ALLOC_PROFILE_PATH),
         help="مسیر فایل پروفایل Sabt برای خروجی rule-engine",
+    )
+    rule_cmd.add_argument(
+        "--counter-duplicate-strategy",
+        choices=("prompt", "abort", "drop", "assign-new"),
+        default="prompt",
+        help="نحوهٔ مدیریت student_id تکراری هنگام تولید شمارنده",
     )
     return parser
 
