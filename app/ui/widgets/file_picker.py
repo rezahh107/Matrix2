@@ -36,6 +36,16 @@ class FilePicker(QWidget):
         layout.addWidget(self._edit)
         layout.addWidget(self._button)
 
+    def set_placeholder_text(self, text: str) -> None:
+        """تنظیم placeholder فیلد ورودی."""
+
+        self._edit.setPlaceholderText(text)
+
+    def set_button_text(self, text: str) -> None:
+        """تنظیم متن دکمه انتخاب."""
+
+        self._button.setText(text)
+
     def text(self) -> str:
         """بازگرداندن مقدار متنی فعلی."""
 

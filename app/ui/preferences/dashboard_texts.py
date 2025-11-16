@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, List
 
 from app.utils.path_utils import resource_path
+from app.ui.texts import UiTranslator
 
 __all__ = [
     "ChecklistItem",
@@ -83,20 +84,34 @@ def _normalize_items(items: Iterable[dict]) -> List[ChecklistItem]:
     return normalized
 
 
-def load_dashboard_texts() -> DashboardTextBundle:
-    """بارگذاری متن‌های داشبورد از `config/dashboard_texts.json`."""
+def load_dashboard_texts(translator: UiTranslator) -> DashboardTextBundle:
+    """بارگذاری متن‌های داشبورد از `config/dashboard_texts.json` با fallback ترجمه."""
 
     payload = _load_json_payload(resource_path("config", "dashboard_texts.json"))
     cards = payload.get("cards", {})
     files_card = cards.get("files", {})
     checklist_card = cards.get("checklist", {})
     actions_card = cards.get("actions", {})
+    default_items = [
+        {"id": "inputs", "text": translator.text("dashboard.checklist.item.inputs", "ورودی‌ها آماده هستند")},
+        {"id": "policy", "text": translator.text("dashboard.checklist.item.policy", "سیاست صحیح انتخاب شده")},
+    ]
+    raw_items = payload.get("checklist", default_items)
     return DashboardTextBundle(
-        files_title=str(files_card.get("title") or "فایل‌های کلیدی"),
-        files_description=str(files_card.get("description") or "آخرین مسیرها"),
-        checklist_title=str(checklist_card.get("title") or "چک‌لیست"),
-        checklist_description=str(checklist_card.get("description") or "مرور سریع"),
-        actions_title=str(actions_card.get("title") or "میانبرها"),
-        actions_description=str(actions_card.get("description") or "دسترسی سریع"),
-        checklist_items=_normalize_items(payload.get("checklist", [])),
+        files_title=str(files_card.get("title") or translator.text("dashboard.files.title", "فایل‌های کلیدی")),
+        files_description=str(
+            files_card.get("description") or translator.text("dashboard.files.description", "آخرین مسیرها")
+        ),
+        checklist_title=str(
+            checklist_card.get("title") or translator.text("dashboard.checklist.title", "چک‌لیست")
+        ),
+        checklist_description=str(
+            checklist_card.get("description")
+            or translator.text("dashboard.checklist.description", "مرور سریع گام‌ها")
+        ),
+        actions_title=str(actions_card.get("title") or translator.text("dashboard.actions.title", "میانبرها")),
+        actions_description=str(
+            actions_card.get("description") or translator.text("dashboard.actions.description", "دسترسی سریع")
+        ),
+        checklist_items=_normalize_items(raw_items),
     )

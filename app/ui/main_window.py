@@ -7,11 +7,12 @@ from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
 import pandas as pd
 from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, Slot, QTimer, QUrl
-from PySide6.QtGui import QCloseEvent, QDesktopServices
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -28,11 +29,13 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStackedLayout,
     QSplitter,
+    QStatusBar,
     QStyle,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
+    QToolBar,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -66,6 +69,8 @@ from .preferences import (
     load_dashboard_texts,
     read_last_run_info,
 )
+from .preferences.language_dialog import LanguageDialog
+from .texts import UiTranslator
 
 __all__ = ["MainWindow", "run_demo", "FilePicker"]
 
@@ -75,14 +80,15 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("سامانه تخصیص دانشجو-منتور")
+        self._prefs = AppPreferences()
+        self._translator = UiTranslator(self._prefs.language)
+        self.setWindowTitle(self._translator.text("app.title", "سامانه تخصیص دانشجو-منتور"))
         self.setMinimumSize(960, 640)
-        self.setLayoutDirection(Qt.RightToLeft)
+        self.setLayoutDirection(Qt.RightToLeft if self._prefs.language == "fa" else Qt.LeftToRight)
 
         self._worker: Worker | None = None
         self._success_hook: Callable[[], None] | None = None
-        self._prefs = AppPreferences()
-        self._dashboard_texts = load_dashboard_texts()
+        self._dashboard_texts = load_dashboard_texts(self._translator)
         self._btn_open_output_folder: QPushButton | None = None
         self._center_manager_combos: Dict[int, QComboBox] = {}
         self._btn_reset_managers: QPushButton | None = None
@@ -95,7 +101,7 @@ class MainWindow(QMainWindow):
         self._progress_caption: QLabel | None = None
         self._last_run_badge: QLabel | None = None
         self._file_status_rows: Dict[str, Tuple[QLabel, QLabel]] = {}
-        self._current_action: str = "آماده"
+        self._current_action: str = self._translator.text("status.ready", "آماده")
         policy_file = resource_path("config", "policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
         exporter_config = resource_path("config", "SmartAlloc_Exporter_Config_v1.json")
@@ -117,11 +123,21 @@ class MainWindow(QMainWindow):
         self._tabs = QTabWidget(self)
         self._tabs.setDocumentMode(True)
         self._tabs.setTabPosition(QTabWidget.North)
-        self._tabs.addTab(self._wrap_page(self._build_build_page()), "ساخت ماتریس")
-        self._tabs.addTab(self._wrap_page(self._build_allocate_page()), "تخصیص")
-        self._tabs.addTab(self._wrap_page(self._build_rule_engine_page()), "موتور قواعد")
-        self._tabs.addTab(self._wrap_page(self._build_validate_page()), "اعتبارسنجی")
-        self._tabs.addTab(self._wrap_page(self._build_explain_page()), "توضیحات")
+        self._tabs.addTab(
+            self._wrap_page(self._build_build_page()), self._t("tabs.build", "ساخت ماتریس")
+        )
+        self._tabs.addTab(
+            self._wrap_page(self._build_allocate_page()), self._t("tabs.allocate", "تخصیص")
+        )
+        self._tabs.addTab(
+            self._wrap_page(self._build_rule_engine_page()), self._t("tabs.rule_engine", "موتور قواعد")
+        )
+        self._tabs.addTab(
+            self._wrap_page(self._build_validate_page()), self._t("tabs.validate", "اعتبارسنجی")
+        )
+        self._tabs.addTab(
+            self._wrap_page(self._build_explain_page()), self._t("tabs.explain", "توضیحات")
+        )
         top_layout.addWidget(self._tabs, 1)
 
         bottom_pane = QWidget(self._splitter)
@@ -132,19 +148,19 @@ class MainWindow(QMainWindow):
         status_layout = QHBoxLayout()
         status_layout.setContentsMargins(0, 0, 0, 0)
         status_layout.setSpacing(12)
-        self._stage_badge = QLabel("آماده")
+        self._stage_badge = QLabel(self._t("status.ready", "آماده"))
         self._stage_badge.setObjectName("labelStageBadge")
-        self._stage_detail = QLabel("برای شروع یکی از سناریوها را انتخاب کنید")
+        self._stage_detail = QLabel(self._t("stage.pick_scenario", "برای شروع یکی از سناریوها را انتخاب کنید"))
         self._stage_detail.setWordWrap(True)
         self._stage_detail.setObjectName("labelStageDetail")
-        self._status = QLabel("آماده")
+        self._status = QLabel(self._t("status.ready", "آماده"))
         self._status.setObjectName("labelStatus")
         status_column = QVBoxLayout()
         status_column.setSpacing(2)
         status_column.addWidget(self._stage_badge)
         status_column.addWidget(self._stage_detail)
         status_column.addWidget(self._status)
-        self._last_run_badge = QLabel("آخرین اجرا: هنوز اجرایی ثبت نشده است")
+        self._last_run_badge = QLabel(self._t("status.no_runs", "آخرین اجرا: هنوز اجرایی ثبت نشده است"))
         self._last_run_badge.setObjectName("lastRunBadge")
         self._last_run_badge.setWordWrap(True)
         status_column.addWidget(self._last_run_badge)
@@ -153,7 +169,7 @@ class MainWindow(QMainWindow):
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setObjectName("progressBar")
-        self._progress_caption = QLabel("0% | آماده")
+        self._progress_caption = QLabel(f"0% | {self._t('status.ready', 'آماده')}")
         self._progress_caption.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._progress_caption.setObjectName("progressCaption")
         progress_column = QVBoxLayout()
@@ -174,7 +190,7 @@ class MainWindow(QMainWindow):
         log_panel.setObjectName("logPanel")
         log_stack = QStackedLayout(log_panel)
         log_stack.setContentsMargins(0, 0, 0, 0)
-        self._log_placeholder = QLabel("هنوز گزارشی ثبت نشده است.")
+        self._log_placeholder = QLabel(self._t("log.placeholder", "هنوز گزارشی ثبت نشده است."))
         self._log_placeholder.setAlignment(Qt.AlignCenter)
         self._log_placeholder.setObjectName("logPlaceholder")
         self._log_placeholder.setWordWrap(True)
@@ -187,12 +203,12 @@ class MainWindow(QMainWindow):
 
         log_buttons = QVBoxLayout()
         log_buttons.setSpacing(8)
-        self._btn_clear_log = QPushButton("پاک کردن گزارش")
+        self._btn_clear_log = QPushButton(self._t("log.clear", "پاک کردن گزارش"))
         self._btn_clear_log.setObjectName("btnClearLog")
         self._btn_clear_log.clicked.connect(self._clear_log)
         log_buttons.addWidget(self._btn_clear_log)
 
-        self._btn_save_log = QPushButton("ذخیره گزارش…")
+        self._btn_save_log = QPushButton(self._t("log.save", "ذخیره گزارش…"))
         self._btn_save_log.setObjectName("btnSaveLog")
         self._btn_save_log.clicked.connect(self._save_log_to_file)
         log_buttons.addWidget(self._btn_save_log)
@@ -205,9 +221,9 @@ class MainWindow(QMainWindow):
         controls_layout.setContentsMargins(0, 0, 0, 0)
         controls_layout.setSpacing(12)
         controls_layout.addStretch(1)
-        self._btn_demo = QPushButton("اجرای تست (دمو Progress)")
+        self._btn_demo = QPushButton(self._t("action.demo", "اجرای تست (دمو Progress)"))
         self._btn_demo.setObjectName("btnDemo")
-        self._btn_demo.setToolTip("اجرای تست کوتاه برای نمایش انیمیشن پیشرفت")
+        self._btn_demo.setToolTip(self._t("log.demo.tooltip", "اجرای تست کوتاه برای نمایش انیمیشن پیشرفت"))
         self._btn_demo.clicked.connect(self._start_demo_task)
         controls_layout.addWidget(self._btn_demo)
         bottom_layout.addLayout(controls_layout)
@@ -218,6 +234,9 @@ class MainWindow(QMainWindow):
         self._splitter.setStretchFactor(1, 1)
 
         self.setCentralWidget(self._splitter)
+
+        self._build_ribbon()
+        self._build_status_bar()
 
         settings = QSettings()
         state = settings.value("ui/main_splitter")
@@ -230,7 +249,88 @@ class MainWindow(QMainWindow):
         self._apply_theme()
         self._refresh_dashboard_state()
 
+    def _t(self, key: str, fallback: str) -> str:
+        """دسترسی سریع به ترجمهٔ UI برای زبان فعال."""
+
+        return self._translator.text(key, fallback)
+
     # ------------------------------------------------------------------ UI setup
+    def _build_ribbon(self) -> None:
+        """ایجاد نوار ابزار بالایی با الهام از Ribbon Office."""
+
+        toolbar = QToolBar(self._t("ribbon.actions", "اکشن‌ها"), self)
+        toolbar.setIconSize(QSize(20, 20))
+        toolbar.setMovable(False)
+
+        build_action = QAction(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder),
+            self._t("action.build", "ساخت ماتریس"),
+            self,
+        )
+        build_action.triggered.connect(self._start_build)
+        toolbar.addAction(build_action)
+
+        allocate_action = QAction(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon),
+            self._t("action.allocate", "تخصیص"),
+            self,
+        )
+        allocate_action.triggered.connect(self._start_allocate)
+        toolbar.addAction(allocate_action)
+
+        rule_action = QAction(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload),
+            self._t("action.rule_engine", "اجرای Rule Engine"),
+            self,
+        )
+        rule_action.triggered.connect(self._start_rule_engine)
+        toolbar.addAction(rule_action)
+
+        toolbar.addSeparator()
+
+        output_action = QAction(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon),
+            self._t("dashboard.button.output", "پوشه خروجی"),
+            self,
+        )
+        output_action.triggered.connect(self._open_last_output_folder)
+        toolbar.addAction(output_action)
+
+        toolbar.addSeparator()
+        prefs_action = QAction(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView),
+            self._t("action.preferences", "تنظیمات"),
+            self,
+        )
+        prefs_action.triggered.connect(self._open_language_dialog)
+        toolbar.addAction(prefs_action)
+
+        self.addToolBar(toolbar)
+
+    def _build_status_bar(self) -> None:
+        """نوار وضعیت پایین با نمایش زبان و وضعیت جاری."""
+
+        status_bar = QStatusBar(self)
+        language_label = QLabel(f"{self._t('status.language', 'زبان فعال')}: {self._prefs.language.upper()}")
+        state_label = QLabel(self._t("statusbar.ready", "وضعیت: آماده"))
+        status_bar.addWidget(state_label)
+        status_bar.addPermanentWidget(language_label)
+        self._language_label = language_label
+        self._status_bar_state = state_label
+        self.setStatusBar(status_bar)
+
+    def _update_status_bar_state(self, key: str) -> None:
+        """به‌روزرسانی متن نوار وضعیت بر اساس کلید."""
+
+        if not hasattr(self, "_status_bar_state"):
+            return
+        mapping = {
+            "ready": self._t("statusbar.ready", "وضعیت: آماده"),
+            "running": self._t("statusbar.running", "وضعیت: در حال اجرا"),
+            "error": self._t("statusbar.error", "وضعیت: خطا"),
+        }
+        self._status_bar_state.setText(mapping.get(key, mapping["ready"]))
+
     def _wrap_page(self, page: QWidget) -> QScrollArea:
         """پیچیدن صفحات فرم در اسکرول برای نمایش بهتر در اندازه‌های کوچک."""
 
@@ -258,7 +358,7 @@ class MainWindow(QMainWindow):
             self,
             max_height=140,
         )
-        statuses = collect_file_statuses(self._prefs)
+        statuses = collect_file_statuses(self._prefs, self._translator)
         for status in statuses:
             files_card.body_layout().addWidget(self._create_file_status_row(status))
         layout.addWidget(files_card, 1)
@@ -276,7 +376,7 @@ class MainWindow(QMainWindow):
                 label.setObjectName("dashboardChecklistItem")
                 checklist_card.body_layout().addWidget(label)
         else:
-            placeholder = QLabel("چک‌لیستی تعریف نشده است")
+            placeholder = QLabel(self._t("dashboard.no_checklist", "چک‌لیستی تعریف نشده است"))
             placeholder.setObjectName("dashboardChecklistItem")
             checklist_card.body_layout().addWidget(placeholder)
         layout.addWidget(checklist_card, 1)
@@ -288,7 +388,8 @@ class MainWindow(QMainWindow):
         )
         policy_display = self._default_policy_path or "config/policy.json"
         policy_label = QLabel(
-            f"<b>سیاست فعال:</b> {policy_display}<br>نسخه Policy: 1.0.3 • نسخه SSoT: 1.0.2"
+            f"<b>{self._t('dashboard.policy.info', 'سیاست فعال:')}</b> {policy_display}<br>"
+            "نسخه Policy: 1.0.3 • نسخه SSoT: 1.0.2"
         )
         policy_label.setTextFormat(Qt.RichText)
         policy_label.setWordWrap(True)
@@ -304,20 +405,20 @@ class MainWindow(QMainWindow):
         buttons_row.setColumnStretch(1, 1)
         buttons = [
             (
-                "ساخت ماتریس",
-                "اجرای کامل سناریوی ساخت ماتریس",
+                self._t("dashboard.button.build", "ساخت ماتریس"),
+                self._t("tooltip.build", "اجرای کامل سناریوی ساخت ماتریس"),
                 self._start_build,
                 QStyle.StandardPixmap.SP_FileDialogNewFolder,
             ),
             (
-                "تخصیص",
-                "اجرای تخصیص دانش‌آموز به منتور",
+                self._t("dashboard.button.allocate", "تخصیص"),
+                self._t("tooltip.allocate", "اجرای تخصیص دانش‌آموز به منتور"),
                 self._start_allocate,
                 QStyle.StandardPixmap.SP_ComputerIcon,
             ),
             (
-                "موتور قواعد",
-                "اجرای Rule Engine برای تست سیاست",
+                self._t("dashboard.button.rule_engine", "موتور قواعد"),
+                self._t("tooltip.rule_engine", "اجرای Rule Engine برای تست سیاست"),
                 self._start_rule_engine,
                 QStyle.StandardPixmap.SP_BrowserReload,
             ),
@@ -326,8 +427,8 @@ class MainWindow(QMainWindow):
             button = self._create_dashboard_shortcut(text, tooltip, callback, icon_role)
             buttons_row.addWidget(button, idx // 2, idx % 2)
         self._btn_open_output_shortcut = self._create_dashboard_shortcut(
-            "پوشه خروجی",
-            "آخرین پوشه خروجی تولید شده را باز می‌کند",
+            self._t("dashboard.button.output", "پوشه خروجی"),
+            self._t("tooltip.output_folder", "آخرین پوشه خروجی تولید شده را باز می‌کند"),
             self._open_last_output_folder,
             QStyle.StandardPixmap.SP_DirHomeIcon,
         )
@@ -396,8 +497,8 @@ class MainWindow(QMainWindow):
         symbol = "●" if model.level is FileStatusLevel.READY else "▲"
         indicator.setText(symbol)
         indicator.setStyleSheet(f"color:{color};font-size:16px;")
-        path_display = model.path if model.path else "تنظیم نشده"
-        state_text = "آماده" if model.exists else "در انتظار اجرا"
+        path_display = model.path if model.path else self._t("status.waiting", "تنظیم نشده")
+        state_text = self._t("status.ready", "آماده") if model.exists else self._t("status.waiting", "در انتظار اجرا")
         text_label.setText(
             f"<b>{model.label}</b><br>"
             f"<span style='color:#475569'>{path_display}</span><br>"
@@ -407,7 +508,7 @@ class MainWindow(QMainWindow):
     def _refresh_dashboard_state(self) -> None:
         """به‌روزرسانی کارت وضعیت و برچسب آخرین اجرا."""
 
-        self._apply_file_statuses(collect_file_statuses(self._prefs))
+        self._apply_file_statuses(collect_file_statuses(self._prefs, self._translator))
         self._refresh_last_run_badge()
 
     def _apply_file_statuses(self, statuses: Iterable[FileStatusViewModel]) -> None:
@@ -422,7 +523,7 @@ class MainWindow(QMainWindow):
         if self._last_run_badge is None:
             return
         info = read_last_run_info(self._prefs)
-        self._last_run_badge.setText(format_last_run_label(info))
+        self._last_run_badge.setText(format_last_run_label(info, self._translator))
 
     def _create_page_hero(self, title: str, subtitle: str, badge: str) -> QFrame:
         """ساخت هدر Hero برای صفحات تب‌ها."""
@@ -456,30 +557,40 @@ class MainWindow(QMainWindow):
 
         stylesheet = """
             QMainWindow {
-                background-color: #1f1f23;
+                background-color: #f5f7fb;
             }
             QWidget {
-                color: #f2f2f2;
-                font-family: "Tahoma";
-                font-size: 8pt;
+                color: #0f172a;
+                font-family: "Segoe UI";
+                font-size: 9pt;
+            }
+            QToolBar {
+                background: #e9eef9;
+                spacing: 8px;
+                padding: 6px;
+            }
+            QStatusBar {
+                background: #e9eef9;
+                padding: 4px 8px;
             }
             QGroupBox {
-                border: 1px solid #3c3f45;
-                border-radius: 10px;
+                border: 1px solid #cfd6e6;
+                border-radius: 8px;
                 margin-top: 10px;
                 padding: 10px;
-                background-color: #25262b;
+                background-color: #ffffff;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                subcontrol-position: top right;
+                subcontrol-position: top left;
                 padding: 0 6px;
-                color: #d6d6d6;
+                color: #1d3a70;
+                font-weight: 600;
             }
             #dashboardCard, #heroCard {
-                border: 1px solid #3c3f45;
+                border: 1px solid #cfd6e6;
                 border-radius: 10px;
-                background-color: #2d2f36;
+                background-color: #ffffff;
             }
             #dashboardPanel {
                 background-color: transparent;
@@ -488,52 +599,53 @@ class MainWindow(QMainWindow):
                 border: none;
             }
             QLabel#dashboardCardTitle {
-                font-size: 9pt;
+                font-size: 10pt;
                 font-weight: 600;
-                color: #f7f7f7;
+                color: #0f172a;
             }
             QLabel#dashboardCardDescription,
             QLabel#dashboardPolicyInfo,
             QLabel#dashboardChecklistItem {
-                color: #b6b8bd;
+                color: #475569;
             }
             QLabel#heroTitle {
-                font-size: 10pt;
+                font-size: 11pt;
                 font-weight: 600;
-                color: #ffffff;
+                color: #0f172a;
             }
             QLabel#heroSubtitle {
-                color: #ced0d6;
+                color: #475569;
             }
             QLabel#heroBadge {
                 padding: 4px 12px;
                 border-radius: 12px;
-                background-color: #323439;
-                color: #8ad0ff;
-                border: 1px solid #0078d4;
+                background-color: #e9eef9;
+                color: #1d3a70;
+                border: 1px solid #2b88d8;
             }
             QLabel#labelStageBadge {
                 font-weight: 600;
-                color: #8ad0ff;
+                color: #1d3a70;
             }
             QLabel#labelStageDetail {
-                color: #d5d7db;
+                color: #334155;
             }
             QLabel#progressCaption {
-                color: #d5d7db;
+                color: #1d3a70;
                 font-weight: 500;
             }
             QLabel#lastRunBadge {
-                color: #c2f7ed;
+                color: #0f172a;
                 font-weight: 600;
             }
             QProgressBar#progressBar {
-                background-color: #2b2d33;
+                background-color: #f8fafc;
+                border: 1px solid #cfd6e6;
                 border-radius: 8px;
                 height: 18px;
             }
             QProgressBar#progressBar::chunk {
-                background-color: #0078d4;
+                background-color: #2b88d8;
                 border-radius: 6px;
             }
             QLineEdit,
@@ -545,76 +657,77 @@ class MainWindow(QMainWindow):
             QTableView,
             QListView,
             QTreeView {
-                background-color: #1f2127;
-                border: 1px solid #3c3f45;
+                background-color: #ffffff;
+                border: 1px solid #cfd6e6;
                 border-radius: 6px;
-                selection-background-color: #2b5f8c;
-                selection-color: #ffffff;
+                padding: 4px;
+                selection-background-color: #e2e8f0;
+                selection-color: #0f172a;
             }
-            QTextEdit#textLog {
-                background-color: #1b1d22;
-                color: #f7f7f7;
-                border-radius: 10px;
-                padding: 6px;
-                border: 1px solid #34363c;
-            }
-            #logPlaceholder {
-                color: #a6a8ad;
-                border: 1px dashed #3b3d44;
-                border-radius: 10px;
-                padding: 12px;
-                background-color: #25262b;
-            }
-            QPushButton {
-                background-color: #0078d4;
-                color: #ffffff;
-                padding: 6px 18px;
-                border-radius: 8px;
-                border: none;
-                font-weight: 600;
-            }
-            QPushButton:hover:!disabled {
-                background-color: #0b64a0;
-            }
-            QPushButton:disabled {
-                background-color: #3a3d44;
-                color: #8e9198;
-            }
-            QToolButton#dashboardShortcut {
-                border-radius: 8px;
-                padding: 6px 10px;
-                min-width: 120px;
-                border: 1px solid #3d4046;
-                background-color: #2f3138;
-                color: #f1f1f1;
-            }
-            QToolButton#dashboardShortcut:hover:!disabled {
-                background-color: #3a3d44;
-            }
-            QToolButton#dashboardShortcut:disabled {
-                background-color: #25262b;
-                color: #7d7f86;
-                border-color: #2b2d33;
+            QTabWidget::pane {
+                border: 1px solid #cfd6e6;
+                border-radius: 6px;
             }
             QTabBar::tab {
-                padding: 6px 14px;
-                margin: 0 2px;
-                background-color: transparent;
-                color: #a5a7ac;
+                background: #eef2fb;
+                color: #0f172a;
+                padding: 8px 12px;
+                border: 1px solid #cfd6e6;
+                border-bottom: none;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
             }
             QTabBar::tab:selected {
+                background: #ffffff;
+                color: #0f172a;
+            }
+            #dashboardShortcut {
+                background: #f3f6fb;
+                border: 1px solid #c3d3f5;
+                border-radius: 6px;
+                padding: 6px 10px;
+            }
+            #dashboardShortcut:hover {
+                background: #e8f0fe;
+            }
+            #fileStatusRow {
+                border-bottom: 1px solid #cfd6e6;
+            }
+            #fileStatusIndicator {
+                font-size: 16px;
+            }
+            #fileStatusText {
+                color: #0f172a;
+            }
+            #logPanel {
+                border: 1px solid #cfd6e6;
+                border-radius: 6px;
+                background: #ffffff;
+            }
+            #logPlaceholder {
+                color: #94a3b8;
+            }
+            QTextEdit#textLog {
+                border: none;
+                background: transparent;
+            }
+            QPushButton#btnDemo {
+                background-color: #2b88d8;
+                border: 1px solid #1d6fb8;
                 color: #ffffff;
-                font-weight: 600;
-                border-bottom: 2px solid #0078d4;
+            }
+            QPushButton#btnDemo:hover {
+                background-color: #1d6fb8;
             }
         """
+
         self.setStyleSheet(stylesheet)
 
     def _set_stage(self, title: str | None, detail: str | None = None) -> None:
         """به‌روزرسانی عنوان و توضیح مرحلهٔ فعال."""
 
         if self._stage_badge is not None:
-            self._stage_badge.setText((title or "آماده").strip())
+            self._stage_badge.setText((title or self._t("status.ready", "آماده")).strip())
         if detail is not None and self._stage_detail is not None:
             self._stage_detail.setText(detail.strip() or "")
 
@@ -635,35 +748,38 @@ class MainWindow(QMainWindow):
         outer.setSpacing(16)
         outer.addWidget(
             self._create_page_hero(
-                "ساخت ماتریس",
-                "ورود فایل‌های Inspactor، مدارس و Crosswalk برای ساخت eligibility matrix مطابق Policy.",
-                "گام ۱ از ۴",
+                self._t("hero.build.title", "ساخت ماتریس"),
+                self._t(
+                    "hero.build.subtitle",
+                    "ورود فایل‌های Inspactor، مدارس و Crosswalk برای ساخت eligibility matrix مطابق Policy.",
+                ),
+                self._t("hero.build.badge", "گام ۱ از ۴"),
             )
         )
 
-        inputs_group = QGroupBox("ورودی‌ها", page)
+        inputs_group = QGroupBox(self._t("group.inputs", "ورودی‌ها"), page)
         inputs_layout = QFormLayout(inputs_group)
         inputs_layout.setLabelAlignment(Qt.AlignRight)
         inputs_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
 
-        self._picker_inspactor = FilePicker(page, placeholder="فایل Inspactor")
+        self._picker_inspactor = FilePicker(page, placeholder=self._t("files.inspactor", "فایل Inspactor"))
         self._picker_inspactor.setObjectName("editInspactor")
-        self._picker_inspactor.setToolTip("خروجی گزارش Inspactor که فهرست پشتیبان‌ها را دارد")
-        inputs_layout.addRow("گزارش Inspactor", self._picker_inspactor)
+        self._picker_inspactor.setToolTip(self._t("files.inspactor", "خروجی گزارش Inspactor که فهرست پشتیبان‌ها را دارد"))
+        inputs_layout.addRow(self._t("files.inspactor", "گزارش Inspactor"), self._picker_inspactor)
 
-        self._picker_schools = FilePicker(page, placeholder="فایل مدارس")
+        self._picker_schools = FilePicker(page, placeholder=self._t("files.schools", "فایل مدارس"))
         self._picker_schools.setObjectName("editSchools")
-        self._picker_schools.setToolTip("فایل رسمی مدارس برای تطبیق کد و نام مدرسه")
-        inputs_layout.addRow("گزارش مدارس", self._picker_schools)
+        self._picker_schools.setToolTip(self._t("files.schools", "فایل رسمی مدارس برای تطبیق کد و نام مدرسه"))
+        inputs_layout.addRow(self._t("files.schools", "گزارش مدارس"), self._picker_schools)
 
-        self._picker_crosswalk = FilePicker(page, placeholder="فایل Crosswalk")
+        self._picker_crosswalk = FilePicker(page, placeholder=self._t("files.crosswalk", "فایل Crosswalk"))
         self._picker_crosswalk.setObjectName("editCrosswalk")
-        self._picker_crosswalk.setToolTip("جدول Crosswalk جهت نگاشت رشته‌ها و گروه‌ها")
-        inputs_layout.addRow("Crosswalk", self._picker_crosswalk)
+        self._picker_crosswalk.setToolTip(self._t("files.crosswalk", "جدول Crosswalk جهت نگاشت رشته‌ها و گروه‌ها"))
+        inputs_layout.addRow(self._t("files.crosswalk", "Crosswalk"), self._picker_crosswalk)
 
         outer.addWidget(inputs_group)
 
-        policy_group = QGroupBox("سیاست", page)
+        policy_group = QGroupBox(self._t("files.policy", "سیاست"), page)
         policy_layout = QFormLayout(policy_group)
         policy_layout.setLabelAlignment(Qt.AlignRight)
         policy_layout.setFormAlignment(Qt.AlignTop | Qt.AlignRight)
@@ -1217,6 +1333,24 @@ class MainWindow(QMainWindow):
             self._interactive.append(self._btn_reset_managers)
 
     # ------------------------------------------------------------------ Actions
+    def _open_language_dialog(self) -> None:
+        """باز کردن دیالوگ انتخاب زبان و ذخیره در تنظیمات."""
+
+        dialog = LanguageDialog(self._prefs.language, self._translator, self)
+        if dialog.exec() == QDialog.Accepted:
+            chosen = dialog.selected_language()
+            if chosen != self._prefs.language:
+                self._prefs.language = chosen
+                if hasattr(self, "_language_label"):
+                    self._language_label.setText(
+                        f"{self._t('status.language', 'زبان فعال')}: {chosen.upper()}"
+                    )
+                QMessageBox.information(
+                    self,
+                    self._t("dialog.language.title", "تنظیمات زبان"),
+                    self._t("status.restart_required", "برای اعمال زبان باید برنامه را مجدد اجرا کنید."),
+                )
+
     def _start_build(self) -> None:
         """اجرای سناریوی ساخت ماتریس با فراخوانی CLI."""
 
@@ -2070,6 +2204,7 @@ class MainWindow(QMainWindow):
         self._set_stage(self._current_action, safe_msg)
         self._update_progress_caption(self._progress.value(), safe_msg)
         self._append_log(f"{pct}% | {safe_msg}")
+        self._update_status_bar_state("running")
 
     @Slot(bool, object)
     def _on_finished(self, success: bool, error: object | None) -> None:
@@ -2097,6 +2232,7 @@ class MainWindow(QMainWindow):
             self._set_stage("خطا", msg)
             self._update_progress_caption(self._progress.value(), "خطا")
             self._append_log(f'<span style="color:{color}">❌ {msg}</span>')
+            self._update_status_bar_state("error")
             return
 
         if not success:
@@ -2104,6 +2240,7 @@ class MainWindow(QMainWindow):
             self._set_stage("لغو شد", "عملیات متوقف شد")
             self._update_progress_caption(self._progress.value(), "لغو شد")
             self._append_log("⚠️ عملیات متوقف شد")
+            self._update_status_bar_state("ready")
             return
 
         self._progress.setValue(100)
@@ -2111,6 +2248,7 @@ class MainWindow(QMainWindow):
         self._set_stage(self._current_action, "عملیات با موفقیت پایان یافت")
         self._update_progress_caption(100, "کامل")
         self._append_log('<span style="color:#2e7d32">✅ عملیات با موفقیت پایان یافت</span>')
+        self._update_status_bar_state("ready")
         if hook is not None:
             try:
                 hook()

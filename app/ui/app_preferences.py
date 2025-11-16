@@ -9,6 +9,7 @@ from typing import Any, List, Set
 from PySide6.QtCore import QByteArray, QSettings
 
 from app.core.policy_loader import load_policy
+from app.ui.texts import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES
 
 __all__ = ["AppPreferences"]
 
@@ -19,6 +20,8 @@ class AppPreferences:
     def __init__(self) -> None:
         self._settings = QSettings("YourOrganization", "MentorAllocation")
         self._valid_centers = self._load_valid_centers()
+        if self.language not in SUPPORTED_LANGUAGES:
+            self.language = DEFAULT_LANGUAGE
 
     # ------------------------------------------------------------------ داخلی
     def _load_valid_centers(self) -> Set[int]:
@@ -275,6 +278,19 @@ class AppPreferences:
         self._settings.sync()
 
     # ------------------------------------------------------------------ UI state
+    @property
+    def language(self) -> str:
+        """زبان رابط کاربری ذخیره‌شده در تنظیمات."""
+
+        value = self._get_string("ui/language", DEFAULT_LANGUAGE)
+        return value if value in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+
+    @language.setter
+    def language(self, value: str) -> None:
+        if value not in SUPPORTED_LANGUAGES:
+            raise ValueError("Language must be one of: " + ", ".join(sorted(SUPPORTED_LANGUAGES)))
+        self._set_string("ui/language", value)
+
     @property
     def window_geometry(self) -> bytes | None:
         """موقعیت و اندازه پنجره."""

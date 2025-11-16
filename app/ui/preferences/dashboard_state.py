@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Sequence
 
 from ..app_preferences import AppPreferences
+from ..texts import UiTranslator
 
 __all__ = [
     "FileStatusLevel",
@@ -47,23 +48,21 @@ class LastRunInfo:
     timestamp: datetime
 
 
-_FILE_STATUS_DEFINITIONS: Sequence[tuple[str, str, str, str]] = (
-    ("matrix_output", "خروجی ماتریس", "آخرین فایل ماتریس ساخته‌شده", "last_matrix_path"),
-    ("alloc_output", "خروجی تخصیص", "فایل نهایی تخصیص دانش‌آموز-منتور", "last_alloc_output"),
-    (
-        "sabt_allocate",
-        "Sabt تخصیص",
-        "آخرین فایل خروجی برای سامانه ثبت از تب تخصیص",
-        "last_sabt_output_allocate",
-    ),
-    (
-        "sabt_rule",
-        "Sabt موتور قواعد",
-        "آخرین فایل خروجی برای سامانه ثبت از تب موتور قواعد",
-        "last_sabt_output_rule",
-    ),
-    ("output_folder", "پوشه خروجی", "آخرین پوشه‌ای که خروجی در آن ذخیره شد", "last_output_dir"),
+_FILE_STATUS_DEFINITIONS: Sequence[tuple[str, str]] = (
+    ("matrix_output", "last_matrix_path"),
+    ("alloc_output", "last_alloc_output"),
+    ("sabt_allocate", "last_sabt_output_allocate"),
+    ("sabt_rule", "last_sabt_output_rule"),
+    ("output_folder", "last_output_dir"),
 )
+
+_FILE_STATUS_TEXT = {
+    "matrix_output": ("files.matrix_output", "آخرین فایل ماتریس ساخته‌شده"),
+    "alloc_output": ("files.alloc_output", "فایل نهایی تخصیص دانش‌آموز-منتور"),
+    "sabt_allocate": ("files.sabt_output", "آخرین فایل خروجی برای سامانه ثبت از تب تخصیص"),
+    "sabt_rule": ("files.sabt_output", "آخرین فایل خروجی برای سامانه ثبت از تب موتور قواعد"),
+    "output_folder": ("files.output_folder", "آخرین پوشه‌ای که خروجی در آن ذخیره شد"),
+}
 
 _RUN_TYPE_LABELS = {
     "build": "ساخت ماتریس",
@@ -77,11 +76,14 @@ def _path_from_prefs(prefs: AppPreferences, attr: str) -> str:
     return str(value or "").strip()
 
 
-def collect_file_statuses(prefs: AppPreferences) -> List[FileStatusViewModel]:
+def collect_file_statuses(prefs: AppPreferences, translator: UiTranslator) -> List[FileStatusViewModel]:
     """ساخت مدل وضعیت فایل‌ها بر اساس مسیرهای ذخیره‌شده."""
 
     statuses: List[FileStatusViewModel] = []
-    for key, label, description, attr in _FILE_STATUS_DEFINITIONS:
+    for key, attr in _FILE_STATUS_DEFINITIONS:
+        label_key, description_fallback = _FILE_STATUS_TEXT.get(key, (key, key))
+        label = translator.text(label_key, label_key)
+        description = translator.text(label_key, description_fallback)
         path_text = _path_from_prefs(prefs, attr)
         exists = bool(path_text and Path(path_text).exists())
         level = FileStatusLevel.READY if exists else FileStatusLevel.WARNING
@@ -112,11 +114,19 @@ def read_last_run_info(prefs: AppPreferences) -> LastRunInfo | None:
     return LastRunInfo(run_type=run_type, timestamp=timestamp)
 
 
-def format_last_run_label(info: LastRunInfo | None) -> str:
+def format_last_run_label(info: LastRunInfo | None, translator: UiTranslator) -> str:
     """ساخت متن قابل‌نمایش برای برچسب آخرین اجرا."""
 
     if info is None:
-        return "آخرین اجرا: هنوز اجرایی ثبت نشده است"
-    run_title = _RUN_TYPE_LABELS.get(info.run_type, info.run_type)
+        return translator.text("status.no_runs", "آخرین اجرا: هنوز اجرایی ثبت نشده است")
+    run_title = _RUN_TYPE_LABELS.get(
+        info.run_type,
+        {
+            "build": translator.text("action.build", info.run_type),
+            "allocate": translator.text("action.allocate", info.run_type),
+            "rule-engine": translator.text("action.rule_engine", info.run_type),
+        }.get(info.run_type, translator.text("status.ready", info.run_type)),
+    )
     formatted_time = info.timestamp.strftime("%Y/%m/%d %H:%M")
-    return f"آخرین اجرا: {run_title} • {formatted_time}"
+    prefix = translator.text("status.no_runs", "آخرین اجرا: هنوز اجرایی ثبت نشده است").split(":")[0]
+    return f"{prefix}: {run_title} • {formatted_time}"
