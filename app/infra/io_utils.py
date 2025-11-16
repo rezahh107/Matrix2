@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import os
 import re
 import tempfile
 import warnings
+from numbers import Real
 from os import PathLike
 from pathlib import Path
 from typing import Dict, Iterator, List, Literal, Mapping, Sequence
@@ -40,6 +42,7 @@ ALT_CODE_COLUMN = "کد جایگزین"
 _INVALID_SHEET_CHARS = re.compile(r"[\\/*?:\[\]]")
 _STRING_EXPORT_KEYS: Sequence[str] = ("alias", "mentor_id", "postal_code")
 _INT_EXPORT_KEYS: Sequence[str] = ("group_code", "school_code")
+_FLOAT_AS_INT_PATTERN = re.compile(r"^[+-]?\d+\.0+")
 _MOBILE_COLUMN_NAMES = frozenset(
     {
         "student_mobile",
@@ -195,7 +198,15 @@ def _stringify_cell(value: object) -> str:
 def _format_mobile_for_export(value: object) -> str:
     """افزودن صفر پیشتاز به شماره‌های موبایل ده‌رقمی که با «9» شروع می‌شوند."""
 
-    text = _stringify_cell(value)
+    normalized_value = value
+    if isinstance(value, Real) and not isinstance(value, bool):
+        float_value = float(value)
+        if math.isfinite(float_value) and float_value.is_integer():
+            normalized_value = int(float_value)
+
+    text = _stringify_cell(normalized_value).strip()
+    if _FLOAT_AS_INT_PATTERN.fullmatch(text):
+        text = text.split(".", 1)[0]
     digits = extract_ascii_digits(text)
     if digits is None:
         return text
