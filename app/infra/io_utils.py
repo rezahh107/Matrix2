@@ -24,6 +24,7 @@ from app.core.common.columns import (
     canonicalize_headers,
     ensure_series,
 )
+from app.core.common.normalization import extract_ascii_digits
 from app.core.policy_loader import get_policy
 from app.infra.excel import apply_workbook_formatting
 
@@ -39,6 +40,44 @@ ALT_CODE_COLUMN = "کد جایگزین"
 _INVALID_SHEET_CHARS = re.compile(r"[\\/*?:\[\]]")
 _STRING_EXPORT_KEYS: Sequence[str] = ("alias", "mentor_id", "postal_code")
 _INT_EXPORT_KEYS: Sequence[str] = ("group_code", "school_code")
+_MOBILE_COLUMN_NAMES = frozenset(
+    {
+        "student_mobile",
+        "student_mobile_raw",
+        "student_mobile_number",
+        "student_contact1_mobile",
+        "student_contact2_mobile",
+        "student_GF_Mobile",
+        "GF_Mobile",
+        "contact1_mobile",
+        "contact2_mobile",
+        "guardian_phone_1",
+        "guardian_phone_2",
+        "guardian1_mobile",
+        "guardian2_mobile",
+        "parent_mobile_1",
+        "parent_mobile_2",
+        "تلفن همراه",
+        "تلفن همراه | student_mobile",
+        "تلفن همراه داوطلب",
+        "موبایل دانش آموز",
+        "موبایل دانش‌آموز",
+        "موبایل رابط 1",
+        "موبایل رابط 2",
+        "تلفن رابط 1",
+        "تلفن رابط 1 | contact1_mobile",
+        "تلفن رابط 2",
+        "تلفن رابط 2 | contact2_mobile",
+    }
+)
+_MOBILE_KEYWORDS = (
+    "mobile",
+    "cell phone",
+    "cellphone",
+    "موبایل",
+    "تلفن همراه",
+    "شماره همراه",
+)
 
 
 def _safe_sheet_name(name: str, taken: set[str]) -> str:
@@ -162,6 +201,50 @@ def _stringify_cell(value: object) -> str:
     return str(value)
 
 
+def _format_mobile_for_export(value: object) -> str:
+    """افزودن صفر پیشتاز به شماره‌های موبایل ده‌رقمی که با «9» شروع می‌شوند."""
+
+    text = _stringify_cell(value)
+    digits = extract_ascii_digits(text)
+    if digits is None:
+        return text
+    if len(digits) == 10 and digits.startswith("9"):
+        return f"0{digits}"
+    if len(digits) == 11 and digits.startswith("09"):
+        return digits
+    return text
+
+
+def _is_mobile_column(label: object) -> bool:
+    """تشخیص ستون‌های موبایل بر اساس نام‌های صریح و کلیدواژه‌های رایج."""
+
+    label_text = str(label)
+    if label_text in _MOBILE_COLUMN_NAMES:
+        return True
+
+    normalized = (
+        label_text.replace("|", " ")
+        .replace("_", " ")
+        .replace("-", " ")
+        .replace("\u200c", " ")
+        .casefold()
+    )
+    normalized = " ".join(normalized.split())
+
+    return any(keyword in normalized for keyword in _MOBILE_KEYWORDS)
+
+
+def _normalize_mobile_columns(df: pd.DataFrame) -> None:
+    """اعمال قالب متنی و صفر پیشتاز روی ستون‌های موبایل شناسایی‌شده."""
+
+    if df.empty:
+        return
+    target_columns = [column for column in df.columns if _is_mobile_column(column)]
+    for column in target_columns:
+        series = ensure_series(df[column]).astype("object")
+        df[column] = series.map(_format_mobile_for_export).astype("string")
+
+
 def _prepare_dataframe_for_excel(df: pd.DataFrame) -> pd.DataFrame:
     """پاک‌سازی کامل DataFrame پیش از نوشتن در Excel."""
 
@@ -170,6 +253,7 @@ def _prepare_dataframe_for_excel(df: pd.DataFrame) -> pd.DataFrame:
     frame.columns = _make_unique_columns(list(map(str, frame.columns)))
 
     converted = frame.copy()
+    _normalize_mobile_columns(converted)
     for column, dtype in converted.dtypes.items():
         if pd.api.types.is_object_dtype(dtype):
             converted[column] = converted[column].map(_stringify_cell)
