@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
 import pandas as pd
-from PySide6.QtCore import QByteArray, QSettings, Qt, Slot, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, Slot, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,11 +24,14 @@ from PySide6.QtWidgets import (
     QPushButton,
     QProgressBar,
     QScrollArea,
+    QStackedLayout,
     QSplitter,
+    QStyle,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -72,6 +75,14 @@ class MainWindow(QMainWindow):
         self._btn_open_output_folder: QPushButton | None = None
         self._center_manager_combos: Dict[int, QComboBox] = {}
         self._btn_reset_managers: QPushButton | None = None
+        self._shortcut_buttons: List[QToolButton] = []
+        self._btn_open_output_shortcut: QToolButton | None = None
+        self._log_placeholder: QLabel | None = None
+        self._log_stack: QStackedLayout | None = None
+        self._stage_badge: QLabel | None = None
+        self._stage_detail: QLabel | None = None
+        self._progress_caption: QLabel | None = None
+        self._current_action: str = "آماده"
         policy_file = resource_path("config", "policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
         exporter_config = resource_path("config", "SmartAlloc_Exporter_Config_v1.json")
@@ -108,13 +119,31 @@ class MainWindow(QMainWindow):
         status_layout = QHBoxLayout()
         status_layout.setContentsMargins(0, 0, 0, 0)
         status_layout.setSpacing(12)
+        self._stage_badge = QLabel("آماده")
+        self._stage_badge.setObjectName("labelStageBadge")
+        self._stage_detail = QLabel("برای شروع یکی از سناریوها را انتخاب کنید")
+        self._stage_detail.setWordWrap(True)
+        self._stage_detail.setObjectName("labelStageDetail")
         self._status = QLabel("آماده")
         self._status.setObjectName("labelStatus")
+        status_column = QVBoxLayout()
+        status_column.setSpacing(2)
+        status_column.addWidget(self._stage_badge)
+        status_column.addWidget(self._stage_detail)
+        status_column.addWidget(self._status)
+        status_layout.addLayout(status_column, 1)
+
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setObjectName("progressBar")
-        status_layout.addWidget(self._status, 0)
-        status_layout.addWidget(self._progress, 1)
+        self._progress_caption = QLabel("0% | آماده")
+        self._progress_caption.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._progress_caption.setObjectName("progressCaption")
+        progress_column = QVBoxLayout()
+        progress_column.setSpacing(4)
+        progress_column.addWidget(self._progress)
+        progress_column.addWidget(self._progress_caption)
+        status_layout.addLayout(progress_column, 1)
         bottom_layout.addLayout(status_layout)
 
         self._log = QTextEdit()
@@ -124,13 +153,26 @@ class MainWindow(QMainWindow):
         log_container = QHBoxLayout()
         log_container.setContentsMargins(0, 0, 0, 0)
         log_container.setSpacing(12)
-        log_container.addWidget(self._log, 1)
+        log_panel = QFrame(self)
+        log_panel.setObjectName("logPanel")
+        log_stack = QStackedLayout(log_panel)
+        log_stack.setContentsMargins(0, 0, 0, 0)
+        self._log_placeholder = QLabel("هنوز گزارشی ثبت نشده است.")
+        self._log_placeholder.setAlignment(Qt.AlignCenter)
+        self._log_placeholder.setObjectName("logPlaceholder")
+        self._log_placeholder.setWordWrap(True)
+        log_stack.addWidget(self._log_placeholder)
+        log_stack.addWidget(self._log)
+        self._log_stack = log_stack
+        self._log.textChanged.connect(self._sync_log_placeholder)
+        self._sync_log_placeholder()
+        log_container.addWidget(log_panel, 1)
 
         log_buttons = QVBoxLayout()
         log_buttons.setSpacing(8)
         self._btn_clear_log = QPushButton("پاک کردن گزارش")
         self._btn_clear_log.setObjectName("btnClearLog")
-        self._btn_clear_log.clicked.connect(self._log.clear)
+        self._btn_clear_log.clicked.connect(self._clear_log)
         log_buttons.addWidget(self._btn_clear_log)
 
         self._btn_save_log = QPushButton("ذخیره گزارش…")
@@ -148,6 +190,7 @@ class MainWindow(QMainWindow):
         controls_layout.addStretch(1)
         self._btn_demo = QPushButton("اجرای تست (دمو Progress)")
         self._btn_demo.setObjectName("btnDemo")
+        self._btn_demo.setToolTip("اجرای تست کوتاه برای نمایش انیمیشن پیشرفت")
         self._btn_demo.clicked.connect(self._start_demo_task)
         controls_layout.addWidget(self._btn_demo)
         bottom_layout.addLayout(controls_layout)
@@ -166,6 +209,8 @@ class MainWindow(QMainWindow):
 
         self._interactive: List[QWidget] = []
         self._register_interactive_controls()
+        self._update_output_folder_button_state()
+        self._apply_theme()
 
     # ------------------------------------------------------------------ UI setup
     def _wrap_page(self, page: QWidget) -> QScrollArea:
@@ -183,43 +228,290 @@ class MainWindow(QMainWindow):
 
         frame = QFrame(self)
         frame.setFrameShape(QFrame.StyledPanel)
+        frame.setObjectName("dashboardCard")
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(24)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(32)
 
         policy_display = self._default_policy_path or "config/policy.json"
         info = QLabel(
-            f"<b>سیاست فعال:</b> {policy_display}<br/>"
-            "<b>نسخه Policy:</b> 1.0.3<br/>"
-            "<b>نسخه SSoT:</b> 1.0.2"
+            f"<div class='dashboard-info'>"
+            f"<div class='dashboard-title'>سیاست فعال</div>"
+            f"<div class='dashboard-value'>{policy_display}</div>"
+            "<div class='dashboard-meta'>نسخه Policy: 1.0.3 • نسخه SSoT: 1.0.2</div>"
+            "</div>"
         )
         info.setTextFormat(Qt.RichText)
         info.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        info.setObjectName("dashboardInfo")
         layout.addWidget(info, 1)
 
         shortcuts = QVBoxLayout()
         shortcuts.setContentsMargins(0, 0, 0, 0)
-        shortcuts.setSpacing(8)
+        shortcuts.setSpacing(12)
         label = QLabel("میان‌بر سناریوها")
         label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        label.setObjectName("dashboardShortcutsTitle")
         shortcuts.addWidget(label)
 
-        btn_build = QPushButton("شروع ساخت ماتریس")
-        btn_build.clicked.connect(self._start_build)
-        shortcuts.addWidget(btn_build)
-
-        btn_allocate = QPushButton("شروع تخصیص")
-        btn_allocate.clicked.connect(self._start_allocate)
-        shortcuts.addWidget(btn_allocate)
-
-        btn_rule = QPushButton("اجرای موتور قواعد")
-        btn_rule.clicked.connect(self._start_rule_engine)
-        shortcuts.addWidget(btn_rule)
-
+        buttons_row = QHBoxLayout()
+        buttons_row.setContentsMargins(0, 0, 0, 0)
+        buttons_row.setSpacing(12)
+        buttons = [
+            (
+                "ساخت ماتریس",
+                "اجرای کامل سناریوی ساخت ماتریس",
+                self._start_build,
+                QStyle.StandardPixmap.SP_FileDialogNewFolder,
+            ),
+            (
+                "تخصیص",
+                "اجرای تخصیص دانش‌آموز به منتور",
+                self._start_allocate,
+                QStyle.StandardPixmap.SP_ComputerIcon,
+            ),
+            (
+                "موتور قواعد",
+                "اجرای Rule Engine برای تست سیاست",
+                self._start_rule_engine,
+                QStyle.StandardPixmap.SP_BrowserReload,
+            ),
+        ]
+        for text, tooltip, callback, icon_role in buttons:
+            button = self._create_dashboard_shortcut(text, tooltip, callback, icon_role)
+            buttons_row.addWidget(button)
+        self._btn_open_output_shortcut = self._create_dashboard_shortcut(
+            "پوشه خروجی",
+            "آخرین پوشه خروجی تولید شده را باز می‌کند",
+            self._open_last_output_folder,
+            QStyle.StandardPixmap.SP_DirHomeIcon,
+        )
+        buttons_row.addWidget(self._btn_open_output_shortcut)
+        shortcuts.addLayout(buttons_row)
         shortcuts.addStretch(1)
         layout.addLayout(shortcuts, 0)
 
         return frame
+
+    def _create_dashboard_shortcut(
+        self,
+        text: str,
+        tooltip: str,
+        callback: Callable[[], None],
+        icon_role: QStyle.StandardPixmap,
+    ) -> QToolButton:
+        """ساخت دکمه میان‌بر داشبورد با آیکون استاندارد."""
+
+        button = QToolButton(self)
+        button.setObjectName("dashboardShortcut")
+        button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        button.setIcon(self.style().standardIcon(icon_role))
+        button.setIconSize(QSize(32, 32))
+        button.setText(text)
+        button.setToolTip(tooltip)
+        button.clicked.connect(callback)
+        self._shortcut_buttons.append(button)
+        return button
+
+    def _create_page_hero(self, title: str, subtitle: str, badge: str) -> QFrame:
+        """ساخت هدر Hero برای صفحات تب‌ها."""
+
+        frame = QFrame(self)
+        frame.setObjectName("heroCard")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
+
+        text_column = QVBoxLayout()
+        text_column.setSpacing(4)
+        title_label = QLabel(title)
+        title_label.setObjectName("heroTitle")
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setObjectName("heroSubtitle")
+        subtitle_label.setWordWrap(True)
+        text_column.addWidget(title_label)
+        text_column.addWidget(subtitle_label)
+        layout.addLayout(text_column, 1)
+
+        badge_label = QLabel(badge)
+        badge_label.setObjectName("heroBadge")
+        badge_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(badge_label, 0, Qt.AlignVCenter)
+
+        return frame
+
+    def _apply_theme(self) -> None:
+        """اعمال استایل‌شیت سراسری برای ایجاد هماهنگی بصری."""
+
+        colors = {
+            "window_bg": "#f3f3f3",
+            "surface_bg": "#ffffff",
+            "subtle_bg": "#f8f9fc",
+            "border": "#d1d9e6",
+            "border_subtle": "#e5e9f2",
+            "text_primary": "#1f2328",
+            "text_secondary": "#444d5c",
+            "text_muted": "#5f6b7a",
+            "accent": "#0f6cbd",
+            "accent_dark": "#0c4a85",
+            "accent_soft": "#d6e9ff",
+            "accent_border": "#8ec5ff",
+        }
+        stylesheet = f"""
+            QMainWindow {{
+                background-color: {colors["window_bg"]};
+                color: {colors["text_primary"]};
+            }}
+            QWidget {{
+                color: {colors["text_primary"]};
+            }}
+            QScrollArea {{
+                background: transparent;
+            }}
+            QGroupBox {{
+                border: 1px solid {colors["border"]};
+                border-radius: 12px;
+                margin-top: 12px;
+                padding: 12px;
+                background-color: {colors["surface_bg"]};
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top right;
+                padding: 0 4px;
+                color: {colors["text_secondary"]};
+                font-weight: 600;
+            }}
+            #dashboardCard, #heroCard {{
+                border: 1px solid {colors["border"]};
+                border-radius: 18px;
+                background-color: {colors["surface_bg"]};
+            }}
+            QLabel#dashboardInfo {{
+                color: {colors["text_secondary"]};
+            }}
+            QLabel#dashboardShortcutsTitle {{
+                color: {colors["text_primary"]};
+                font-weight: 600;
+            }}
+            QLabel#heroTitle {{
+                font-size: 15px;
+                font-weight: 600;
+                color: {colors["text_primary"]};
+            }}
+            QLabel#heroSubtitle {{
+                color: {colors["text_secondary"]};
+            }}
+            QLabel#heroBadge {{
+                padding: 6px 18px;
+                border-radius: 16px;
+                background-color: {colors["accent_soft"]};
+                color: {colors["accent_dark"]};
+                font-weight: 600;
+            }}
+            QLabel#labelStageBadge {{
+                font-size: 13px;
+                font-weight: 600;
+                color: {colors["accent_dark"]};
+            }}
+            QLabel#labelStageDetail {{
+                color: {colors["text_secondary"]};
+            }}
+            QLabel#labelStatus, QLabel#progressCaption {{
+                color: {colors["text_primary"]};
+            }}
+            QProgressBar#progressBar {{
+                background-color: {colors["subtle_bg"]};
+                border-radius: 8px;
+                height: 18px;
+                border: 1px solid {colors["border_subtle"]};
+            }}
+            QProgressBar#progressBar::chunk {{
+                background-color: {colors["accent"]};
+                border-radius: 7px;
+            }}
+            QTextEdit#textLog {{
+                background-color: {colors["surface_bg"]};
+                color: {colors["text_primary"]};
+                border-radius: 12px;
+                border: 1px solid {colors["border"]};
+                padding: 12px;
+            }}
+            #logPanel {{
+                border-radius: 14px;
+                background-color: {colors["surface_bg"]};
+            }}
+            #logPlaceholder {{
+                color: {colors["text_muted"]};
+                border: 1px dashed {colors["border"]};
+                border-radius: 12px;
+                padding: 20px;
+                background-color: {colors["subtle_bg"]};
+            }}
+            QPushButton {{
+                background-color: {colors["accent"]};
+                color: white;
+                padding: 8px 20px;
+                border-radius: 10px;
+                border: 1px solid {colors["accent_border"]};
+                font-weight: 600;
+            }}
+            QPushButton:hover:!disabled {{
+                background-color: {colors["accent_dark"]};
+            }}
+            QPushButton:disabled {{
+                background-color: {colors["border_subtle"]};
+                color: {colors["text_muted"]};
+                border-color: {colors["border_subtle"]};
+            }}
+            QToolButton#dashboardShortcut {{
+                border-radius: 14px;
+                padding: 12px 18px;
+                min-width: 120px;
+                background-color: {colors["subtle_bg"]};
+                color: {colors["text_primary"]};
+                border: 1px solid {colors["border_subtle"]};
+            }}
+            QToolButton#dashboardShortcut:hover:!disabled {{
+                background-color: {colors["accent_soft"]};
+                border-color: {colors["accent_border"]};
+            }}
+            QToolButton#dashboardShortcut:disabled {{
+                background-color: {colors["border_subtle"]};
+                color: {colors["text_muted"]};
+            }}
+            QTabBar::tab {{
+                padding: 10px 16px;
+                margin: 2px;
+                border: none;
+                color: {colors["text_secondary"]};
+            }}
+            QTabBar::tab:selected {{
+                color: {colors["accent_dark"]};
+                font-weight: 600;
+                border-bottom: 2px solid {colors["accent"]};
+            }}
+            QTabWidget::pane {{
+                border: none;
+            }}
+        """
+        self.setStyleSheet(stylesheet)
+
+    def _set_stage(self, title: str | None, detail: str | None = None) -> None:
+        """به‌روزرسانی عنوان و توضیح مرحلهٔ فعال."""
+
+        if self._stage_badge is not None:
+            self._stage_badge.setText((title or "آماده").strip())
+        if detail is not None and self._stage_detail is not None:
+            self._stage_detail.setText(detail.strip() or "")
+
+    def _update_progress_caption(self, pct: int, message: str | None) -> None:
+        """نمایش درصد پیشرفت همراه با توضیح مرحله."""
+
+        if self._progress_caption is None:
+            return
+        safe_message = message or self._status.text() or "در حال پردازش"
+        self._progress_caption.setText(f"{pct}% | {safe_message}")
 
     def _build_build_page(self) -> QWidget:
         """فرم ورودی‌های سناریوی ساخت ماتریس."""
@@ -228,6 +520,13 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(page)
         outer.setContentsMargins(24, 24, 24, 24)
         outer.setSpacing(16)
+        outer.addWidget(
+            self._create_page_hero(
+                "ساخت ماتریس",
+                "ورود فایل‌های Inspactor، مدارس و Crosswalk برای ساخت eligibility matrix مطابق Policy.",
+                "گام ۱ از ۴",
+            )
+        )
 
         inputs_group = QGroupBox("ورودی‌ها", page)
         inputs_layout = QFormLayout(inputs_group)
@@ -297,6 +596,13 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(page)
         outer.setContentsMargins(24, 24, 24, 24)
         outer.setSpacing(16)
+        outer.addWidget(
+            self._create_page_hero(
+                "تخصیص",
+                "انتخاب فایل دانش‌آموز و استخر منتورها برای محاسبهٔ تخصیص و خروجی‌های Sabt.",
+                "گام ۲ از ۴",
+            )
+        )
 
         inputs_group = QGroupBox("ورودی‌های تخصیص", page)
         inputs_layout = QFormLayout(inputs_group)
@@ -476,6 +782,13 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(page)
         outer.setContentsMargins(24, 24, 24, 24)
         outer.setSpacing(16)
+        outer.addWidget(
+            self._create_page_hero(
+                "موتور قواعد",
+                "اجرای Rule Engine روی ماتریس ساخته‌شده جهت بازبینی سیاست و شمارنده‌ها.",
+                "گام ۳ از ۴",
+            )
+        )
 
         inputs_group = QGroupBox("ورودی‌ها", page)
         inputs_layout = QFormLayout(inputs_group)
@@ -649,6 +962,13 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
+        layout.addWidget(
+            self._create_page_hero(
+                "کنترل کیفیت",
+                "مرور خروجی‌های Sabt و گزارش‌های خطا پیش از تحویل نهایی.",
+                "گام ۴ از ۴",
+            )
+        )
 
         intro = QLabel(
             "این بخش برای یادآوری مراحل کنترل کیفیت خروجی‌های Sabt و تخصیص است."
@@ -690,6 +1010,13 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
+        layout.addWidget(
+            self._create_page_hero(
+                "گزارش Explain",
+                "دسترسی سریع به ساختار گزارش توضیح تصمیمات برای ممیزی و آموزش.",
+                "ضمیمه",
+            )
+        )
 
         label = QLabel(
             "خلاصهٔ Explain در شیت جداگانه داخل فایل اکسل ذخیره می‌شود تا روند"
@@ -771,6 +1098,7 @@ class MainWindow(QMainWindow):
             self._picker_rule_current_roster,
             self._btn_rule_autodetect,
         ]
+        self._interactive.extend(self._shortcut_buttons)
         self._interactive.extend(self._center_manager_combos.values())
         if self._btn_reset_managers is not None:
             self._interactive.append(self._btn_reset_managers)
@@ -1424,7 +1752,11 @@ class MainWindow(QMainWindow):
         """اجرای تابع در Worker با آماده‌سازی UI."""
 
         self._progress.setValue(0)
-        self._status.setText(f"{action} در حال اجرا…")
+        self._current_action = action
+        running_text = f"{action} در حال اجرا…"
+        self._status.setText(running_text)
+        self._set_stage(action, "در انتظار گزارش پیشرفت")
+        self._update_progress_caption(0, running_text)
         self._append_log(f"<b>▶️ شروع {action}</b>")
         self._disable_controls(True)
         self._success_hook = on_success
@@ -1513,6 +1845,12 @@ class MainWindow(QMainWindow):
             return
         QMessageBox.information(self, "ذخیره گزارش", "گزارش با موفقیت ذخیره شد.")
 
+    def _clear_log(self) -> None:
+        """پاک کردن لاگ و بازگرداندن حالت خالی."""
+
+        self._log.clear()
+        self._sync_log_placeholder()
+
     def _append_log(self, text: str) -> None:
         """افزودن پیام به لاگ با برجسته کردن خطاها."""
 
@@ -1523,6 +1861,15 @@ class MainWindow(QMainWindow):
         else:
             html = message
         self._log.append(html)
+        self._sync_log_placeholder()
+
+    def _sync_log_placeholder(self) -> None:
+        """به‌روزرسانی وضعیت نمایش placeholder لاگ."""
+
+        if self._log_stack is None or self._log_placeholder is None:
+            return
+        target = self._log if self._log.toPlainText().strip() else self._log_placeholder
+        self._log_stack.setCurrentWidget(target)
 
     def _determine_last_output_path(self) -> str:
         """بررسی آخرین خروجی‌های ذخیره شده در تنظیمات."""
@@ -1552,9 +1899,11 @@ class MainWindow(QMainWindow):
     def _update_output_folder_button_state(self) -> None:
         """فعال/غیرفعال کردن دکمهٔ باز کردن پوشه بر اساس Prefs."""
 
-        if self._btn_open_output_folder is None:
-            return
-        self._btn_open_output_folder.setEnabled(bool(self._determine_last_output_path()))
+        available = bool(self._determine_last_output_path())
+        if self._btn_open_output_folder is not None:
+            self._btn_open_output_folder.setEnabled(available)
+        if self._btn_open_output_shortcut is not None:
+            self._btn_open_output_shortcut.setEnabled(available)
 
     def _load_counter_dataframe(self, path: Path) -> pd.DataFrame:
         """بارگذاری دیتافریم شمارنده با تشخیص شیت مناسب."""
@@ -1599,6 +1948,8 @@ class MainWindow(QMainWindow):
         self._progress.setValue(max(0, min(100, int(pct))))
         self._status.setText(message or "در حال پردازش")
         safe_msg = message or "(بدون پیام)"
+        self._set_stage(self._current_action, safe_msg)
+        self._update_progress_caption(self._progress.value(), safe_msg)
         self._append_log(f"{pct}% | {safe_msg}")
 
     @Slot(bool, object)
@@ -1624,16 +1975,22 @@ class MainWindow(QMainWindow):
                 color = "#c00"
                 QMessageBox.critical(self, "خطای ناشناخته", msg)
             self._status.setText("خطا")
+            self._set_stage("خطا", msg)
+            self._update_progress_caption(self._progress.value(), "خطا")
             self._append_log(f'<span style="color:{color}">❌ {msg}</span>')
             return
 
         if not success:
             self._status.setText("لغو شد")
+            self._set_stage("لغو شد", "عملیات متوقف شد")
+            self._update_progress_caption(self._progress.value(), "لغو شد")
             self._append_log("⚠️ عملیات متوقف شد")
             return
 
         self._progress.setValue(100)
         self._status.setText("کامل")
+        self._set_stage(self._current_action, "عملیات با موفقیت پایان یافت")
+        self._update_progress_caption(100, "کامل")
         self._append_log('<span style="color:#2e7d32">✅ عملیات با موفقیت پایان یافت</span>')
         if hook is not None:
             try:
