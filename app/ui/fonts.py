@@ -102,17 +102,34 @@ def _policy_font_name() -> str:
     try:
         name = (get_policy().excel.font_name or "Vazirmatn").strip()
     except Exception as exc:  # pragma: no cover - خطاهای محیطی Policy
-        LOGGER.warning("خواندن فونت از Policy شکست خورد؛ استفاده از پیش‌فرض.", exc_info=exc)
-        return "Vazirmatn"
-    return name or "Vazirmatn"
+        LOGGER.warning(
+            "خواندن فونت از Policy شکست خورد؛ استفاده از تاهوما.", exc_info=exc
+        )
+        return "Tahoma"
+    return name or "Tahoma"
 
 
-def prepare_default_font(*, point_size: int = DEFAULT_UI_POINT_SIZE) -> "QFont":
+@lru_cache(maxsize=1)
+def _policy_font_size() -> int:
+    """برگرداندن اندازهٔ پیشنهادی Policy با محدودیت منطقی برای رابط کاربری."""
+
+    try:
+        size = int(get_policy().excel.font_size)
+    except Exception as exc:  # pragma: no cover - خطای محیطی
+        LOGGER.warning(
+            "خواندن اندازهٔ فونت از Policy شکست خورد؛ استفاده از مقدار پیش‌فرض.",
+            exc_info=exc,
+        )
+        return DEFAULT_UI_POINT_SIZE
+    return max(8, min(12, size))
+
+
+def prepare_default_font(*, point_size: int | None = None) -> "QFont":
     """ساخت شیء فونت پیش‌فرض با نصب فونت‌های لازم (وزیرمتن/تاهوما).
 
     مثال::
 
-        >>> font = prepare_default_font(point_size=11)  # doctest: +SKIP
+        >>> font = prepare_default_font(point_size=10)  # doctest: +SKIP
         >>> font.family()  # doctest: +SKIP
         'Vazirmatn'
     """
@@ -120,6 +137,8 @@ def prepare_default_font(*, point_size: int = DEFAULT_UI_POINT_SIZE) -> "QFont":
     from PySide6.QtGui import QFont, QFontDatabase
 
     policy_font = _policy_font_name()
+    policy_point_size = _policy_font_size()
+    resolved_point_size = policy_point_size if point_size is None else point_size
     installed_families = _install_bundled_fonts(policy_font)
     candidates = _dedupe_preserve_order(
         [policy_font, *installed_families, *_SYSTEM_FALLBACKS]
@@ -129,14 +148,14 @@ def prepare_default_font(*, point_size: int = DEFAULT_UI_POINT_SIZE) -> "QFont":
     for family in candidates:
         if database.hasFamily(family):
             font = QFont(family)
-            font.setPointSize(point_size)
+            font.setPointSize(resolved_point_size)
             font.setStyleHint(QFont.StyleHint.AnyStyle)
             font.setStyleStrategy(QFont.StyleStrategy.PreferDefault)
             LOGGER.info("فونت رابط کاربری انتخاب شد: %s", family)
             return font
 
     fallback = QFont()
-    fallback.setPointSize(point_size)
+    fallback.setPointSize(resolved_point_size)
     LOGGER.warning("هیچ فونت مناسبی یافت نشد؛ استفاده از پیش‌فرض سیستم.")
     return fallback
 

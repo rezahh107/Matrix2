@@ -14,8 +14,10 @@ def _reset_policy_cache():
     """پاک‌سازی کش فونت Policy قبل از هر تست."""
 
     fonts._policy_font_name.cache_clear()
+    fonts._policy_font_size.cache_clear()
     yield
     fonts._policy_font_name.cache_clear()
+    fonts._policy_font_size.cache_clear()
 
 
 def test_dedupe_preserve_order_basic() -> None:
