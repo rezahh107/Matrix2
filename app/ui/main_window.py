@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -284,7 +285,6 @@ class MainWindow(QMainWindow):
             self._dashboard_texts.actions_title,
             self._dashboard_texts.actions_description,
             self,
-            max_height=140,
         )
         policy_display = self._default_policy_path or "config/policy.json"
         policy_label = QLabel(
@@ -295,9 +295,13 @@ class MainWindow(QMainWindow):
         policy_label.setObjectName("dashboardPolicyInfo")
         actions_card.body_layout().addWidget(policy_label)
 
-        buttons_row = QHBoxLayout()
+        buttons_container = QWidget(self)
+        buttons_row = QGridLayout(buttons_container)
         buttons_row.setContentsMargins(0, 0, 0, 0)
-        buttons_row.setSpacing(6)
+        buttons_row.setHorizontalSpacing(6)
+        buttons_row.setVerticalSpacing(6)
+        buttons_row.setColumnStretch(0, 1)
+        buttons_row.setColumnStretch(1, 1)
         buttons = [
             (
                 "ساخت ماتریس",
@@ -318,17 +322,17 @@ class MainWindow(QMainWindow):
                 QStyle.StandardPixmap.SP_BrowserReload,
             ),
         ]
-        for text, tooltip, callback, icon_role in buttons:
+        for idx, (text, tooltip, callback, icon_role) in enumerate(buttons):
             button = self._create_dashboard_shortcut(text, tooltip, callback, icon_role)
-            buttons_row.addWidget(button)
+            buttons_row.addWidget(button, idx // 2, idx % 2)
         self._btn_open_output_shortcut = self._create_dashboard_shortcut(
             "پوشه خروجی",
             "آخرین پوشه خروجی تولید شده را باز می‌کند",
             self._open_last_output_folder,
             QStyle.StandardPixmap.SP_DirHomeIcon,
         )
-        buttons_row.addWidget(self._btn_open_output_shortcut)
-        actions_card.body_layout().addLayout(buttons_row)
+        buttons_row.addWidget(self._btn_open_output_shortcut, len(buttons) // 2, len(buttons) % 2)
+        actions_card.body_layout().addWidget(buttons_container)
         layout.addWidget(actions_card, 1)
 
         return frame
@@ -346,9 +350,10 @@ class MainWindow(QMainWindow):
         button.setObjectName("dashboardShortcut")
         button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         button.setIcon(self.style().standardIcon(icon_role))
-        button.setIconSize(QSize(20, 20))
+        icon_size = self.style().pixelMetric(QStyle.PM_SmallIconSize) or 16
+        button.setIconSize(QSize(icon_size, icon_size))
         button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        button.setFixedHeight(40)
+        button.setFixedHeight(32)
         button.setText(text)
         button.setToolTip(tooltip)
         button.clicked.connect(callback)
