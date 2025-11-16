@@ -385,11 +385,12 @@ class MainWindow(QMainWindow):
         indicator.setStyleSheet(f"color:{color};font-size:16px;")
         path_display = model.path if model.path else "تنظیم نشده"
         state_text = "آماده" if model.exists else "در انتظار اجرا"
-        text_label.setText(
+        status_html = (
             f"<b>{model.label}</b><br>"
             f"<span style='color:#475569'>{path_display}</span><br>"
             f"<span style='color:#0f172a'>{state_text}</span>"
         )
+        text_label.setText(status_html)
 
     def _refresh_dashboard_state(self) -> None:
         """به‌روزرسانی کارت وضعیت و برچسب آخرین اجرا."""
