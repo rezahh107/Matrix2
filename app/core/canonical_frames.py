@@ -37,6 +37,10 @@ __all__ = [
 _POOL_STATS_ATTR = "pool_canonicalization_stats"
 POOL_JOIN_KEY_DUPLICATES_ATTR = "pool_join_key_duplicates"
 POOL_DUPLICATE_SUMMARY_ATTR = "pool_duplicate_summary"
+_FINAL_EXAM_GROUP_NORMALIZED = normalize_fa("گروه آزمایشی نهایی")
+_FINAL_EXAM_GROUP_TOKENS = tuple(
+    token for token in _FINAL_EXAM_GROUP_NORMALIZED.split(" ") if token
+)
 
 
 @dataclass(slots=True)
@@ -334,6 +338,25 @@ def _append_bilingual_alias_columns(
     return result
 
 
+def _promote_final_exam_group_column(frame: pd.DataFrame) -> pd.DataFrame:
+    """افزودن نگاشت «گروه آزمایشی نهایی» به «کدرشته» در صورت فقدان."""
+
+    canonical_group = CANON_EN_TO_FA["group_code"]
+    if canonical_group in frame.columns:
+        return frame
+    for column in frame.columns:
+        normalized = normalize_fa(column)
+        if not normalized:
+            continue
+        if normalized == _FINAL_EXAM_GROUP_NORMALIZED or all(
+            token in normalized for token in _FINAL_EXAM_GROUP_TOKENS
+        ):
+            promoted = frame.copy()
+            promoted[canonical_group] = ensure_series(frame[column])
+            return promoted
+    return frame
+
+
 def _ensure_student_defaults(frame: pd.DataFrame, policy: PolicyConfig) -> pd.DataFrame:
     """تزریق ستون‌های حیاتی با مقادیر پیش‌فرض برای دانش‌آموزان."""
 
@@ -381,6 +404,7 @@ def canonicalize_students_frame(
     """کاننیکال‌سازی کامل دیتافریم دانش‌آموز برای تخصیص (SSoT)."""
 
     students = resolve_aliases(students_df.copy(deep=True), "report")
+    students = _promote_final_exam_group_column(students)
     if isinstance(students.columns, pd.MultiIndex):
         students.columns = [
             next((str(part).strip() for part in tpl if str(part).strip()), "column")

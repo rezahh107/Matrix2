@@ -118,6 +118,27 @@ def test_canonicalize_students_frame_handles_duplicate_school_columns() -> None:
     assert normalized["school_code_raw"].iloc[0] == "1111"
 
 
+def test_canonicalize_students_frame_promotes_final_exam_column_variants() -> None:
+    policy = load_policy()
+    students = pd.DataFrame(
+        {
+            "student_id": ["STD-001"],
+            "گروه آزمایشی نهایی (کد رشته)": [3201],
+            "جنسیت": [1],
+            "دانش آموز فارغ": [0],
+            "مرکز گلستان صدرا": [1],
+            "مالی حکمت بنیاد": [0],
+            "کد مدرسه": [3581],
+        }
+    )
+
+    normalized = canonicalize_students_frame(students, policy=policy)
+
+    group_col = columns.CANON_EN_TO_FA["group_code"]
+    assert group_col in normalized.columns
+    assert normalized[group_col].iloc[0] == 3201
+
+
 def test_canonicalize_students_frame_flattens_multiindex_school_columns() -> None:
     policy = load_policy()
     multi_columns = pd.MultiIndex.from_tuples(
