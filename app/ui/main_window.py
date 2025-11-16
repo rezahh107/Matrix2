@@ -744,6 +744,7 @@ class MainWindow(QMainWindow):
 
         page = QWidget(self)
         outer = QVBoxLayout(page)
+        browse_text = self._t("action.browse", "انتخاب…")
         outer.setContentsMargins(24, 24, 24, 24)
         outer.setSpacing(16)
         outer.addWidget(
@@ -807,6 +808,7 @@ class MainWindow(QMainWindow):
         )
         self._picker_output_matrix.setObjectName("editMatrixOut")
         self._picker_output_matrix.setToolTip("مسیر ذخیرهٔ فایل خروجی ماتریس اهلیت")
+        self._picker_output_matrix.set_button_text(browse_text)
         self._apply_pref_default(self._picker_output_matrix, self._prefs.last_matrix_path)
         self._set_picker_button_text(self._picker_output_matrix)
         output_layout.addRow("خروجی ماتریس", self._picker_output_matrix)
@@ -828,6 +830,7 @@ class MainWindow(QMainWindow):
 
         page = QWidget(self)
         outer = QVBoxLayout(page)
+        browse_text = self._t("action.browse", "انتخاب…")
         outer.setContentsMargins(24, 24, 24, 24)
         outer.setSpacing(16)
         outer.addWidget(
@@ -854,6 +857,7 @@ class MainWindow(QMainWindow):
         self._picker_pool = FilePicker(page, placeholder="استخر منتورها (*.xlsx)")
         self._picker_pool.setObjectName("editPool")
         self._picker_pool.setToolTip("فهرست منتورها یا پشتیبان‌ها برای تخصیص")
+        self._picker_pool.set_button_text(browse_text)
         self._picker_pool.line_edit().textChanged.connect(
             lambda *_: self._refresh_all_manager_combos()
         )
@@ -881,6 +885,7 @@ class MainWindow(QMainWindow):
         )
         self._picker_alloc_out.setObjectName("editAllocOut")
         self._picker_alloc_out.setToolTip("مسیر ذخیرهٔ نتیجه نهایی تخصیص دانش‌آموز-منتور")
+        self._picker_alloc_out.set_button_text(browse_text)
         self._apply_pref_default(self._picker_alloc_out, self._prefs.last_alloc_output)
         self._set_picker_button_text(self._picker_alloc_out)
 
@@ -959,6 +964,7 @@ class MainWindow(QMainWindow):
         self._picker_sabt_output_alloc.setToolTip(
             "فایل ImportToSabt برای ارسال به سامانه ثبت"
         )
+        self._picker_sabt_output_alloc.set_button_text(browse_text)
         self._apply_pref_default(
             self._picker_sabt_output_alloc, self._prefs.last_sabt_output_allocate
         )
@@ -974,6 +980,7 @@ class MainWindow(QMainWindow):
         self._picker_sabt_config_alloc.setToolTip(
             "فایل تنظیمات SmartAlloc Exporter"
         )
+        self._picker_sabt_config_alloc.set_button_text(browse_text)
         self._apply_pref_default(
             self._picker_sabt_config_alloc, self._prefs.last_sabt_config_path
         )
@@ -1023,6 +1030,7 @@ class MainWindow(QMainWindow):
 
         page = QWidget(self)
         outer = QVBoxLayout(page)
+        browse_text = self._t("action.browse", "انتخاب…")
         outer.setContentsMargins(24, 24, 24, 24)
         outer.setSpacing(16)
         outer.addWidget(
@@ -1043,6 +1051,7 @@ class MainWindow(QMainWindow):
         )
         self._picker_rule_matrix.setObjectName("editRuleMatrix")
         self._picker_rule_matrix.setToolTip("فایل ماتریس اهلیت ساخته‌شده را انتخاب کنید")
+        self._picker_rule_matrix.set_button_text(browse_text)
         self._apply_pref_default(
             self._picker_rule_matrix, self._prefs.last_matrix_path
         )
@@ -1150,6 +1159,7 @@ class MainWindow(QMainWindow):
         self._picker_sabt_output_rule.setToolTip(
             "فایل ImportToSabt برای خروجی سناریوی موتور قواعد"
         )
+        self._picker_sabt_output_rule.set_button_text(browse_text)
         self._apply_pref_default(
             self._picker_sabt_output_rule, self._prefs.last_sabt_output_rule
         )
@@ -1165,6 +1175,7 @@ class MainWindow(QMainWindow):
         self._picker_sabt_config_rule.setToolTip(
             "فایل تنظیمات SmartAlloc Exporter برای Rule-Engine"
         )
+        self._picker_sabt_config_rule.set_button_text(browse_text)
         self._apply_pref_default(
             self._picker_sabt_config_rule, self._prefs.last_sabt_config_path
         )
