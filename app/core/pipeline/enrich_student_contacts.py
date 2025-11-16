@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 import pandas as pd
 
@@ -16,6 +16,8 @@ __all__ = [
     "enrich_student_contacts",
     "CONTACT_POLICY_COLUMNS",
     "CONTACT_POLICY_ALIAS_GROUPS",
+    "REGISTRATION_STATUS_CANDIDATES",
+    "debug_registration_distribution",
 ]
 
 CONTACT_POLICY_COLUMNS: tuple[str, ...] = (
@@ -122,6 +124,26 @@ _TRACKING_CODE_CANDIDATES: tuple[str, ...] = (
 )
 
 
+def _unique_preserve(items: Sequence[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            unique.append(item)
+    return tuple(unique)
+
+
+REGISTRATION_STATUS_CANDIDATES: tuple[str, ...] = _unique_preserve(
+    (
+        "student_registration_status",
+        *_STATUS_CANDIDATES,
+        "student_reg_status",
+        "وضعیت ثبت نام",
+    )
+)
+
+
 def _first_existing(df: pd.DataFrame, candidates: Iterable[str], default: str) -> str:
     for column in candidates:
         if column in df.columns:
@@ -132,6 +154,37 @@ def _first_existing(df: pd.DataFrame, candidates: Iterable[str], default: str) -
 def _ensure_column(df: pd.DataFrame, column: str) -> None:
     if column not in df.columns:
         df[column] = pd.Series([pd.NA] * len(df), dtype="string", index=df.index)
+
+
+def debug_registration_distribution(
+    df: pd.DataFrame, candidate_columns: Iterable[str]
+) -> dict[str, Any]:
+    """شمارش توزیع وضعیت ثبت‌نام برای دیباگ.
+
+    اولین ستونی را که در بین نام‌های ورودی پیدا کند انتخاب می‌کند و تعداد
+    مقادیر غیرخالی، صفرها و سه‌ها را برمی‌گرداند. در صورت نبود ستون، ستون None
+    گزارش می‌شود.
+    """
+
+    first_column: str | None = None
+    for name in candidate_columns:
+        if name in df.columns:
+            first_column = name
+            break
+
+    if first_column is None:
+        return {"column": None, "non_null": 0, "zeros": 0, "threes": 0}
+
+    series = pd.to_numeric(df[first_column], errors="coerce")
+    non_null = int(series.notna().sum())
+    zeros = int((series == 0).sum())
+    threes = int((series == 3).sum())
+    return {
+        "column": first_column,
+        "non_null": non_null,
+        "zeros": zeros,
+        "threes": threes,
+    }
 
 
 def enrich_student_contacts(df: pd.DataFrame) -> pd.DataFrame:
