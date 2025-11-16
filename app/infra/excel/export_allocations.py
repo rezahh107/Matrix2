@@ -10,7 +10,7 @@ from typing import Iterable, Literal, Sequence
 
 import pandas as pd
 
-from app.core.common.columns import canonicalize_headers, ensure_series
+from app.core.common.columns import CANON_EN_TO_FA, canonicalize_headers, ensure_series
 from app.core.common.normalization import normalize_fa
 from app.infra.excel.common import enforce_text_columns, identify_code_headers
 from app.infra.io_utils import write_xlsx_atomic
@@ -39,6 +39,7 @@ _ALLOCATION_HEADER_MAP = {
     normalize_fa("کپی کد جایگزین 39"): "mentor_alias_code",
 }
 _SPLIT_PATTERN = re.compile(r"[|،,/]+")
+_ASCII_KEY_PATTERN = re.compile(r"[^0-9a-z]+")
 
 
 def _clean_text(value: object) -> str:
@@ -57,7 +58,10 @@ def _slugify(value: str) -> str:
 def _normalize_lookup_key(value: str) -> str:
     normalized = normalize_fa(value)
     normalized = "".join(ch for ch in normalized.lower() if not ch.isspace())
-    return normalized
+    if normalized:
+        return normalized
+    ascii_fallback = _ASCII_KEY_PATTERN.sub("", str(value).strip().lower())
+    return ascii_fallback
 
 
 def _iter_mapping_candidates(value: str) -> Iterable[str]:
@@ -190,14 +194,22 @@ def _resolve_student_column(
     return None
 
 
+def _register_lookup_key(lookup: dict[str, str], label: str, column: str) -> None:
+    key = _normalize_lookup_key(label)
+    if key:
+        lookup.setdefault(key, column)
+
+
 def _build_students_lookup(df: pd.DataFrame) -> dict[str, str]:
     lookup: dict[str, str] = {}
     for column in df.columns:
         label = str(column).strip()
         if not label:
             continue
-        key = _normalize_lookup_key(label)
-        lookup.setdefault(key, column)
+        _register_lookup_key(lookup, label, column)
+        persian_label = CANON_EN_TO_FA.get(label)
+        if persian_label:
+            _register_lookup_key(lookup, persian_label, column)
     return lookup
 
 
