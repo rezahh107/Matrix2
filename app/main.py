@@ -297,7 +297,7 @@ def setup_application() -> QApplication:
         app.setApplicationVersion(__version__)
         app.setQuitOnLastWindowClosed(True)
         
-        font = apply_default_font(app, point_size=11)
+        font = apply_default_font(app, point_size=8, family_override="Tahoma")
         logger.info("فونت فعال برنامه: %s", font.family())
 
         logger.info("QApplication با موفقیت راه‌اندازی شد")
