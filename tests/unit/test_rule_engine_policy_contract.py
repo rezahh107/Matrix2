@@ -76,6 +76,7 @@ def test_ranking_policy_respects_order_and_natural_sort() -> None:
     ranking_names = [rule.name for rule in policy.ranking_rules]
     assert ranking_names == [
         "min_occupancy_ratio",
+        "max_remaining_capacity",
         "min_allocations_new",
         "min_mentor_id",
     ]

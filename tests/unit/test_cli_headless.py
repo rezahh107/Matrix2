@@ -55,6 +55,11 @@ def policy_file(tmp_path: Path) -> Path:
         },
         "ranking_rules": [
             {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
+            {
+                "name": "max_remaining_capacity",
+                "column": "remaining_capacity_desc",
+                "ascending": True,
+            },
             {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
             {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
         ],

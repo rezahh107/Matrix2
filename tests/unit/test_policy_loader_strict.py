@@ -31,6 +31,11 @@ def test_policy_join_keys_must_have_six_entries(tmp_path: Path) -> None:
         "join_keys": ["a", "b", "c", "d", "e"],
         "ranking_rules": [
             {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
+            {
+                "name": "max_remaining_capacity",
+                "column": "remaining_capacity_desc",
+                "ascending": True,
+            },
             {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
             {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
         ],

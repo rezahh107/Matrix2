@@ -55,6 +55,11 @@ def _valid_payload() -> dict[str, object]:
         },
         "ranking_rules": [
             {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
+            {
+                "name": "max_remaining_capacity",
+                "column": "remaining_capacity_desc",
+                "ascending": True,
+            },
             {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
             {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
         ],
@@ -109,19 +114,18 @@ def test_ranking_constraints() -> None:
     payload = _valid_payload()
     payload["ranking_rules"] = [
         {"name": "dup", "column": "occupancy_ratio", "ascending": True},
-        {"name": "dup", "column": "allocations_new", "ascending": True},
-        {"name": "ok", "column": "mentor_sort_key", "ascending": True},
+        {"name": "dup", "column": "remaining_capacity_desc", "ascending": True},
+        {"name": "ok", "column": "allocations_new", "ascending": True},
+        {"name": "ok2", "column": "mentor_sort_key", "ascending": True},
     ]
     with pytest.raises(ValueError, match="ranking items must be unique"):
         parse_policy_dict(payload)
 
 
-def test_ranking_must_have_three_items() -> None:
+def test_ranking_must_have_four_items() -> None:
     payload = _valid_payload()
-    payload["ranking_rules"].append(
-        {"name": "extra", "column": "mentor_extra", "ascending": True}
-    )
-    with pytest.raises(ValueError, match="ranking must contain exactly 3 items"):
+    payload["ranking_rules"].pop()
+    with pytest.raises(ValueError, match="ranking must contain exactly 4 items"):
         parse_policy_dict(payload)
 
 
@@ -238,6 +242,7 @@ def test_ranking_legacy_strings_supported() -> None:
     legacy_payload.pop("trace_stages")
     legacy_payload["ranking"] = [
         "min_occupancy_ratio",
+        "max_remaining_capacity",
         "min_allocations_new",
         "min_mentor_id",
     ]
@@ -246,6 +251,7 @@ def test_ranking_legacy_strings_supported() -> None:
     policy = parse_policy_dict(legacy_payload)
     assert [rule.name for rule in policy.ranking_rules] == [
         "min_occupancy_ratio",
+        "max_remaining_capacity",
         "min_allocations_new",
         "min_mentor_id",
     ]
@@ -340,6 +346,7 @@ def test_load_policy_reads_default_config(tmp_path: Path) -> None:
     assert len(policy.join_keys) == 6
     assert policy.ranking == [
         "min_occupancy_ratio",
+        "max_remaining_capacity",
         "min_allocations_new",
         "min_mentor_id",
     ]

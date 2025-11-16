@@ -22,7 +22,7 @@ VersionMismatchMode = Literal["raise", "warn", "migrate"]
 
 DEFAULT_POLICY_VERSION = "1.0.3"
 _EXPECTED_JOIN_KEYS_COUNT = 6
-_EXPECTED_RANKING_ITEMS_COUNT = 3
+_EXPECTED_RANKING_ITEMS_COUNT = 4
 
 _DEFAULT_VIRTUAL_ALIAS_RANGES: tuple[tuple[int, int], ...] = ((7000, 7999),)
 _DEFAULT_VIRTUAL_NAME_PATTERNS: tuple[str, ...] = (
@@ -99,6 +99,7 @@ _LEGACY_TRACE_DEFAULTS: Mapping[str, str] = {
 
 _RANKING_RULE_LIBRARY: Mapping[str, tuple[str, bool]] = {
     "min_occupancy_ratio": ("occupancy_ratio", True),
+    "max_remaining_capacity": ("remaining_capacity_desc", True),
     "min_allocations_new": ("allocations_new", True),
     "min_mentor_id": ("mentor_sort_key", True),
 }

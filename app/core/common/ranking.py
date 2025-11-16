@@ -71,8 +71,8 @@ def build_mentor_state(
     *,
     capacity_column: str = "remaining_capacity",
     policy: PolicyConfig | None = None,
-) -> Dict[Any, Dict[str, int]]:
-    """ساخت وضعیت ظرفیت اولیهٔ پشتیبان‌ها برای تخصیص."""
+) -> Dict[Any, Dict[str, float | int]]:
+    """ساخت وضعیت ظرفیت اولیهٔ پشتیبان‌ها برای تخصیص و Rule Engine."""
 
     if policy is None:
         policy = load_policy()
@@ -118,7 +118,7 @@ def build_mentor_state(
 
     grouped = canonical.groupby("mentor_id", dropna=True)[resolved_capacity]
     initial = pd.to_numeric(grouped.max(), errors="coerce").fillna(0).astype(int)
-    state: Dict[Any, Dict[str, int]] = {}
+    state: Dict[Any, Dict[str, float | int]] = {}
     for mentor_id, capacity in initial.items():
         value = int(max(capacity, 0))
         state[mentor_id] = {
@@ -126,6 +126,9 @@ def build_mentor_state(
             "remaining": value,
             "alloc_new": 0,
             "occupancy_ratio": 0.0,
+            "total_capacity": value,
+            "current_allocations": 0,
+            "remaining_capacity": value,
         }
     return state
 
@@ -133,7 +136,7 @@ def build_mentor_state(
 def apply_ranking_policy(
     candidate_pool: pd.DataFrame,
     *,
-    state: Mapping[Any, Mapping[str, int]] | None = None,
+    state: Mapping[Any, Mapping[str, object]] | None = None,
     policy: PolicyConfig | None = None,
     policy_path: str | Path = _DEFAULT_POLICY_PATH,
 ) -> pd.DataFrame:
@@ -170,7 +173,7 @@ def apply_ranking_policy(
     if mentor_ids is None:
         raise KeyError("candidate pool must include 'mentor_id' column after canonicalization")
 
-    state_view: Mapping[Any, Mapping[str, int]]
+    state_view: Mapping[Any, Mapping[str, object]]
     state_view = (
         state if state is not None else build_mentor_state(state_source, policy=policy)
     )
@@ -185,15 +188,25 @@ def apply_ranking_policy(
         except (ValueError, TypeError):  # pragma: no cover - نگهبان ورودی پیش‌بینی‌نشده
             return 0
 
+    def _series_as_int(series: pd.Series) -> pd.Series:
+        numeric = pd.to_numeric(series, errors="coerce").fillna(0)
+        return numeric.astype(int)
+
     initial = mentor_ids.map(lambda mentor: _state_value(mentor, "initial"))
     remaining = mentor_ids.map(lambda mentor: _state_value(mentor, "remaining"))
     allocations = mentor_ids.map(lambda mentor: _state_value(mentor, "alloc_new"))
 
-    safe_initial = initial.mask(initial <= 0, 1)
-    occupancy = (initial - remaining) / safe_initial
+    initial_int = _series_as_int(initial)
+    remaining_int = _series_as_int(remaining)
+    allocations_int = _series_as_int(allocations)
+
+    safe_initial = initial_int.mask(initial_int <= 0, 1)
+    occupancy = (initial_int - remaining_int) / safe_initial
 
     ranked["occupancy_ratio"] = occupancy.astype(float)
-    ranked["allocations_new"] = allocations.astype(int)
+    ranked["allocations_new"] = allocations_int
+    ranked["remaining_capacity"] = remaining_int
+    ranked["remaining_capacity_desc"] = (-remaining_int).astype(int)
     ranked["mentor_sort_key"] = mentor_ids.map(natural_key)
     ranked["mentor_id_en"] = mentor_ids
 
@@ -243,7 +256,9 @@ def _coerce_capacity_value(value: Any) -> int:
         return 0
 
 
-def consume_capacity(state: Dict[Any, Dict[str, int]], mentor_id: Any) -> tuple[int, int, float]:
+def consume_capacity(
+    state: Dict[Any, Dict[str, float | int]], mentor_id: Any
+) -> tuple[int, int, float]:
     """به‌روزرسانی ظرفیت پشتیبان پس از تخصیص و بازگشت ظرفیت قبل/بعد."""
 
     if mentor_id not in state:
@@ -255,9 +270,16 @@ def consume_capacity(state: Dict[Any, Dict[str, int]], mentor_id: Any) -> tuple[
     after = before - 1
     entry["remaining"] = after
     entry["alloc_new"] = _coerce_capacity_value(entry.get("alloc_new", 0)) + 1
+    entry["remaining_capacity"] = after
+    entry["current_allocations"] = _coerce_capacity_value(
+        entry.get("current_allocations", 0)
+    ) + 1
     initial = _coerce_capacity_value(entry.get("initial", before))
     if initial <= 0:
         initial = max(before, 1)
+    entry["total_capacity"] = max(
+        initial, _coerce_capacity_value(entry.get("total_capacity", initial))
+    )
     denominator = max(initial, 1)
     occupancy_ratio = (initial - after) / denominator
     entry["occupancy_ratio"] = float(occupancy_ratio)

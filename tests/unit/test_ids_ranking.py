@@ -63,6 +63,11 @@ def _base_policy_payload() -> dict[str, object]:
         },
         "ranking_rules": [
             {"name": "min_occupancy_ratio", "column": "occupancy_ratio", "ascending": True},
+            {
+                "name": "max_remaining_capacity",
+                "column": "remaining_capacity_desc",
+                "ascending": True,
+            },
             {"name": "min_allocations_new", "column": "allocations_new", "ascending": True},
             {"name": "min_mentor_id", "column": "mentor_sort_key", "ascending": True},
         ],
@@ -196,6 +201,7 @@ def test_apply_ranking_policy_natural_tie_break(_policy: PolicyConfig) -> None:
             **_base_policy_payload(),
             "ranking": [
                 "min_occupancy_ratio",
+                "max_remaining_capacity",
                 "min_allocations_new",
                 "min_mentor_id",
             ],
@@ -263,16 +269,23 @@ def test_build_mentor_state_handles_persian_headers_and_normalizes_values(
 
     state = build_mentor_state(pool, policy=_policy)
 
-    assert state["EMP-1"] == {
-        "initial": 5,
-        "remaining": 5,
-        "alloc_new": 0,
-        "occupancy_ratio": 0.0,
-    }
-    assert state["EMP-2"]["initial"] == 3
-    assert state["EMP-2"]["remaining"] == 3
-    assert state["EMP-NEG"]["initial"] == 0
-    assert state["EMP-NEG"]["remaining"] == 0
+    entry = state["EMP-1"]
+    assert entry["initial"] == 5
+    assert entry["remaining"] == 5
+    assert entry["alloc_new"] == 0
+    assert entry["occupancy_ratio"] == 0.0
+    assert entry["total_capacity"] == 5
+    assert entry["current_allocations"] == 0
+    assert entry["remaining_capacity"] == 5
+
+    second = state["EMP-2"]
+    assert second["initial"] == 3
+    assert second["remaining"] == 3
+    assert second["remaining_capacity"] == 3
+
+    negative = state["EMP-NEG"]
+    assert negative["initial"] == 0
+    assert negative["remaining"] == 0
 
 
 def test_build_mentor_state_returns_empty_when_capacity_missing(
