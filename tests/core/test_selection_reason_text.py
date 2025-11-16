@@ -62,7 +62,10 @@ def test_reason_chain_order_locale() -> None:
         occupancy_ratio="12.50",
         allocations_new="1",
         remaining_capacity="3",
-        tiebreak_text="۱) نسبت اشغال کمتر → ۲) تخصیص جدید کمتر → ۳) شناسه پشتیبان (مرتب‌سازی طبیعی)",
+        tiebreak_text=(
+            "۱) نسبت اشغال کمتر → ۲) ظرفیت مطلق باقی‌مانده بیشتر → "
+            "۳) تخصیص جدید کمتر → ۴) شناسه پشتیبان (مرتب‌سازی طبیعی)"
+        ),
         is_after_school=True,
     )
     text = render_reason(context, policy)
@@ -122,8 +125,9 @@ def test_tiebreak_explanation_reflects_policy() -> None:
     )
     reason_text = reasons.iloc[0]["دلیل انتخاب پشتیبان"]
     assert "۱) نسبت اشغال کمتر" in reason_text
-    assert "۲) تخصیص جدید کمتر" in reason_text
-    assert "۳) شناسه پشتیبان" in reason_text
+    assert "۲) ظرفیت مطلق باقی‌مانده بیشتر" in reason_text
+    assert "۳) تخصیص جدید کمتر" in reason_text
+    assert "۴) شناسه پشتیبان" in reason_text
 
 
 def test_selection_reason_handles_duplicate_student_rows() -> None:

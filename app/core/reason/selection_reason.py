@@ -169,6 +169,8 @@ def _build_tiebreak_text(policy: PolicyConfig, labels: SelectionReasonLabels) ->
     for idx, rule in enumerate(order, start=1):
         if rule.name == "min_occupancy_ratio":
             phrase = f"{idx}) نسبت اشغال کمتر"
+        elif rule.name == "max_remaining_capacity":
+            phrase = f"{idx}) ظرفیت مطلق باقی‌مانده بیشتر"
         elif rule.name == "min_allocations_new":
             phrase = f"{idx}) تخصیص جدید کمتر"
         elif rule.name == "min_mentor_id":
