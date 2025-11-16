@@ -284,7 +284,6 @@ class MainWindow(QMainWindow):
             self._dashboard_texts.actions_title,
             self._dashboard_texts.actions_description,
             self,
-            max_height=140,
         )
         policy_display = self._default_policy_path or "config/policy.json"
         policy_label = QLabel(
