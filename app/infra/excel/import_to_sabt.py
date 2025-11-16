@@ -12,15 +12,17 @@ from typing import Any, Callable, Iterable, Mapping, MutableMapping, NamedTuple,
 
 import pandas as pd
 
-from app.core.common.columns import CANON_EN_TO_FA, canonicalize_headers, ensure_series
+from app.core.common.columns import canonicalize_headers, ensure_series
 from app.core.common.normalization import normalize_fa
 from app.core.common.phone_rules import (
     normalize_landline_series,
     normalize_mobile,
 )
 from app.infra.excel._writer import ensure_text_columns
+from app.core.pipeline import (
+    enrich_student_contacts,
+)
 from app.infra.excel.common import attach_contact_columns
-from app.core.pipeline import enrich_student_contacts
 
 GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
     # اطلاعات هویتی دانش‌آموز
@@ -66,6 +68,7 @@ GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
     "150": ("submission_source", "منبع ارسال"),
     "151": ("form_version", "sa_form_version"),
 }
+
 _DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _HEADER_SPACE_PATTERN = re.compile(r"[\s\u200c\u200f]+")
 _HEADER_PUNCT_PATTERN = re.compile(r"[\-/]+")

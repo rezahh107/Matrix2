@@ -6,9 +6,12 @@ from typing import Iterable, Sequence, TYPE_CHECKING
 
 import pandas as pd
 
-from app.core.common.columns import ensure_series
+from app.core.common.columns import CANON_EN_TO_FA, ensure_series
 from app.core.common.normalization import normalize_fa
-from app.core.pipeline import CONTACT_POLICY_ALIAS_GROUPS, CONTACT_POLICY_COLUMNS
+from app.core.pipeline import (
+    CONTACT_POLICY_ALIAS_GROUPS,
+    CONTACT_POLICY_COLUMNS,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - فقط برای type checking
     from app.infra.excel.export_allocations import AllocationExportColumn
@@ -86,14 +89,16 @@ def enforce_text_columns(
 def attach_contact_columns(
     target: pd.DataFrame, contacts: pd.DataFrame
 ) -> pd.DataFrame:
-    """افزودن ستون‌های تماس نرمال‌شده و تمام نام‌های فارسی متناظر."""
+    """افزودن ستون‌های تماس نرمال‌شده و همهٔ نام‌های فارسی متناظر."""
 
-    result = target.copy()
     for column in CONTACT_POLICY_COLUMNS:
         if column not in contacts.columns:
             continue
-        series = ensure_series(contacts[column]).reindex(result.index)
-        result[column] = series
-        for extra in CONTACT_POLICY_ALIAS_GROUPS.get(column, ()):  # pragma: no cover - داده محور
-            result[extra] = series
-    return result
+        series = ensure_series(contacts[column]).reindex(target.index)
+        target[column] = series
+        alias = CANON_EN_TO_FA.get(column)
+        if alias:
+            target[alias] = series
+        for extra in CONTACT_POLICY_ALIAS_GROUPS.get(column, ()):
+            target[extra] = series
+    return target
