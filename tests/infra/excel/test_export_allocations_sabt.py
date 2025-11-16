@@ -185,6 +185,60 @@ def test_build_sabt_export_frame_sources_allocation_and_student_correctly() -> N
     assert pd_types.is_float_dtype(export_df["معدل"])
 
 
+def test_build_sabt_export_frame_matches_profile_against_english_headers() -> None:
+    allocations_df = pd.DataFrame(
+        {
+            "student_id": [101],
+            "mentor_id": ["M-1"],
+            "mentor_alias_code": ["A-1"],
+        }
+    )
+    students_df = pd.DataFrame(
+        {
+            "student_id": [101],
+            "group_code": ["3001"],
+            "gender": ["1"],
+        }
+    )
+    profile = [
+        AllocationExportColumn(
+            key="mentor_id",
+            header="پشتیبان",
+            source_kind="allocation",
+            source_field="mentor_id",
+            literal_value=None,
+            order=1,
+        ),
+        AllocationExportColumn(
+            key="student_id",
+            header="کد ثبت نام",
+            source_kind="allocation",
+            source_field="student_id",
+            literal_value=None,
+            order=2,
+        ),
+        AllocationExportColumn(
+            key="group_code",
+            header="گروه آزمایشی نهایی",
+            source_kind="student",
+            source_field="کد رشته",
+            literal_value=None,
+            order=3,
+        ),
+        AllocationExportColumn(
+            key="gender",
+            header="جنسیت",
+            source_kind="student",
+            source_field="جنسیت (0 یا 1)",
+            literal_value=None,
+            order=4,
+        ),
+    ]
+    export_df = build_sabt_export_frame(allocations_df, students_df, profile)
+    assert export_df.loc[0, "گروه آزمایشی نهایی"] == "3001"
+    assert export_df.loc[0, "جنسیت"] == "1"
+
+
 def test_export_sabt_excel_headers_and_types(tmp_path: Path) -> None:
     allocations_df = pd.DataFrame(
         {
