@@ -910,7 +910,6 @@ def build_sheet2_frame(
 
     if today is None:
         today = datetime.today()
-    df_alloc = enrich_student_contacts(df_alloc)
     sheet_cfg = exporter_cfg["sheets"]["Sheet2"]
     columns_cfg = sheet_cfg["columns"]
     if isinstance(columns_cfg, OrderedDict):
