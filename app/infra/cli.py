@@ -600,7 +600,16 @@ def _build_duplicate_row_report(
         for index_label in ordered:
             position = position_map.get(index_label)
             row = students_en.loc[index_label] if index_label in students_en.index else None
-            national_id = str(row.get("national_id", "").strip()) if row is not None else ""
+            if row is not None:
+                raw_national_id = row.get("national_id", "")
+                if raw_national_id is None:
+                    national_id = ""
+                elif isinstance(raw_national_id, str):
+                    national_id = raw_national_id.strip()
+                else:
+                    national_id = str(raw_national_id).strip()
+            else:
+                national_id = ""
             rows.append(
                 {
                     "index": index_label,
