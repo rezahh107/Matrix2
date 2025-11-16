@@ -284,7 +284,6 @@ class MainWindow(QMainWindow):
             self._dashboard_texts.actions_title,
             self._dashboard_texts.actions_description,
             self,
-            max_height=140,
         )
         policy_display = self._default_policy_path or "config/policy.json"
         policy_label = QLabel(
@@ -346,9 +345,10 @@ class MainWindow(QMainWindow):
         button.setObjectName("dashboardShortcut")
         button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         button.setIcon(self.style().standardIcon(icon_role))
-        button.setIconSize(QSize(20, 20))
+        icon_size = self.style().pixelMetric(QStyle.PM_SmallIconSize) or 16
+        button.setIconSize(QSize(icon_size, icon_size))
         button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        button.setFixedHeight(40)
+        button.setFixedHeight(32)
         button.setText(text)
         button.setToolTip(tooltip)
         button.clicked.connect(callback)
