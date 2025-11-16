@@ -146,6 +146,16 @@ def test_ensure_required_columns_accepts_synonym() -> None:
     assert columns.CANON_EN_TO_FA["group_code"] in ensured.columns
 
 
+def test_final_exam_group_alias_maps_to_group_code() -> None:
+    df = pd.DataFrame({"گروه آزمایشی نهایی": [3001]})
+
+    resolved = columns.resolve_aliases(df, "report")
+
+    group_col = columns.CANON_EN_TO_FA["group_code"]
+    assert group_col in resolved.columns
+    assert resolved.loc[0, group_col] == 3001
+
+
 @pytest.mark.skipif(
     importlib.util.find_spec("openpyxl") is None,
     reason="openpyxl برای بررسی خروجی لازم است",
