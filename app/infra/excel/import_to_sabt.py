@@ -17,8 +17,10 @@ from app.core.common.normalization import normalize_fa
 from app.core.common.phone_rules import (
     HEKMAT_LANDLINE_FALLBACK,
     HEKMAT_TRACKING_CODE,
+    normalize_landline_series,
     normalize_mobile,
 )
+from app.infra.excel._writer import ensure_text_columns
 from app.core.pipeline import enrich_student_contacts
 
 GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
@@ -961,15 +963,9 @@ def build_sheet2_frame(
     if landline_column in sheet.columns:
         landline_source = df_alloc.get("student_landline")
         if landline_source is not None:
-            landline_series = (
-                ensure_series(landline_source)
-                .reindex(df_alloc.index)
-                .astype("string")
-                .fillna("")
-            )
-            mask_landline = landline_series.str.strip() != ""
-            if mask_landline.any():
-                sheet.loc[mask_landline, landline_column] = landline_series[mask_landline]
+            landline_series = normalize_landline_series(ensure_series(landline_source))
+            landline_series = landline_series.reindex(df_alloc.index)
+            sheet[landline_column] = landline_series.fillna("")
 
     hekmat_mask: pd.Series | None = None
     hekmat_cfg = sheet_cfg.get("hekmat_rule")
@@ -999,6 +995,11 @@ def build_sheet2_frame(
             landline_values = sheet[landline_column].astype("string")
             mask_empty = landline_values.str.strip() == ""
             sheet.loc[hekmat_mask & mask_empty, landline_column] = HEKMAT_LANDLINE_FALLBACK
+
+    if landline_column in sheet.columns:
+        sheet[landline_column] = normalize_landline_series(
+            sheet[landline_column], allow_special_zero=True
+        ).fillna("")
 
     sheet = sheet.astype({column: "string" for column in sheet.columns})
     sheet.attrs["exporter_config"] = exporter_cfg
@@ -1204,6 +1205,7 @@ def _write_dataframe_to_sheet(ws, df: pd.DataFrame) -> None:
     for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
         for col_idx, value in enumerate(row.tolist(), start=1):
             ws.cell(row=row_idx, column=col_idx, value=value)
+    ensure_text_columns(ws, df.columns)
 
 
 def _normalize_header_label(value: Any) -> str:

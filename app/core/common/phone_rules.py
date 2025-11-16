@@ -5,20 +5,25 @@ from typing import Optional, Tuple
 import pandas as pd
 
 from app.core.common.normalization import extract_ascii_digits
+from app.core.common.domain import FinanceCode
 
 MOBILE_REQUIRED_PREFIX = "09"
 MOBILE_REQUIRED_LENGTH = 11
 HEKMAT_TRACKING_CODE = "1111111111111111"
 HEKMAT_LANDLINE_FALLBACK = "00000000000"
+HEKMAT_STATUS_CODE = int(FinanceCode.HEKMAT)
 
 __all__ = [
     "MOBILE_REQUIRED_PREFIX",
     "MOBILE_REQUIRED_LENGTH",
     "HEKMAT_TRACKING_CODE",
     "HEKMAT_LANDLINE_FALLBACK",
+    "HEKMAT_STATUS_CODE",
     "normalize_digits",
     "normalize_mobile",
+    "normalize_landline",
     "normalize_mobile_series",
+    "normalize_landline_series",
     "normalize_digits_series",
     "fix_guardian_phones",
     "fix_guardian_phone_columns",
@@ -26,12 +31,11 @@ __all__ = [
 
 
 def normalize_digits(value: object | None) -> Optional[str]:
-    """بازگرداندن فقط digits انگلیسی از ورودی متنی/عددی.
+    """بازگرداندن تنها digits انگلیسی از ورودی.
 
-    مثال::
-
-        >>> normalize_digits("۰۲۱-۱۲۳ ۴۵۶۷")
-        '0211234567'
+    - ارقام فارسی/عربی به انگلیسی برگردانده می‌شوند.
+    - تمامی نویزها (فاصله، خط تیره و …) حذف می‌شوند.
+    - اگر خروجی خالی باشد ``None`` بازگردانده می‌شود.
     """
 
     digits = extract_ascii_digits(value)
@@ -57,11 +61,37 @@ def normalize_mobile(value: object | None) -> Optional[str]:
     digits = normalize_digits(value)
     if digits is None:
         return None
+    if len(digits) == 10 and digits.startswith("9"):
+        digits = f"0{digits}"
     if len(digits) != MOBILE_REQUIRED_LENGTH:
         return None
     if not digits.startswith(MOBILE_REQUIRED_PREFIX):
         return None
     return digits
+
+
+def normalize_landline(
+    value: object | None,
+    *,
+    allow_special_zero: bool = False,
+) -> Optional[str]:
+    """نرمال‌سازی تلفن ثابت طبق Policy.
+
+    قواعد:
+    - فقط digits انگلیسی نگه داشته می‌شوند.
+    - در حالت عادی تنها شماره‌هایی که با «3» یا «5» شروع شوند پذیرفته می‌شوند.
+    - اگر ``allow_special_zero`` فعال باشد، مقدار ویژهٔ حکمت ``00000000000`` بدون تغییر
+      بازگردانده می‌شود تا قانون «شروع با 3 یا 5» آن را حذف نکند.
+    """
+
+    digits = normalize_digits(value)
+    if digits is None:
+        return None
+    if allow_special_zero and digits == HEKMAT_LANDLINE_FALLBACK:
+        return digits
+    if digits.startswith("3") or digits.startswith("5"):
+        return digits
+    return None
 
 
 def normalize_mobile_series(series: pd.Series | None) -> pd.Series:
@@ -73,6 +103,26 @@ def normalize_mobile_series(series: pd.Series | None) -> pd.Series:
     if series is None:
         return pd.Series(dtype="string")
     normalized = series.astype("object").map(normalize_mobile)
+    return pd.Series(normalized, index=series.index, dtype="string")
+
+
+def normalize_landline_series(
+    series: pd.Series | None,
+    *,
+    allow_special_zero: bool = False,
+) -> pd.Series:
+    """اعمال ``normalize_landline`` روی Series با حفظ index.
+
+    Args:
+        series: ستون ورودی.
+        allow_special_zero: برای نگه‌داشت مقدار خاص حکمت فعال می‌شود.
+    """
+
+    if series is None:
+        return pd.Series(dtype="string")
+    normalized = series.astype("object").map(
+        lambda value: normalize_landline(value, allow_special_zero=allow_special_zero)
+    )
     return pd.Series(normalized, index=series.index, dtype="string")
 
 

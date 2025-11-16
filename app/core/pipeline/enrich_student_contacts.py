@@ -6,7 +6,7 @@ import pandas as pd
 
 from app.core.common.phone_rules import (
     fix_guardian_phone_columns,
-    normalize_digits_series,
+    normalize_landline_series,
     normalize_mobile_series,
 )
 
@@ -60,7 +60,7 @@ def enrich_student_contacts(df: pd.DataFrame) -> pd.DataFrame:
     این مرحله:
         - موبایل دانش‌آموز را با سیاست «09 + 11 رقم» پالایش می‌کند.
         - منطق «رابط دوم فقط در صورت وجود اول» و «حذف تکراری‌ها» را اعمال می‌کند.
-        - تلفن ثابت را به فقط digits انگلیسی تبدیل می‌کند تا برای قواعد حکمت آماده باشد.
+        - تلفن ثابت را تنها در صورت شروع با «3» یا «5» نگه می‌دارد تا برای قواعد حکمت آماده شود.
     """
 
     result = df.copy()
@@ -87,7 +87,7 @@ def enrich_student_contacts(df: pd.DataFrame) -> pd.DataFrame:
 
     landline_column = _first_existing(result, _LANDLINE_CANDIDATES, "student_landline")
     _ensure_column(result, landline_column)
-    landline_normalized = normalize_digits_series(result[landline_column])
+    landline_normalized = normalize_landline_series(result[landline_column])
     result[landline_column] = landline_normalized
     if landline_column != "student_landline":
         result["student_landline"] = landline_normalized

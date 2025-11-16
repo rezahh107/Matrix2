@@ -302,8 +302,8 @@ def test_mobile_normalizer_handles_various_inputs() -> None:
     df_alloc.loc[0, "student_GF_Mobile"] = "۹۱۲۳۴۵۶۷۸۹"
     df_alloc.loc[1, "student_GF_Mobile"] = "9123456789"
     df_sheet2 = build_sheet2_frame(df_alloc, cfg)
-    assert df_sheet2.loc[0, "تلفن همراه"] == ""
-    assert df_sheet2.loc[1, "تلفن همراه"] == ""
+    assert df_sheet2.loc[0, "تلفن همراه"] == "09123456789"
+    assert df_sheet2.loc[1, "تلفن همراه"] == "09123456789"
 
 
 def test_alias_rule_prefers_alias_when_present() -> None:
