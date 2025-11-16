@@ -765,16 +765,19 @@ class MainWindow(QMainWindow):
         self._picker_inspactor = FilePicker(page, placeholder=self._t("files.inspactor", "فایل Inspactor"))
         self._picker_inspactor.setObjectName("editInspactor")
         self._picker_inspactor.setToolTip(self._t("files.inspactor", "خروجی گزارش Inspactor که فهرست پشتیبان‌ها را دارد"))
+        self._set_picker_button_text(self._picker_inspactor)
         inputs_layout.addRow(self._t("files.inspactor", "گزارش Inspactor"), self._picker_inspactor)
 
         self._picker_schools = FilePicker(page, placeholder=self._t("files.schools", "فایل مدارس"))
         self._picker_schools.setObjectName("editSchools")
         self._picker_schools.setToolTip(self._t("files.schools", "فایل رسمی مدارس برای تطبیق کد و نام مدرسه"))
+        self._set_picker_button_text(self._picker_schools)
         inputs_layout.addRow(self._t("files.schools", "گزارش مدارس"), self._picker_schools)
 
         self._picker_crosswalk = FilePicker(page, placeholder=self._t("files.crosswalk", "فایل Crosswalk"))
         self._picker_crosswalk.setObjectName("editCrosswalk")
         self._picker_crosswalk.setToolTip(self._t("files.crosswalk", "جدول Crosswalk جهت نگاشت رشته‌ها و گروه‌ها"))
+        self._set_picker_button_text(self._picker_crosswalk)
         inputs_layout.addRow(self._t("files.crosswalk", "Crosswalk"), self._picker_crosswalk)
 
         outer.addWidget(inputs_group)
@@ -790,6 +793,7 @@ class MainWindow(QMainWindow):
         self._picker_policy_build.setObjectName("editPolicy1")
         if self._default_policy_path:
             self._picker_policy_build.setText(self._default_policy_path)
+        self._set_picker_button_text(self._picker_policy_build)
         policy_layout.addRow("سیاست", self._picker_policy_build)
         outer.addWidget(policy_group)
 
@@ -804,6 +808,7 @@ class MainWindow(QMainWindow):
         self._picker_output_matrix.setObjectName("editMatrixOut")
         self._picker_output_matrix.setToolTip("مسیر ذخیرهٔ فایل خروجی ماتریس اهلیت")
         self._apply_pref_default(self._picker_output_matrix, self._prefs.last_matrix_path)
+        self._set_picker_button_text(self._picker_output_matrix)
         output_layout.addRow("خروجی ماتریس", self._picker_output_matrix)
         outer.addWidget(output_group)
 
@@ -843,6 +848,7 @@ class MainWindow(QMainWindow):
         )
         self._picker_students.setObjectName("editStudents")
         self._picker_students.setToolTip("لیست دانش‌آموزانی که باید به پشتیبان متصل شوند")
+        self._set_picker_button_text(self._picker_students)
         inputs_layout.addRow("فایل دانش‌آموزان", self._picker_students)
 
         self._picker_pool = FilePicker(page, placeholder="استخر منتورها (*.xlsx)")
@@ -851,6 +857,7 @@ class MainWindow(QMainWindow):
         self._picker_pool.line_edit().textChanged.connect(
             lambda *_: self._refresh_all_manager_combos()
         )
+        self._set_picker_button_text(self._picker_pool)
         inputs_layout.addRow("استخر منتورها", self._picker_pool)
 
         outer.addWidget(inputs_group)
@@ -866,6 +873,7 @@ class MainWindow(QMainWindow):
         self._picker_policy_allocate.setObjectName("editPolicy2")
         if self._default_policy_path:
             self._picker_policy_allocate.setText(self._default_policy_path)
+        self._set_picker_button_text(self._picker_policy_allocate)
         advanced_layout.addRow("سیاست", self._picker_policy_allocate)
 
         self._picker_alloc_out = FilePicker(
@@ -874,6 +882,7 @@ class MainWindow(QMainWindow):
         self._picker_alloc_out.setObjectName("editAllocOut")
         self._picker_alloc_out.setToolTip("مسیر ذخیرهٔ نتیجه نهایی تخصیص دانش‌آموز-منتور")
         self._apply_pref_default(self._picker_alloc_out, self._prefs.last_alloc_output)
+        self._set_picker_button_text(self._picker_alloc_out)
 
         self._edit_capacity = QLineEdit(page)
         self._edit_capacity.setPlaceholderText("remaining_capacity")
@@ -909,6 +918,7 @@ class MainWindow(QMainWindow):
         )
         self._picker_prior_roster.setObjectName("priorRosterPicker")
         self._picker_prior_roster.setToolTip("برای بازیابی شمارندهٔ سال قبل در صورت وجود")
+        self._set_picker_button_text(self._picker_prior_roster)
         register_layout.addRow("روستر سال قبل", self._picker_prior_roster)
 
         self._picker_current_roster = FilePicker(
@@ -917,6 +927,7 @@ class MainWindow(QMainWindow):
         )
         self._picker_current_roster.setObjectName("currentRosterPicker")
         self._picker_current_roster.setToolTip("برای کشف آخرین شمارنده‌های سال جاری")
+        self._set_picker_button_text(self._picker_current_roster)
         register_layout.addRow("روستر سال جاری", self._picker_current_roster)
 
         self._btn_autodetect = QPushButton("پیشنهاد خودکار", register_box)
@@ -951,6 +962,7 @@ class MainWindow(QMainWindow):
         self._apply_pref_default(
             self._picker_sabt_output_alloc, self._prefs.last_sabt_output_allocate
         )
+        self._set_picker_button_text(self._picker_sabt_output_alloc)
         sabt_layout.addRow("فایل خروجی", self._picker_sabt_output_alloc)
 
         self._picker_sabt_config_alloc = FilePicker(
@@ -968,6 +980,7 @@ class MainWindow(QMainWindow):
         self._apply_resource_default(
             self._picker_sabt_config_alloc, self._default_sabt_config_path
         )
+        self._set_picker_button_text(self._picker_sabt_config_alloc)
         sabt_layout.addRow("فایل تنظیمات", self._picker_sabt_config_alloc)
 
         self._picker_sabt_template_alloc = FilePicker(
@@ -979,6 +992,7 @@ class MainWindow(QMainWindow):
         self._picker_sabt_template_alloc.setToolTip(
             "قالب اختیاری؛ در صورت خالی ساخت خودکار انجام می‌شود"
         )
+        self._set_picker_button_text(self._picker_sabt_template_alloc)
         sabt_layout.addRow("فایل قالب", self._picker_sabt_template_alloc)
 
         sabt_hint = QLabel(
@@ -1032,6 +1046,7 @@ class MainWindow(QMainWindow):
         self._apply_pref_default(
             self._picker_rule_matrix, self._prefs.last_matrix_path
         )
+        self._set_picker_button_text(self._picker_rule_matrix)
         inputs_layout.addRow("فایل ماتریس", self._picker_rule_matrix)
 
         self._picker_rule_students = FilePicker(
@@ -1039,6 +1054,7 @@ class MainWindow(QMainWindow):
         )
         self._picker_rule_students.setObjectName("editRuleStudents")
         self._picker_rule_students.setToolTip("لیست دانش‌آموزان برای ارزیابی مجدد با موتور قواعد")
+        self._set_picker_button_text(self._picker_rule_students)
         inputs_layout.addRow("فایل دانش‌آموزان", self._picker_rule_students)
 
         outer.addWidget(inputs_group)
@@ -1066,6 +1082,7 @@ class MainWindow(QMainWindow):
             placeholder="روستر سال قبل (اختیاری)",
         )
         self._picker_rule_prior_roster.setObjectName("rulePriorRosterPicker")
+        self._set_picker_button_text(self._picker_rule_prior_roster)
         register_layout.addRow("روستر سال قبل", self._picker_rule_prior_roster)
 
         self._picker_rule_current_roster = FilePicker(
@@ -1073,6 +1090,7 @@ class MainWindow(QMainWindow):
             placeholder="روستر سال جاری / شمارنده‌ها",
         )
         self._picker_rule_current_roster.setObjectName("ruleCurrentRosterPicker")
+        self._set_picker_button_text(self._picker_rule_current_roster)
         register_layout.addRow("روستر سال جاری", self._picker_rule_current_roster)
 
         self._btn_rule_autodetect = QPushButton("پیشنهاد خودکار", register_box)
@@ -1093,6 +1111,7 @@ class MainWindow(QMainWindow):
         self._picker_policy_rule.setObjectName("editRulePolicy")
         if self._default_policy_path:
             self._picker_policy_rule.setText(self._default_policy_path)
+        self._set_picker_button_text(self._picker_policy_rule)
         advanced_layout.addRow("سیاست", self._picker_policy_rule)
 
         self._edit_rule_capacity = QLineEdit(page)
@@ -1112,6 +1131,7 @@ class MainWindow(QMainWindow):
         )
         self._picker_rule_output.setObjectName("editRuleOutput")
         self._picker_rule_output.setToolTip("فایل خروجی موتور قواعد برای ذخیره گزارش جدید")
+        self._set_picker_button_text(self._picker_rule_output)
         output_layout.addRow("خروجی", self._picker_rule_output)
         outer.addWidget(output_group)
 
@@ -1133,6 +1153,7 @@ class MainWindow(QMainWindow):
         self._apply_pref_default(
             self._picker_sabt_output_rule, self._prefs.last_sabt_output_rule
         )
+        self._set_picker_button_text(self._picker_sabt_output_rule)
         sabt_layout.addRow("فایل خروجی", self._picker_sabt_output_rule)
 
         self._picker_sabt_config_rule = FilePicker(
@@ -1150,6 +1171,7 @@ class MainWindow(QMainWindow):
         self._apply_resource_default(
             self._picker_sabt_config_rule, self._default_sabt_config_path
         )
+        self._set_picker_button_text(self._picker_sabt_config_rule)
         sabt_layout.addRow("فایل تنظیمات", self._picker_sabt_config_rule)
 
         self._picker_sabt_template_rule = FilePicker(
@@ -1161,6 +1183,7 @@ class MainWindow(QMainWindow):
         self._picker_sabt_template_rule.setToolTip(
             "قالب اختیاری؛ در صورت خالی همان ساخت خودکار اعمال می‌شود"
         )
+        self._set_picker_button_text(self._picker_sabt_template_rule)
         sabt_layout.addRow("فایل قالب", self._picker_sabt_template_rule)
 
         sabt_hint = QLabel(
@@ -2073,6 +2096,11 @@ class MainWindow(QMainWindow):
         if value and not picker.text().strip():
             picker.setText(value)
 
+    def _set_picker_button_text(self, picker: FilePicker) -> None:
+        """تنظیم متن دکمهٔ انتخاب فایل برای ترجمهٔ جاری."""
+
+        picker.set_button_text(self._t("action.browse", "انتخاب…"))
+
     def _save_log_to_file(self) -> None:
         """ذخیرهٔ محتوای لاگ در فایل متنی یا HTML."""
 
@@ -2218,36 +2246,45 @@ class MainWindow(QMainWindow):
             msg = str(error)
             if isinstance(error, FileNotFoundError):
                 color = "#c00"
-                QMessageBox.critical(self, "فایل یافت نشد", msg)
+                QMessageBox.critical(self, self._t("status.error", "خطا"), msg)
             elif isinstance(error, PermissionError):
                 color = "#c00"
-                QMessageBox.critical(self, "عدم دسترسی", msg)
+                QMessageBox.critical(self, self._t("status.error", "خطا"), msg)
             elif isinstance(error, ValueError):
                 color = "#b58900"
-                QMessageBox.warning(self, "داده نامعتبر", msg)
+                QMessageBox.warning(self, self._t("status.error", "خطا"), msg)
             else:
                 color = "#c00"
-                QMessageBox.critical(self, "خطای ناشناخته", msg)
-            self._status.setText("خطا")
-            self._set_stage("خطا", msg)
-            self._update_progress_caption(self._progress.value(), "خطا")
+                QMessageBox.critical(self, self._t("status.error", "خطا"), msg)
+            self._status.setText(self._t("status.error", "خطا"))
+            self._set_stage(self._t("status.error", "خطا"), msg)
+            self._update_progress_caption(self._progress.value(), self._t("status.error", "خطا"))
             self._append_log(f'<span style="color:{color}">❌ {msg}</span>')
             self._update_status_bar_state("error")
             return
 
         if not success:
-            self._status.setText("لغو شد")
-            self._set_stage("لغو شد", "عملیات متوقف شد")
-            self._update_progress_caption(self._progress.value(), "لغو شد")
-            self._append_log("⚠️ عملیات متوقف شد")
+            self._status.setText(self._t("status.cancelled", "لغو شد"))
+            self._set_stage(
+                self._t("status.cancelled", "لغو شد"),
+                self._t("status.cancelled.detail", "عملیات متوقف شد"),
+            )
+            self._update_progress_caption(
+                self._progress.value(), self._t("status.cancelled", "لغو شد")
+            )
+            self._append_log(f'⚠️ {self._t("status.cancelled.detail", "عملیات متوقف شد")}')
             self._update_status_bar_state("ready")
             return
 
         self._progress.setValue(100)
-        self._status.setText("کامل")
-        self._set_stage(self._current_action, "عملیات با موفقیت پایان یافت")
-        self._update_progress_caption(100, "کامل")
-        self._append_log('<span style="color:#2e7d32">✅ عملیات با موفقیت پایان یافت</span>')
+        self._status.setText(self._t("status.complete", "کامل"))
+        self._set_stage(
+            self._current_action, self._t("status.complete.detail", "عملیات با موفقیت پایان یافت")
+        )
+        self._update_progress_caption(100, self._t("status.complete", "کامل"))
+        self._append_log(
+            f'<span style="color:#2e7d32">✅ {self._t("status.complete.detail", "عملیات با موفقیت پایان یافت")}</span>'
+        )
         self._update_status_bar_state("ready")
         if hook is not None:
             try:

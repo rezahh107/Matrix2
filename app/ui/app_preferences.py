@@ -20,8 +20,6 @@ class AppPreferences:
     def __init__(self) -> None:
         self._settings = QSettings("YourOrganization", "MentorAllocation")
         self._valid_centers = self._load_valid_centers()
-        if self.language not in SUPPORTED_LANGUAGES:
-            self.language = DEFAULT_LANGUAGE
 
     # ------------------------------------------------------------------ داخلی
     def _load_valid_centers(self) -> Set[int]:
