@@ -835,6 +835,13 @@ def _series_from_source(
                 candidates.extend(mapped)
             prefixed = f"student_{field}" if not field.startswith("student_") else field
             candidates.extend([prefixed, f"student_gf_{field}", field])
+        expanded_candidates: list[str] = []
+        for column_name in candidates:
+            if not column_name:
+                continue
+            expanded_candidates.append(column_name)
+            expanded_candidates.append(f"student_{column_name}")
+        candidates = expanded_candidates
         for column_name in dict.fromkeys(filter(None, candidates)):
             if column_name in df.columns:
                 series = df[column_name]
@@ -930,12 +937,12 @@ def build_sheet2_frame(
         series = series.reindex(df_alloc.index)
         series = _apply_normalizers(series, spec.get("normalize"))
 
+        if column_name == "وضعیت ثبت نام":
+            series = _normalize_registration_status(series)
+
         map_dict = _resolve_map(spec.get("map"), exporter_cfg)
         if map_dict:
-            if spec.get("type") == "choice_value":
-                mapped = series.map(map_dict)
-            else:
-                mapped = series.astype("string").map(map_dict)
+            mapped = series.astype("string").map(map_dict)
             series = mapped.fillna(series)
 
         series = _coerce_type(series, spec.get("type"), spec.get("precision"))
@@ -976,6 +983,22 @@ def build_sheet2_frame(
     sheet = sheet.astype({column: "string" for column in sheet.columns})
     sheet.attrs["exporter_config"] = exporter_cfg
     return sheet
+
+
+def _normalize_registration_status(series: pd.Series) -> pd.Series:
+    """بازگرداندن ستون وضعیت ثبت‌نام با حفظ مقادیر ۰/۱/۳.
+
+    این تابع فقط جایگزین امن برای مقادیر خالی است و مقدار موجود را تغییر نمی‌دهد.
+
+    مثال::
+        >>> s = pd.Series([0, 3, None])
+        >>> _normalize_registration_status(s).tolist()
+        [0, 3, 0]
+    """
+
+    normalized = ensure_series(series)
+    blank_mask = normalized.isna() | normalized.astype("string").str.strip().eq("")
+    return normalized.mask(blank_mask, 0)
 
 
 def apply_alias_rule(sheet2: pd.DataFrame, df_alloc: pd.DataFrame) -> pd.DataFrame:
