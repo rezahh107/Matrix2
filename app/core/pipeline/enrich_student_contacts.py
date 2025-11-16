@@ -12,10 +12,13 @@ from app.core.common.phone_rules import (
     normalize_mobile_series,
 )
 
+CONTACT_POLICY_ATTR = "contacts_policy_normalized"
+
 __all__ = [
     "enrich_student_contacts",
     "CONTACT_POLICY_COLUMNS",
     "CONTACT_POLICY_ALIAS_GROUPS",
+    "CONTACT_POLICY_ATTR",
 ]
 
 CONTACT_POLICY_COLUMNS: tuple[str, ...] = (
@@ -186,4 +189,5 @@ def enrich_student_contacts(df: pd.DataFrame) -> pd.DataFrame:
     if tracking_column != canonical_tracking_column:
         result[tracking_column] = result[canonical_tracking_column]
 
+    result.attrs[CONTACT_POLICY_ATTR] = True
     return result

@@ -19,7 +19,7 @@ from app.core.common.phone_rules import (
     normalize_mobile,
 )
 from app.infra.excel._writer import ensure_text_columns
-from app.core.pipeline import enrich_student_contacts
+from app.core.pipeline import CONTACT_POLICY_ATTR, enrich_student_contacts
 from app.infra.excel.common import attach_contact_columns
 
 GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
@@ -910,6 +910,9 @@ def build_sheet2_frame(
 
     if today is None:
         today = datetime.today()
+    if not df_alloc.attrs.get(CONTACT_POLICY_ATTR):
+        df_alloc = enrich_student_contacts(df_alloc)
+
     sheet_cfg = exporter_cfg["sheets"]["Sheet2"]
     columns_cfg = sheet_cfg["columns"]
     if isinstance(columns_cfg, OrderedDict):
