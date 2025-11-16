@@ -343,115 +343,12 @@ class MainWindow(QMainWindow):
     def _apply_theme(self) -> None:
         """اعمال استایل‌شیت سراسری برای ایجاد هماهنگی بصری."""
 
-        stylesheet = """
-            QMainWindow {
-                background-color: #f5f7fb;
-            }
-            QGroupBox {
-                border: 1px solid #e1e7f0;
-                border-radius: 12px;
-                margin-top: 12px;
-                padding: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top right;
-                padding: 0 4px;
-                color: #344767;
-            }
-            #dashboardCard, #heroCard {
-                border: 1px solid #d8e2f1;
-                border-radius: 18px;
-                background-color: #ffffff;
-            }
-            QLabel#heroTitle {
-                font-size: 16px;
-                font-weight: 600;
-                color: #12263f;
-            }
-            QLabel#heroSubtitle {
-                color: #4f5d75;
-            }
-            QLabel#heroBadge {
-                padding: 6px 18px;
-                border-radius: 16px;
-                background-color: #e8f0ff;
-                color: #0d47a1;
-                font-weight: 600;
-            }
-            QLabel#labelStageBadge {
-                font-size: 14px;
-                font-weight: 600;
-                color: #0d47a1;
-            }
-            QLabel#labelStageDetail {
-                color: #4f5d75;
-            }
-            QLabel#progressCaption {
-                color: #1f2937;
-                font-weight: 500;
-            }
-            QProgressBar#progressBar {
-                background-color: #e9edf7;
-                border-radius: 8px;
-                height: 20px;
-            }
-            QProgressBar#progressBar::chunk {
-                background-color: #2563eb;
-                border-radius: 8px;
-            }
-            QTextEdit#textLog {
-                background-color: #0f172a;
-                color: #f8fafc;
-                border-radius: 12px;
-                padding: 8px;
-            }
-            #logPlaceholder {
-                color: #64748b;
-                border: 1px dashed #cbd5f5;
-                border-radius: 12px;
-                padding: 16px;
-                background-color: rgba(148, 163, 184, 0.15);
-            }
-            QPushButton {
-                background-color: #2563eb;
-                color: white;
-                padding: 8px 20px;
-                border-radius: 10px;
-                border: none;
-                font-weight: 600;
-            }
-            QPushButton:hover:!disabled {
-                background-color: #1d4ed8;
-            }
-            QPushButton:disabled {
-                background-color: #94a3b8;
-                color: #e2e8f0;
-            }
-            QToolButton#dashboardShortcut {
-                border-radius: 16px;
-                padding: 12px 18px;
-                min-width: 120px;
-                background-color: rgba(37, 99, 235, 0.08);
-                color: #0f172a;
-            }
-            QToolButton#dashboardShortcut:hover:!disabled {
-                background-color: rgba(37, 99, 235, 0.18);
-            }
-            QToolButton#dashboardShortcut:disabled {
-                background-color: rgba(148, 163, 184, 0.4);
-                color: #475569;
-            }
-            QTabBar::tab {
-                padding: 10px 16px;
-                margin: 2px;
-            }
-            QTabBar::tab:selected {
-                color: #0d47a1;
-                font-weight: 600;
-                border-bottom: 2px solid #0d47a1;
-            }
-        """
+        stylesheet_path = resource_path("app", "ui", "assets", "fluent_theme.qss")
+        try:
+            stylesheet = stylesheet_path.read_text(encoding="utf-8")
+        except OSError as exc:  # pragma: no cover - UI cosmetic fallback
+            print(f"Warning: Stylesheet file not found at {stylesheet_path}: {exc}")
+            stylesheet = ""
         self.setStyleSheet(stylesheet)
 
     def _set_stage(self, title: str | None, detail: str | None = None) -> None:
