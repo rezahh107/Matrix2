@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, List, Set
 
 from PySide6.QtCore import QByteArray, QSettings
@@ -137,6 +138,34 @@ class AppPreferences:
     @last_sabt_config_path.setter
     def last_sabt_config_path(self, value: str) -> None:
         self._set_string("ui/last_sabt_config", value)
+
+    # ------------------------------------------------------------------ متادیتای اجرا
+    @property
+    def last_run_type(self) -> str:
+        """نوع آخرین سناریوی اجرا شده (build/allocate/rule-engine)."""
+
+        return self._get_string("ui/last_run/type")
+
+    @last_run_type.setter
+    def last_run_type(self, value: str) -> None:
+        self._set_string("ui/last_run/type", value)
+
+    @property
+    def last_run_timestamp(self) -> str:
+        """زمان آخرین اجرا به صورت ISO string."""
+
+        return self._get_string("ui/last_run/timestamp")
+
+    @last_run_timestamp.setter
+    def last_run_timestamp(self, value: str) -> None:
+        self._set_string("ui/last_run/timestamp", value)
+
+    def record_last_run(self, run_type: str, timestamp: datetime | None = None) -> None:
+        """ثبت متادیتای آخرین اجرای موفق سناریو."""
+
+        moment = timestamp or datetime.now()
+        self.last_run_type = run_type
+        self.last_run_timestamp = moment.isoformat(timespec="minutes")
 
     # ------------------------------------------------------------------ تنظیمات تخصیص
     @property
