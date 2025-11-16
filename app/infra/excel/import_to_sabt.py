@@ -12,16 +12,18 @@ from typing import Any, Callable, Iterable, Mapping, MutableMapping, NamedTuple,
 
 import pandas as pd
 
-from app.core.common.columns import canonicalize_headers, ensure_series
+from app.core.common.columns import CANON_EN_TO_FA, canonicalize_headers, ensure_series
 from app.core.common.normalization import normalize_fa
 from app.core.common.phone_rules import (
-    HEKMAT_LANDLINE_FALLBACK,
-    HEKMAT_TRACKING_CODE,
     normalize_landline_series,
     normalize_mobile,
 )
 from app.infra.excel._writer import ensure_text_columns
-from app.core.pipeline import enrich_student_contacts
+from app.core.pipeline import (
+    CONTACT_POLICY_ALIAS_GROUPS,
+    CONTACT_POLICY_COLUMNS,
+    enrich_student_contacts,
+)
 
 GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
     # اطلاعات هویتی دانش‌آموز
@@ -67,6 +69,24 @@ GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
     "150": ("submission_source", "منبع ارسال"),
     "151": ("form_version", "sa_form_version"),
 }
+
+
+def _attach_contact_columns(
+    target: pd.DataFrame, contacts: pd.DataFrame
+) -> pd.DataFrame:
+    """تزریق ستون‌های تماس نرمال‌شده و تمامی معادل‌های فارسی آن‌ها."""
+
+    for column in CONTACT_POLICY_COLUMNS:
+        if column not in contacts.columns:
+            continue
+        series = ensure_series(contacts[column]).reindex(target.index)
+        target[column] = series
+        alias = CANON_EN_TO_FA.get(column)
+        if alias:
+            target[alias] = series
+        for extra in CONTACT_POLICY_ALIAS_GROUPS.get(column, ()): 
+            target[extra] = series
+    return target
 
 _DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _HEADER_SPACE_PATTERN = re.compile(r"[\s\u200c\u200f]+")
@@ -192,7 +212,9 @@ def prepare_allocation_export_frame(
     """ادغام ستون‌های دانش‌آموز و پشتیبان روی دیتافریم تخصیص."""
 
     alloc = canonicalize_headers(allocations_df, header_mode="en").copy()
+    students_contacts = enrich_student_contacts(students_df)
     students = canonicalize_headers(students_df, header_mode="en").copy()
+    students = _attach_contact_columns(students, students_contacts)
     mentors = canonicalize_headers(mentors_df, header_mode="en").copy()
 
     dedupe_logs: list[dict[str, list[str]]] = []
@@ -908,6 +930,7 @@ def build_sheet2_frame(
 
     if today is None:
         today = datetime.today()
+    df_alloc = enrich_student_contacts(df_alloc)
     sheet_cfg = exporter_cfg["sheets"]["Sheet2"]
     columns_cfg = sheet_cfg["columns"]
     if isinstance(columns_cfg, OrderedDict):
@@ -963,40 +986,8 @@ def build_sheet2_frame(
     if landline_column in sheet.columns:
         landline_source = df_alloc.get("student_landline")
         if landline_source is not None:
-            landline_series = normalize_landline_series(ensure_series(landline_source))
-            landline_series = landline_series.reindex(df_alloc.index)
-            sheet[landline_column] = landline_series.fillna("")
-
-    hekmat_mask: pd.Series | None = None
-    hekmat_cfg = sheet_cfg.get("hekmat_rule")
-    if isinstance(hekmat_cfg, Mapping):
-        status_column = hekmat_cfg.get("status_column")
-        expected = hekmat_cfg.get("expected_value")
-        target_columns = hekmat_cfg.get("columns", [])
-        if status_column in sheet.columns and expected is not None:
-            mask = sheet[status_column].astype("string") == str(expected)
-            hekmat_mask = mask
-            for column in target_columns:
-                if column in sheet.columns:
-                    sheet.loc[~mask, column] = ""
-
-    if hekmat_mask is not None:
-        tracking_candidates = (
-            "کد رهگیری حکمت",
-            "hekmat_tracking",
-            "student_hekmat_tracking_code",
-        )
-        tracking_column = next(
-            (column for column in tracking_candidates if column in sheet.columns), None
-        )
-        if tracking_column:
-            sheet.loc[hekmat_mask, tracking_column] = HEKMAT_TRACKING_CODE
-        if landline_column in sheet.columns:
-            landline_values = sheet[landline_column].astype("string")
-            mask_empty = landline_values.str.strip() == ""
-            sheet.loc[hekmat_mask & mask_empty, landline_column] = HEKMAT_LANDLINE_FALLBACK
-
-    if landline_column in sheet.columns:
+            aligned_landline = ensure_series(landline_source).reindex(df_alloc.index)
+            sheet[landline_column] = aligned_landline.astype("string").fillna("")
         sheet[landline_column] = normalize_landline_series(
             sheet[landline_column], allow_special_zero=True
         ).fillna("")
