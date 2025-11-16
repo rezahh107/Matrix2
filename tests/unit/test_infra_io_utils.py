@@ -208,7 +208,6 @@ def test_write_xlsx_atomic_pads_mobile_columns(tmp_path: Path) -> None:
         {
             "student_mobile": [9171075740],
             "تلفن همراه": ["9170000000"],
-            "تلفن همراه داوطلب": [9300798195],
             "نام": ["الف"],
         }
     )
@@ -223,7 +222,6 @@ def test_write_xlsx_atomic_pads_mobile_columns(tmp_path: Path) -> None:
 
     assert ws.cell(row=2, column=1).value == "09171075740"
     assert ws.cell(row=2, column=2).value == "09170000000"
-    assert ws.cell(row=2, column=3).value == "09300798195"
 
 
 def test_write_xlsx_atomic_cleans_up_temp_file_on_failure(

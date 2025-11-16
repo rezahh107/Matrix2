@@ -59,7 +59,6 @@ _MOBILE_COLUMN_NAMES = frozenset(
         "parent_mobile_2",
         "تلفن همراه",
         "تلفن همراه | student_mobile",
-        "تلفن همراه داوطلب",
         "موبایل دانش آموز",
         "موبایل دانش‌آموز",
         "موبایل رابط 1",
@@ -69,14 +68,6 @@ _MOBILE_COLUMN_NAMES = frozenset(
         "تلفن رابط 2",
         "تلفن رابط 2 | contact2_mobile",
     }
-)
-_MOBILE_KEYWORDS = (
-    "mobile",
-    "cell phone",
-    "cellphone",
-    "موبایل",
-    "تلفن همراه",
-    "شماره همراه",
 )
 
 
@@ -215,31 +206,12 @@ def _format_mobile_for_export(value: object) -> str:
     return text
 
 
-def _is_mobile_column(label: object) -> bool:
-    """تشخیص ستون‌های موبایل بر اساس نام‌های صریح و کلیدواژه‌های رایج."""
-
-    label_text = str(label)
-    if label_text in _MOBILE_COLUMN_NAMES:
-        return True
-
-    normalized = (
-        label_text.replace("|", " ")
-        .replace("_", " ")
-        .replace("-", " ")
-        .replace("\u200c", " ")
-        .casefold()
-    )
-    normalized = " ".join(normalized.split())
-
-    return any(keyword in normalized for keyword in _MOBILE_KEYWORDS)
-
-
 def _normalize_mobile_columns(df: pd.DataFrame) -> None:
     """اعمال قالب متنی و صفر پیشتاز روی ستون‌های موبایل شناسایی‌شده."""
 
     if df.empty:
         return
-    target_columns = [column for column in df.columns if _is_mobile_column(column)]
+    target_columns = [column for column in df.columns if str(column) in _MOBILE_COLUMN_NAMES]
     for column in target_columns:
         series = ensure_series(df[column]).astype("object")
         df[column] = series.map(_format_mobile_for_export).astype("string")
