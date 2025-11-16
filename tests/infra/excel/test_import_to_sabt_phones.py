@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
@@ -68,6 +66,7 @@ _EXPORTER_CFG = {
                     ),
                 ]
             ),
+            "landline_column": "تلفن ثابت",
             "hekmat_rule": {
                 "status_column": "وضعیت ثبت نام",
                 "expected_value": "حکمت",
@@ -84,29 +83,38 @@ def test_phone_rules_in_sheet2_output() -> None:
             {
                 "student_id": "S1",
                 "registration_status": "0",
-                "student_mobile": "۰۹۱۲-۳۴۵ ۶۷۸۹",
+                "student_mobile": "9357174851",
                 "contact1_mobile": "۰۹۱۲۳۴۵۶۷۸۰",
                 "contact2_mobile": "09123456780",
-                "student_landline": "",
+                "student_landline": "3512345678",
                 "hekmat_tracking": "",
             },
             {
                 "student_id": "S2",
+                "registration_status": "0",
+                "student_mobile": "",
+                "contact1_mobile": "",
+                "contact2_mobile": "",
+                "student_landline": "6123456789",
+                "hekmat_tracking": "",
+            },
+            {
+                "student_id": "S3",
                 "registration_status": "3",
                 "student_mobile": "9123456789",
                 "contact1_mobile": "",
                 "contact2_mobile": "۰۹۳۵-۱۱۱ ۲۲۳۳",
                 "student_landline": "",
-                "hekmat_tracking": "1234",
+                "hekmat_tracking": "",
             },
             {
-                "student_id": "S3",
+                "student_id": "S4",
                 "registration_status": "3",
                 "student_mobile": "۰۹۳۵۱۲۳۴",
                 "contact1_mobile": "۰۹۱۲۰۰۰۰۰۰۰",
                 "contact2_mobile": "",
-                "student_landline": "۰۲۱-۱۲۳۴۵۶۷",
-                "hekmat_tracking": "9999",
+                "student_landline": "2123456789",
+                "hekmat_tracking": "",
             },
         ]
     )
@@ -114,20 +122,21 @@ def test_phone_rules_in_sheet2_output() -> None:
     enriched = enrich_student_contacts(df_alloc)
     sheet = build_sheet2_frame(enriched, _EXPORTER_CFG, today=datetime(2024, 1, 1))
 
-    # دانش‌آموز اول: موبایل معتبر و رابط دوم تکراری حذف می‌شود.
-    assert sheet.loc[0, "تلفن همراه"] == "09123456789"
+    assert sheet.loc[0, "تلفن همراه"] == "09357174851"
     assert sheet.loc[0, "تلفن رابط 1"] == "09123456780"
     assert sheet.loc[0, "تلفن رابط 2"] == ""
+    assert sheet.loc[0, "تلفن ثابت"] == "3512345678"
 
-    # دانش‌آموز حکمت با موبایل نامعتبر: موبایل و رابط دوم خالی اما رابط اول با مقدار دوم پر می‌شود.
-    assert sheet.loc[1, "تلفن همراه"] == ""
-    assert sheet.loc[1, "تلفن رابط 1"] == "09351112233"
-    assert sheet.loc[1, "تلفن رابط 2"] == ""
-    assert sheet.loc[1, "کد رهگیری حکمت"] == "1111111111111111"
-    assert sheet.loc[1, "تلفن ثابت"] == "00000000000"
+    assert sheet.loc[1, "تلفن ثابت"] == ""
 
-    # دانش‌آموز حکمت با تلفن ثابت واقعی باید همان مقدار نرمال‌شده را حفظ کند.
-    assert sheet.loc[2, "تلفن همراه"] == ""
-    assert sheet.loc[2, "تلفن رابط 1"] == "09120000000"
-    assert sheet.loc[2, "تلفن ثابت"] == "0211234567"
+    assert sheet.loc[2, "تلفن همراه"] == "09123456789"
+    assert sheet.loc[2, "تلفن رابط 1"] == "09351112233"
+    assert sheet.loc[2, "تلفن رابط 2"] == ""
+    assert sheet.loc[2, "تلفن ثابت"] == "00000000000"
     assert sheet.loc[2, "کد رهگیری حکمت"] == "1111111111111111"
+
+    assert sheet.loc[3, "تلفن همراه"] == ""
+    assert sheet.loc[3, "تلفن ثابت"] == "00000000000"
+    assert sheet.loc[3, "کد رهگیری حکمت"] == "1111111111111111"
+
+    assert sheet["کد رهگیری حکمت"].dtype == "string"

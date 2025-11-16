@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pathlib import Path
 import sys
 
@@ -15,9 +13,15 @@ from app.core.common.phone_rules import (
     fix_guardian_phones,
     normalize_digits,
     normalize_digits_series,
+    normalize_landline,
+    normalize_landline_series,
     normalize_mobile,
     normalize_mobile_series,
 )
+
+
+def test_normalize_mobile_adds_leading_zero_for_10_digit_phones() -> None:
+    assert normalize_mobile("9357174851") == "09357174851"
 
 
 def test_normalize_digits_handles_farsi_and_punctuation() -> None:
@@ -30,9 +34,9 @@ def test_normalize_mobile_accepts_valid() -> None:
 
 
 def test_normalize_mobile_rejects_invalid_lengths_or_prefix() -> None:
-    assert normalize_mobile("9123456789") is None
     assert normalize_mobile("001234567890") is None
     assert normalize_mobile("08123456789") is None
+    assert normalize_mobile("935") is None
 
 
 def test_normalize_mobile_series_preserves_index() -> None:
@@ -40,7 +44,7 @@ def test_normalize_mobile_series_preserves_index() -> None:
     normalized = normalize_mobile_series(series)
     assert normalized.index.tolist() == ["a", "b"]
     assert normalized.loc["a"] == "09123456789"
-    assert pd.isna(normalized.loc["b"])
+    assert normalized.loc["b"] == "09123456789"
 
 
 def test_fix_guardian_phones_moves_second_if_first_missing() -> None:
@@ -61,3 +65,19 @@ def test_normalize_digits_series_returns_string_dtype() -> None:
     assert normalized.dtype == "string"
     assert normalized.iloc[0] == "021"
     assert pd.isna(normalized.iloc[1])
+
+
+def test_normalize_landline_accepts_only_3_or_5_prefix() -> None:
+    assert normalize_landline("۳۳۳۴۴۴۵۵۵۵") == "3334445555"
+    assert normalize_landline("۵۱۲۳۴۵۶۷") == "51234567"
+    assert normalize_landline("0123456789") is None
+
+
+def test_normalize_landline_series_handles_special_zero() -> None:
+    series = pd.Series(["51234567", "00000000000", "6123456"])
+    normalized_default = normalize_landline_series(series)
+    assert normalized_default.loc[0] == "51234567"
+    assert normalized_default.isna().tolist() == [False, True, True]
+    normalized_with_special = normalize_landline_series(series, allow_special_zero=True)
+    assert normalized_with_special.loc[1] == "00000000000"
+    assert normalized_with_special.isna().tolist() == [False, False, True]
