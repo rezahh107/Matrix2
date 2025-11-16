@@ -111,7 +111,8 @@ def format_last_run_label(info: LastRunInfo | None, translator: UiTranslator) ->
     """ساخت متن قابل‌نمایش برای برچسب آخرین اجرا."""
 
     if info is None:
-        return translator.text("status.no_runs", "آخرین اجرا: هنوز اجرایی ثبت نشده است")
+        prefix = translator.text("status.last_run_prefix", "آخرین اجرا")
+        return f"{prefix}: {translator.text('status.no_runs', 'هنوز اجرایی ثبت نشده است')}"
     run_title = {
         "build": translator.text("action.build", info.run_type),
         "allocate": translator.text("action.allocate", info.run_type),

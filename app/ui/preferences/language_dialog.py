@@ -19,8 +19,7 @@ class LanguageDialog(QDialog):
         self._combo.addItem(translator.text("language.fa", "فارسی (fa-IR)"), "fa")
         self._combo.addItem(translator.text("language.en", "English (en-US)"), "en")
         current = language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
-        idx = self._combo.findData(current)
-        self._combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._combo.setCurrentIndex(self._combo.findData(current))
 
         layout = QFormLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
