@@ -15,6 +15,7 @@ from app.infra.excel.import_to_sabt import (
     build_sheet2_frame,
     build_summary_frame,
     load_exporter_config,
+    prepare_allocation_export_frame,
     write_import_to_sabt_excel,
     _apply_normalizers,
     _normalize_mobile_ir,
@@ -163,6 +164,32 @@ class TestHekmatConditionalLogic:
         if hekmat_code:
             assert len(hekmat_code) == 16
             assert hekmat_code.isdigit()
+
+
+class TestRegistrationStatusPreservation:
+    def test_prefixed_status_values_survive_mapping(
+        self, exporter_config: dict
+    ) -> None:
+        allocations_df = pd.DataFrame({"student_id": ["s1", "s2", "s3"], "mentor_id": [1, 2, 3]})
+        students_df = pd.DataFrame(
+            {
+                "student_id": ["s1", "s2", "s3"],
+                "student_first_name": ["الف", "ب", "پ"],
+                "student_last_name": ["یک", "دو", "سه"],
+                "student_gender": ["M", "F", "M"],
+                "وضعیت ثبت نام": [0, 3, pd.NA],
+            }
+        )
+        mentors_df = pd.DataFrame({"mentor_id": [1, 2, 3]})
+
+        prepared = prepare_allocation_export_frame(
+            allocations_df, students_df, mentors_df, student_ids=allocations_df["student_id"]
+        )
+        sheet2 = build_sheet2_frame(prepared, exporter_config)
+
+        assert sheet2.loc[0, "وضعیت ثبت نام"] == "عادی"
+        assert sheet2.loc[1, "وضعیت ثبت نام"] == "حکمت"
+        assert sheet2.loc[2, "وضعیت ثبت نام"] == "عادی"
 
 
 class TestDerivedFields:

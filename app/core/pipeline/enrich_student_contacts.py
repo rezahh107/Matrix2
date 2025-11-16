@@ -44,6 +44,15 @@ def _alias_names(column: str) -> tuple[str, ...]:
     return CONTACT_POLICY_ALIAS_GROUPS.get(column, ())
 
 
+def _expand_with_student_prefix(candidates: Iterable[str]) -> tuple[str, ...]:
+    expanded: list[str] = []
+    for name in candidates:
+        expanded.append(name)
+        if not str(name).startswith("student_"):
+            expanded.append(f"student_{name}")
+    return tuple(expanded)
+
+
 _STUDENT_MOBILE_CANDIDATES: tuple[str, ...] = (
     "student_mobile",
     "student_mobile_raw",
@@ -90,13 +99,17 @@ _TRACKING_EXTRA: tuple[str, ...] = _optional_names(
     *_alias_names("hekmat_tracking"),
 )
 _STATUS_CANDIDATES: tuple[str, ...] = (
-    "student_registration_status",
-    "registration_status",
-    "student_finance",
-    "finance",
-    "student_finance_status",
-    "student_finance_code",
-    *_STATUS_EXTRA,
+    *_expand_with_student_prefix(
+        (
+            "student_registration_status",
+            "registration_status",
+            "student_finance",
+            "finance",
+            "student_finance_status",
+            "student_finance_code",
+            *_STATUS_EXTRA,
+        )
+    ),
 )
 _TRACKING_CODE_CANDIDATES: tuple[str, ...] = (
     "hekmat_tracking",
