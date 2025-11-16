@@ -619,6 +619,22 @@ def safe_truncate(text: object, max_len: int) -> str:
     return f"{trimmed}…"
 
 
+def extract_ascii_digits(value: Any) -> str:
+    """استخراج تنها ارقام انگلیسی از ورودی متنی/عددی."""
+
+    try:
+        if _is_nan_like(value):
+            return ""
+        text = _to_stable_str(value)
+        if not text:
+            return ""
+        translated = text.translate(_PERSIAN_DIGITS)
+        digits = "".join(ch for ch in translated if ch.isdigit())
+        return digits
+    except Exception:
+        return ""
+
+
 __all__ = [
     "normalize_fa",
     "normalize_header",
@@ -631,4 +647,5 @@ __all__ = [
     "fa_digitize",
     "safe_truncate",
     "strip_school_code_separators",
+    "extract_ascii_digits",
 ]

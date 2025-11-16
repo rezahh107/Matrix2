@@ -14,6 +14,12 @@ import pandas as pd
 
 from app.core.common.columns import canonicalize_headers, ensure_series
 from app.core.common.normalization import normalize_fa
+from app.core.common.phone_rules import (
+    HEKMAT_LANDLINE_FALLBACK,
+    HEKMAT_TRACKING_CODE,
+    normalize_mobile,
+)
+from app.core.pipeline import enrich_student_contacts
 
 GF_FIELD_TO_COL: Mapping[str, Sequence[str]] = {
     # اطلاعات هویتی دانش‌آموز
@@ -296,6 +302,7 @@ def prepare_allocation_export_frame(
     merged.index = alloc.index
     if dedupe_logs:
         merged.attrs["dedupe_logs"] = dedupe_logs
+    merged = enrich_student_contacts(merged)
     return merged
 
 
@@ -733,44 +740,10 @@ def _apply_normalizers(series: pd.Series, normalizer: Any) -> pd.Series:
 
 
 def _normalize_mobile_ir(value: Any) -> str:
-    """نرمال‌سازی شماره موبایل ایران به فرمت 11 رقمی 09xxxxxxxxx."""
+    """نرمال‌سازی موبایل از طریق :func:`app.core.common.phone_rules.normalize_mobile`."""
 
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return ""
-
-    text = str(value).strip()
-    text = text.translate(_DIGIT_TRANSLATION)
-    if not text:
-        return ""
-
-    digits = "".join(ch for ch in text if ch.isdigit())
-    if not digits:
-        return ""
-
-    if len(digits) > 11:
-        stripped = digits.lstrip("0")
-        digits = stripped if stripped else digits
-
-    if digits.startswith("0098"):
-        digits = digits[4:]
-    elif digits.startswith("098"):
-        digits = digits[3:]
-    elif digits.startswith("98"):
-        digits = digits[2:]
-
-    if len(digits) > 11:
-        digits = digits[-11:]
-
-    if len(digits) == 10 and digits.startswith("9"):
-        digits = f"0{digits}"
-
-    if len(digits) == 11 and digits.startswith("9") and not digits.startswith("09"):
-        digits = f"0{digits[-10:]}"
-
-    if len(digits) == 11 and digits.startswith("09"):
-        return digits
-
-    return digits
+    normalized = normalize_mobile(value)
+    return normalized or ""
 
 
 def _resolve_map(map_spec: Any, cfg: Mapping[str, Any]) -> Mapping[Any, Any] | None:
@@ -984,6 +957,21 @@ def build_sheet2_frame(
 
     sheet = sheet.loc[:, ordered_columns]
 
+    landline_column = sheet_cfg.get("landline_column") or "تلفن ثابت"
+    if landline_column in sheet.columns:
+        landline_source = df_alloc.get("student_landline")
+        if landline_source is not None:
+            landline_series = (
+                ensure_series(landline_source)
+                .reindex(df_alloc.index)
+                .astype("string")
+                .fillna("")
+            )
+            mask_landline = landline_series.str.strip() != ""
+            if mask_landline.any():
+                sheet.loc[mask_landline, landline_column] = landline_series[mask_landline]
+
+    hekmat_mask: pd.Series | None = None
     hekmat_cfg = sheet_cfg.get("hekmat_rule")
     if isinstance(hekmat_cfg, Mapping):
         status_column = hekmat_cfg.get("status_column")
@@ -991,9 +979,26 @@ def build_sheet2_frame(
         target_columns = hekmat_cfg.get("columns", [])
         if status_column in sheet.columns and expected is not None:
             mask = sheet[status_column].astype("string") == str(expected)
+            hekmat_mask = mask
             for column in target_columns:
                 if column in sheet.columns:
                     sheet.loc[~mask, column] = ""
+
+    if hekmat_mask is not None:
+        tracking_candidates = (
+            "کد رهگیری حکمت",
+            "hekmat_tracking",
+            "student_hekmat_tracking_code",
+        )
+        tracking_column = next(
+            (column for column in tracking_candidates if column in sheet.columns), None
+        )
+        if tracking_column:
+            sheet.loc[hekmat_mask, tracking_column] = HEKMAT_TRACKING_CODE
+        if landline_column in sheet.columns:
+            landline_values = sheet[landline_column].astype("string")
+            mask_empty = landline_values.str.strip() == ""
+            sheet.loc[hekmat_mask & mask_empty, landline_column] = HEKMAT_LANDLINE_FALLBACK
 
     sheet = sheet.astype({column: "string" for column in sheet.columns})
     sheet.attrs["exporter_config"] = exporter_cfg

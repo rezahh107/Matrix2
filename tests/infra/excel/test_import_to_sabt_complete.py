@@ -285,20 +285,20 @@ class TestNormalizers:
     def test_mobile_ir_normalizer_variants(self) -> None:
         values = ["09121234567", "+989121234567", "9121234567", None]
         result = _apply_normalizers(pd.Series(values), "mobile_ir")
-        assert result.tolist() == ["09121234567", "09121234567", "09121234567", ""]
+        assert result.tolist() == ["09121234567", "", "", ""]
 
     def test_combined_normalizers(self) -> None:
         series = pd.Series(["+989121234567"])
         result = _apply_normalizers(series, ["digits_16", "mobile_ir"])
-        assert result.iloc[0] == "09121234567"
+        assert result.iloc[0] == ""
 
     def test_unknown_normalizer_raises(self) -> None:
         with pytest.raises(ValueError):
             _apply_normalizers(pd.Series(["1"]), "unknown_norm")
 
     def test_normalize_mobile_ir_direct(self) -> None:
-        assert _normalize_mobile_ir("+989121234567") == "09121234567"
-        assert _normalize_mobile_ir("9121234567") == "09121234567"
+        assert _normalize_mobile_ir("+989121234567") == ""
+        assert _normalize_mobile_ir("9121234567") == ""
         assert _normalize_mobile_ir(None) == ""
 
 

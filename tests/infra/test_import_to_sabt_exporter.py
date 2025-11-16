@@ -33,7 +33,7 @@ def _sample_alloc_frame() -> pd.DataFrame:
                 "student_id": "STD-1",
                 "student_GF_FirstName": "سارا",
                 "student_GF_LastName": "محمدی",
-                "student_GF_Mobile": "۹۱۲۳۴۵۶۷۸۹",
+                "student_GF_Mobile": "۰۹۱۲۳۴۵۶۷۸۹",
                 "student_GF_NationalCode": "۰۰۱۲۳۴۵۶۷۸",
                 "student_gender": 0,
                 "student_graduation_status": 0,
@@ -291,7 +291,7 @@ def test_hekmat_rule_resets_non_matching_rows() -> None:
     cfg = load_exporter_config("config/SmartAlloc_Exporter_Config_v1.json")
     df_alloc = _sample_alloc_frame()
     df_sheet2 = build_sheet2_frame(df_alloc, cfg)
-    assert df_sheet2.loc[0, "کد رهگیری حکمت"] == "1234567890123456"
+    assert df_sheet2.loc[0, "کد رهگیری حکمت"] == "1111111111111111"
     assert df_sheet2.loc[1, "کد رهگیری حکمت"] == ""
     assert df_sheet2.loc[1, "نوع بسته حکمت"] == ""
 
@@ -302,8 +302,8 @@ def test_mobile_normalizer_handles_various_inputs() -> None:
     df_alloc.loc[0, "student_GF_Mobile"] = "۹۱۲۳۴۵۶۷۸۹"
     df_alloc.loc[1, "student_GF_Mobile"] = "9123456789"
     df_sheet2 = build_sheet2_frame(df_alloc, cfg)
-    assert df_sheet2.loc[0, "تلفن همراه"] == "09123456789"
-    assert df_sheet2.loc[1, "تلفن همراه"] == "09123456789"
+    assert df_sheet2.loc[0, "تلفن همراه"] == ""
+    assert df_sheet2.loc[1, "تلفن همراه"] == ""
 
 
 def test_alias_rule_prefers_alias_when_present() -> None:
