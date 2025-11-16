@@ -18,6 +18,8 @@ __all__ = [
     "apply_default_font",
 ]
 
+DEFAULT_UI_POINT_SIZE = 11
+
 LOGGER = logging.getLogger(__name__)
 
 _BUNDLED_FONT_PAYLOADS: dict[str, str] = {
@@ -98,21 +100,21 @@ def _policy_font_name() -> str:
     """خواندن نام فونت از Policy با تضمین خطای کنترل‌شده."""
 
     try:
-        name = (get_policy().excel.font_name or "Tahoma").strip()
+        name = (get_policy().excel.font_name or "Vazirmatn").strip()
     except Exception as exc:  # pragma: no cover - خطاهای محیطی Policy
         LOGGER.warning("خواندن فونت از Policy شکست خورد؛ استفاده از پیش‌فرض.", exc_info=exc)
-        return "Tahoma"
-    return name or "Tahoma"
+        return "Vazirmatn"
+    return name or "Vazirmatn"
 
 
-def prepare_default_font(*, point_size: int = 10) -> "QFont":
-    """ساخت شیء فونت پیش‌فرض با نصب فونت‌های لازم (تاهوما یا وزیر).
+def prepare_default_font(*, point_size: int = DEFAULT_UI_POINT_SIZE) -> "QFont":
+    """ساخت شیء فونت پیش‌فرض با نصب فونت‌های لازم (وزیرمتن/تاهوما).
 
     مثال::
 
         >>> font = prepare_default_font(point_size=11)  # doctest: +SKIP
         >>> font.family()  # doctest: +SKIP
-        'Tahoma'
+        'Vazirmatn'
     """
 
     from PySide6.QtGui import QFont, QFontDatabase
@@ -139,13 +141,15 @@ def prepare_default_font(*, point_size: int = 10) -> "QFont":
     return fallback
 
 
-def apply_default_font(app: "QApplication", *, point_size: int = 10) -> "QFont":
+def apply_default_font(
+    app: "QApplication", *, point_size: int = DEFAULT_UI_POINT_SIZE
+) -> "QFont":
     """نصب و اعمال فونت پیش‌فرض (تاهوما یا وزیر) بر روی QApplication.
 
     مثال::
 
         >>> app = QApplication([])  # doctest: +SKIP
-        >>> font = apply_default_font(app, point_size=10)  # doctest: +SKIP
+        >>> font = apply_default_font(app, point_size=11)  # doctest: +SKIP
     """
 
     font = prepare_default_font(point_size=point_size)

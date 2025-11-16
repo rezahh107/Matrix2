@@ -459,6 +459,61 @@ def test_detect_reader_coerces_alt_code(
     assert loaded.loc[0, ALT_CODE_COLUMN] == "987654"
 
 
+def test_inject_student_ids_ui_mode_disables_prompt(
+    monkeypatch: pytest.MonkeyPatch, policy_file: Path
+) -> None:
+    policy = load_policy(policy_file)
+    students_df = pd.DataFrame({
+        "national_id": ["1", "2"],
+        "gender": [1, 1],
+    })
+    args = argparse.Namespace(
+        counter_duplicate_strategy=None,
+        academic_year=1402,
+        prior_roster=None,
+        current_roster=None,
+        _ui_overrides={"academic_year": 1402},
+        _ui_mode=True,
+    )
+
+    def _clone(df: pd.DataFrame, *_args, **_kwargs) -> pd.DataFrame:
+        return df.copy()
+
+    base_counters = pd.Series(["STD-1", "STD-1"], index=students_df.index, dtype="string")
+    base_counters.attrs["counter_summary"] = {"reused_count": 0}
+
+    def fake_assign(*_args, **_kwargs):
+        return base_counters.copy()
+
+    observed: dict[str, object] = {}
+
+    def fake_apply(**kwargs):
+        observed["interactive"] = kwargs["interactive"]
+        observed["strategy"] = kwargs["strategy"]
+        resolved = pd.Series(["STD-1", "STD-2"], index=kwargs["counters"].index, dtype="string")
+        resolved.attrs["counter_summary"] = {"reused_count": 0}
+        return resolved, False, tuple()
+
+    class _DummyStdin:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(cli, "canonicalize_headers", _clone)
+    monkeypatch.setattr(cli, "enrich_school_columns_en", lambda df, empty_as_zero: df)
+    monkeypatch.setattr(cli, "assign_counters", fake_assign)
+    monkeypatch.setattr(cli, "find_duplicate_student_id_groups", lambda counters: {"STD-1": list(counters.index)})
+    monkeypatch.setattr(cli, "_apply_counter_duplicate_strategy", fake_apply)
+    monkeypatch.setattr(cli, "assert_unique_student_ids", lambda *_: None)
+    monkeypatch.setattr(cli.sys, "stdin", _DummyStdin())
+
+    student_ids, summary, _ = cli._inject_student_ids(students_df.copy(), args, policy)
+
+    assert isinstance(student_ids, pd.Series)
+    assert summary["reused_count"] == 0
+    assert observed["interactive"] is False
+    assert observed["strategy"] == "assign-new"
+
+
 def test_build_duplicate_row_report_handles_numeric_national_id() -> None:
     students_df = pd.DataFrame({"student_id": ["S-1", "S-1"]})
     students_df.index = [0, 1]

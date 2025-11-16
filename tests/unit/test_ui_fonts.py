@@ -43,4 +43,4 @@ def test_policy_font_name_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
         raise RuntimeError("policy missing")
 
     monkeypatch.setattr(fonts, "get_policy", _boom)
-    assert fonts._policy_font_name() == "Tahoma"
+    assert fonts._policy_font_name() == "Vazirmatn"
