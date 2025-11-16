@@ -8,11 +8,16 @@ import pandas as pd
 
 from app.core.common.columns import ensure_series
 from app.core.common.normalization import normalize_fa
+from app.core.pipeline import CONTACT_POLICY_ALIAS_GROUPS, CONTACT_POLICY_COLUMNS
 
 if TYPE_CHECKING:  # pragma: no cover - فقط برای type checking
     from app.infra.excel.export_allocations import AllocationExportColumn
 
-__all__ = ["identify_code_headers", "enforce_text_columns"]
+__all__ = [
+    "identify_code_headers",
+    "enforce_text_columns",
+    "attach_contact_columns",
+]
 
 _CODE_HEADER_KEYWORDS = ("کد", "شماره", "رهگیری", "قبض")
 _CODE_FIELD_HINTS = frozenset(
@@ -76,3 +81,19 @@ def enforce_text_columns(
         if header in output.columns:
             output[header] = ensure_series(output[header]).astype("string")
     return output
+
+
+def attach_contact_columns(
+    target: pd.DataFrame, contacts: pd.DataFrame
+) -> pd.DataFrame:
+    """افزودن ستون‌های تماس نرمال‌شده و تمام نام‌های فارسی متناظر."""
+
+    result = target.copy()
+    for column in CONTACT_POLICY_COLUMNS:
+        if column not in contacts.columns:
+            continue
+        series = ensure_series(contacts[column]).reindex(result.index)
+        result[column] = series
+        for extra in CONTACT_POLICY_ALIAS_GROUPS.get(column, ()):  # pragma: no cover - داده محور
+            result[extra] = series
+    return result
