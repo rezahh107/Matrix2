@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -456,6 +457,25 @@ def test_detect_reader_coerces_alt_code(
 
     assert loaded[ALT_CODE_COLUMN].dtype == object
     assert loaded.loc[0, ALT_CODE_COLUMN] == "987654"
+
+
+def test_build_duplicate_row_report_handles_numeric_national_id() -> None:
+    students_df = pd.DataFrame({"student_id": ["S-1", "S-1"]})
+    students_df.index = [0, 1]
+    students_en = pd.DataFrame(
+        {
+            "student_id": ["S-1", "S-1"],
+            "national_id": [np.int64(1234567890), " 0042 "],
+            "full_name": ["الف", "ب"],
+        },
+        index=students_df.index,
+    )
+    duplicate_groups = {"S-1": [0, 1]}
+
+    report = cli._build_duplicate_row_report(students_df, students_en, duplicate_groups)
+
+    assert report[0]["rows"][0]["national_id"] == "1234567890"
+    assert report[0]["rows"][1]["national_id"] == "0042"
 
 
 def test_load_matrix_candidate_pool_filters_virtual(
