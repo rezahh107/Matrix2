@@ -9,6 +9,10 @@ config_dir = project_root / "config"
 if config_dir.exists():
     dist_datas.append((str(config_dir), "config"))
 
+assets_dir = project_root / "app" / "ui" / "assets"
+if assets_dir.exists():
+    dist_datas.append((str(assets_dir), "app/ui/assets"))
+
 block_cipher = None
 
 a = Analysis(
