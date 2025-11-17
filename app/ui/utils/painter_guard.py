@@ -9,9 +9,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
-from typing import Final
+from typing import Final, Iterator
 
 from PySide6.QtGui import QPainter
 
@@ -49,4 +50,25 @@ def assert_painter_active(painter: QPainter, context: str, *, strict: bool | Non
     return False
 
 
-__all__: Final = ["assert_painter_active", "painter_guard_enabled"]
+__all__: Final = ["assert_painter_active", "painter_guard_enabled", "painter_state"]
+
+
+@contextlib.contextmanager
+def painter_state(painter: QPainter) -> Iterator[QPainter]:
+    """مدیریت امن save/restore برای نقاش Qt.
+
+    این context manager به‌صورت خودکار وضعیت فعلی painter را ذخیره و در خروج
+    (حتی در صورت بروز استثنا) بازیابی می‌کند تا هیچ «saved state» معلقی باقی
+    نماند.
+
+    مثال:
+        >>> with painter_state(p):
+        ...     painter.setOpacity(0.5)
+        ...     painter.drawRect(0, 0, 10, 10)
+    """
+
+    painter.save()
+    try:
+        yield painter
+    finally:
+        painter.restore()
