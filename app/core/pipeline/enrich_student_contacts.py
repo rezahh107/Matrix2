@@ -177,8 +177,7 @@ def debug_registration_distribution(
     if first_column is None:
         return {"column": None, "non_null": 0, "zeros": 0, "threes": 0}
 
-    series_str = df[first_column].astype("string").str.translate(_DIGIT_TRANSLATION)
-    series = pd.to_numeric(series_str, errors="coerce")
+    series = pd.to_numeric(df[first_column], errors="coerce")
     non_null = int(series.notna().sum())
     zeros = int((series == 0).sum())
     threes = int((series == 3).sum())

@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QFrame,
 )
 
+from app.ui.theme import Theme
+
 __all__ = ["DashboardCard"]
 
 
@@ -27,6 +29,7 @@ class DashboardCard(QFrame):
         parent: QWidget | None = None,
         *,
         max_height: int | None = None,
+        theme: Theme | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("dashboardCard")
@@ -42,14 +45,14 @@ class DashboardCard(QFrame):
         header = QVBoxLayout()
         header.setSpacing(2)
 
-        title_label = QLabel(title)
-        title_label.setObjectName("dashboardCardTitle")
-        description_label = QLabel(description)
-        description_label.setObjectName("dashboardCardDescription")
-        description_label.setWordWrap(True)
+        self._title_label = QLabel(title)
+        self._title_label.setObjectName("dashboardCardTitle")
+        self._description_label = QLabel(description)
+        self._description_label.setObjectName("dashboardCardDescription")
+        self._description_label.setWordWrap(True)
 
-        header.addWidget(title_label)
-        header.addWidget(description_label)
+        header.addWidget(self._title_label)
+        header.addWidget(self._description_label)
         self._layout.addLayout(header)
 
         self._body_container = QScrollArea(self)
@@ -64,6 +67,9 @@ class DashboardCard(QFrame):
         self._body_container.setWidget(self._body_widget)
         self._layout.addWidget(self._body_container)
 
+        if theme is not None:
+            self.apply_theme(theme)
+
     def body_layout(self) -> QVBoxLayout:
         """دسترسی به لایهٔ محتوای کارت."""
 
@@ -74,3 +80,30 @@ class DashboardCard(QFrame):
 
         for widget in widgets:
             self._body.addWidget(widget)
+
+    def clear_body(self) -> None:
+        """پاک‌سازی محتوای بدنه برای بازسازی ترجمه یا محتوا."""
+
+        while self._body.count():
+            item = self._body.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+
+    def set_header(self, title: str, description: str) -> None:
+        """به‌روزرسانی عنوان و توضیح کارت."""
+
+        self._title_label.setText(title)
+        self._description_label.setText(description)
+
+    def apply_theme(self, theme: Theme) -> None:
+        """اعمال تم روی کارت و متن‌های آن."""
+
+        self.setStyleSheet(
+            f"#dashboardCard{{"
+            f"background:{theme.card.name()};"
+            f"border:1px solid {theme.border.name()};"
+            f"border-radius:{theme.radius}px;}}"
+            f"#dashboardCardTitle{{color:{theme.text_primary.name()};font-weight:600;}}"
+            f"#dashboardCardDescription, #dashboardChecklistItem{{color:{theme.text_muted.name()};}}"
+        )

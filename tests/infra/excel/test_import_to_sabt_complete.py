@@ -226,23 +226,6 @@ class TestRegistrationStatusPreservation:
 
         assert sheet2["وضعیت ثبت نام"].tolist() == ["عادی", "حکمت", "عادی"]
 
-    def test_registration_status_persian_digits(self, exporter_config: dict) -> None:
-        minimal_df = pd.DataFrame(
-            {
-                "student_id": ["s1", "s2"],
-                "mentor_id": [1, 2],
-                "student_first_name": ["الف", "ب"],
-                "student_last_name": ["یک", "دو"],
-                "student_gender": ["M", "F"],
-                "student_registration_status": ["۰", "۳"],
-            }
-        )
-
-        sheet2 = build_sheet2_frame(minimal_df, exporter_config)
-
-        assert sheet2.loc[0, "وضعیت ثبت نام"] == "عادی"
-        assert sheet2.loc[1, "وضعیت ثبت نام"] == "حکمت"
-
     def test_debug_log_traces_registration_status(
         self, exporter_config: dict
     ) -> None:

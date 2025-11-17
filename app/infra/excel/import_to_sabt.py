@@ -997,22 +997,6 @@ def build_sheet2_frame(
                     ),
                 }
             )
-            map_dict = _resolve_map(spec.get("map"), exporter_cfg)
-            if map_dict:
-                numeric_map: dict[int, Any] = {}
-                for key, value in map_dict.items():
-                    try:
-                        numeric_key = int(str(key))
-                    except (TypeError, ValueError):
-                        continue
-                    numeric_map[numeric_key] = value
-
-                mapped_numeric = series.map(numeric_map)
-                mapped_text = series.astype("string").map(map_dict)
-                series = mapped_numeric.fillna(mapped_text).fillna(series)
-            map_dict = None
-        else:
-            map_dict = _resolve_map(spec.get("map"), exporter_cfg)
 
         if map_dict:
             mapped = series.astype("string").map(map_dict)

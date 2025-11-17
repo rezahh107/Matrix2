@@ -43,6 +43,15 @@ class AppPreferences:
         self._settings.setValue(key, value)
         self._settings.sync()
 
+    def _get_choice(self, key: str, choices: List[str], default: str) -> str:
+        """خواندن مقدار انتخابی همراه با اعتبارسنجی."""
+
+        value = self._get_string(key, default).lower().strip()
+        if value in choices:
+            return value
+        self._log_invalid_setting(key, value, "invalid choice")
+        return default
+
     def _get_bool(self, key: str, default: bool = False) -> bool:
         value = self._settings.value(key, default)
         if isinstance(value, bool):
@@ -288,6 +297,19 @@ class AppPreferences:
         if value not in SUPPORTED_LANGUAGES:
             raise ValueError("Language must be one of: " + ", ".join(sorted(SUPPORTED_LANGUAGES)))
         self._set_string("ui/language", value)
+
+    @property
+    def theme(self) -> str:
+        """نام تم انتخاب شده توسط کاربر (light/dark)."""
+
+        return self._get_choice("ui/theme", ["light", "dark"], "light")
+
+    @theme.setter
+    def theme(self, value: str) -> None:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"light", "dark"}:
+            raise ValueError("Theme must be either 'light' or 'dark'")
+        self._set_string("ui/theme", normalized)
 
     @property
     def window_geometry(self) -> bytes | None:
