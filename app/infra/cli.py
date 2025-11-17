@@ -1214,7 +1214,8 @@ def _allocate_and_write(
     logs_df = _make_excel_safe(logs_df)
     trace_df = _make_excel_safe(trace_df)
     selection_reasons_df = _make_excel_safe(selection_reasons_df)
-    # sabt_allocations_df به صورت خام حفظ می‌شود تا فرمت ستون‌ها دست‌نخورده بماند.
+    # sabt_allocations_df با هدر اصلی حفظ می‌شود اما از مسیر آماده‌سازی پیش‌فرض
+    # عبور می‌کند تا ستون‌های موبایل/رهگیری به‌صورت متن و با صفر پیشتاز ذخیره شوند.
     # --- پایان پاک‌سازی ---
 
     progress(90, "writing outputs")
@@ -1225,7 +1226,6 @@ def _allocate_and_write(
         sheets["allocations"] = allocations_df
         sheets["allocations_sabt"] = sabt_allocations_df
         header_overrides["allocations_sabt"] = None
-        prepare_overrides["allocations_sabt"] = "raw"
     else:
         sheets["allocations"] = allocations_df
     sheets["updated_pool"] = updated_pool_df

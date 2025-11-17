@@ -7,11 +7,11 @@ from typing import Iterable, Sequence
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from app.core.common.contact_columns import MOBILE_COLUMN_NAMES
+from app.core.common.contact_columns import TEXT_SENSITIVE_COLUMN_NAMES
 
 __all__ = ["ensure_text_columns", "TEXT_COLUMN_NAMES"]
 
-TEXT_COLUMN_NAMES = frozenset(MOBILE_COLUMN_NAMES)
+TEXT_COLUMN_NAMES = frozenset(TEXT_SENSITIVE_COLUMN_NAMES)
 
 
 def ensure_text_columns(
