@@ -67,3 +67,77 @@ def test_prepare_base_rows_accepts_numeric_group_code() -> None:
     assert unseen_groups == []
     assert unmatched_schools == []
     assert base_df.iloc[0]["group_pairs"] == [("یازدهم ریاضی", 27)]
+
+
+def test_prepare_base_rows_ignores_invalid_when_valid_present() -> None:
+    """توکن نامعتبر کنار مقدار معتبر نباید coverage را کاهش دهد."""
+
+    name_to_code, code_to_name, buckets, synonyms = _sample_crosswalk()
+    cfg = BuildConfig()
+    domain_cfg = _as_domain_config(cfg)
+    insp = pd.DataFrame(
+        {
+            COL_MENTOR_ID: ["EMP-1"],
+            COL_MENTOR_NAME: ["پشتیبان الف"],
+            COL_MANAGER_NAME: ["مدیر الف"],
+            "گروه آزمایشی": ["27, نامعتبر"],
+        }
+    )
+
+    base_df, unseen_groups, unmatched_schools = _prepare_base_rows(
+        insp,
+        cfg=cfg,
+        domain_cfg=domain_cfg,
+        name_to_code=name_to_code,
+        code_to_name=code_to_name,
+        buckets=buckets,
+        synonyms=synonyms,
+        school_name_to_code={},
+        code_to_name_school={},
+        group_cols=["گروه آزمایشی"],
+        school_cols=[],
+        gender_col=None,
+        included_col=None,
+    )
+
+    assert unseen_groups == []
+    assert unmatched_schools == []
+    assert base_df.iloc[0]["group_pairs"] == [("یازدهم ریاضی", 27)]
+
+
+def test_prepare_base_rows_reports_unseen_when_no_valid_group() -> None:
+    """وقتی هیچ گروه معتبری نیست، باید unseen_groups ثبت شود."""
+
+    name_to_code, code_to_name, buckets, synonyms = _sample_crosswalk()
+    cfg = BuildConfig()
+    domain_cfg = _as_domain_config(cfg)
+    insp = pd.DataFrame(
+        {
+            COL_MENTOR_ID: ["EMP-2"],
+            COL_MENTOR_NAME: ["پشتیبان ب"],
+            COL_MANAGER_NAME: ["مدیر ب"],
+            "گروه آزمایشی": ["نامعتبر"],
+        }
+    )
+
+    base_df, unseen_groups, unmatched_schools = _prepare_base_rows(
+        insp,
+        cfg=cfg,
+        domain_cfg=domain_cfg,
+        name_to_code=name_to_code,
+        code_to_name=code_to_name,
+        buckets=buckets,
+        synonyms=synonyms,
+        school_name_to_code={},
+        code_to_name_school={},
+        group_cols=["گروه آزمایشی"],
+        school_cols=[],
+        gender_col=None,
+        included_col=None,
+    )
+
+    assert base_df.empty
+    assert unmatched_schools == []
+    assert unseen_groups == [
+        {"group_token": "نامعتبر", "supporter": "پشتیبان ب", "manager": "مدیر ب"}
+    ]
