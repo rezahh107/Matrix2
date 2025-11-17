@@ -241,9 +241,11 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self._prefs = AppPreferences()
-        if self._prefs.language != "en":
-            self._prefs.language = "en"
-        self._translator = UiTranslator("en")
+        self._language = self._prefs.language or "en"
+        if not self._prefs.language:
+            self._prefs.language = self._language
+
+        self._translator = UiTranslator(self._language)
         self.setWindowTitle(self._translator.text("app.title", _EN_TEXT_DEFAULTS["app.title"]))
         self.setMinimumSize(960, 640)
         self.resize(1200, 800)

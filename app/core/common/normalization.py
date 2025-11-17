@@ -648,7 +648,17 @@ def normalize_persian_text(text: Any) -> str:
     """
 
     sanitized = sanitize_bidi(text)
-    return normalize_fa(sanitized)
+    if not sanitized:
+        return ""
+
+    sanitized = unicodedata.normalize("NFKC", sanitized)
+    sanitized = _remove_combining(sanitized)
+    sanitized = _apply_arabic_to_persian_maps(sanitized)
+    sanitized = _apply_allah_special(sanitized)
+    sanitized = _translate_digits_and_symbols_for_text(sanitized)
+    sanitized = sanitized.replace(_ZWNJ, " ")
+    sanitized = _RE_WHITESPACE.sub(" ", sanitized)
+    return sanitized.strip()
 
 
 def normalize_persian_label(text: Any) -> str:
@@ -660,7 +670,7 @@ def normalize_persian_label(text: Any) -> str:
     """
 
     normalized = normalize_persian_text(text)
-    return normalized.strip()
+    return normalized
 
 
 def normalize_ascii_digits(text: Any) -> str:
