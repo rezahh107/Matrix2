@@ -1277,6 +1277,8 @@ def _prepare_base_rows(
         raw_groups = ensure_list([row[c] for c in group_cols]) if group_cols else []
         group_pairs: list[tuple[str, int]] = []
         used_included = False
+        row_unseen_tokens: list[str] = []
+
         if included_col:
             invalid_codes: list[int] = []
             codes = parse_group_code_spec(
@@ -1288,19 +1290,14 @@ def _prepare_base_rows(
                 used_included = True
             for gc in codes:
                 group_pairs.append((code_to_name[gc], gc))
-            for gc in invalid_codes:
-                unseen_groups.append(
-                    {"group_token": f"code:{gc}", "supporter": mentor_name, "manager": manager_name}
-                )
+            row_unseen_tokens.extend(f"code:{gc}" for gc in invalid_codes)
 
         if not used_included:
             expanded: list[tuple[str, int]] = []
             for tok in raw_groups or []:
                 ex = expand_group_token(tok, name_to_code, code_to_name, buckets, synonyms)
                 if not ex:
-                    unseen_groups.append(
-                        {"group_token": str(tok), "supporter": mentor_name, "manager": manager_name}
-                    )
+                    row_unseen_tokens.append(str(tok))
                 expanded.extend(ex)
             seen_codes: set[int] = set()
             for name, code in expanded:
@@ -1309,6 +1306,11 @@ def _prepare_base_rows(
                     seen_codes.add(code)
 
         if not group_pairs:
+            tokens = list(dict.fromkeys(row_unseen_tokens or [""]))
+            for token in tokens:
+                unseen_groups.append(
+                    {"group_token": token, "supporter": mentor_name, "manager": manager_name}
+                )
             continue
 
         mentor_mode = classify_mentor_mode(
