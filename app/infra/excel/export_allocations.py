@@ -223,7 +223,11 @@ def build_sabt_export_frame(
     students_df: pd.DataFrame,
     profile: Sequence[AllocationExportColumn],
 ) -> pd.DataFrame:
-    """ساخت دیتافریم Sabt با join روی student_id و مرتب‌سازی پایدار."""
+    """ساخت دیتافریم Sabt با join روی student_id و مرتب‌سازی پایدار.
+
+    ستون‌های تماس (شامل «وضعیت ثبت نام») از خروجی :func:`enrich_student_contacts`
+    به دانش‌آموزان ضمیمه می‌شود تا وضعیت ثبت‌نام مستقیماً از SSOT خوانده شود.
+    """
 
     if not profile:
         raise ValueError("Sabt export profile is empty")
@@ -266,8 +270,8 @@ def build_sabt_export_frame(
                 series = pd.Series(pd.NA, index=alloc_en.index, dtype="object")
             else:
                 aligned = students_indexed.reindex(student_ids.tolist())
-                values = aligned[resolved].to_numpy()
-                series = pd.Series(values, index=alloc_en.index)
+                series = ensure_series(aligned[resolved]).copy()
+                series.index = alloc_en.index
         else:
             literal = column.literal_value
             series = pd.Series([literal] * len(alloc_en), index=alloc_en.index)
