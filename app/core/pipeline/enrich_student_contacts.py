@@ -12,6 +12,8 @@ from app.core.common.phone_rules import (
     normalize_mobile_series,
 )
 
+_DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
 __all__ = [
     "enrich_student_contacts",
     "CONTACT_POLICY_COLUMNS",
@@ -230,7 +232,8 @@ def enrich_student_contacts(df: pd.DataFrame) -> pd.DataFrame:
 
     status_column = _first_existing(result, _STATUS_CANDIDATES, "student_registration_status")
     _ensure_column(result, status_column)
-    status_numeric = pd.to_numeric(result[status_column], errors="coerce")
+    status_raw = result[status_column].astype("string").str.translate(_DIGIT_TRANSLATION)
+    status_numeric = pd.to_numeric(status_raw, errors="coerce")
     canonical_status_column = "student_registration_status"
     result[canonical_status_column] = status_numeric.astype("Int64")
     if status_column != canonical_status_column:

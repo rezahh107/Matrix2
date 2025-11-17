@@ -998,7 +998,6 @@ def build_sheet2_frame(
                 }
             )
 
-        map_dict = _resolve_map(spec.get("map"), exporter_cfg)
         if map_dict:
             mapped = series.astype("string").map(map_dict)
             series = mapped.fillna(series)
@@ -1048,6 +1047,7 @@ def _normalize_registration_status(series: pd.Series) -> pd.Series:
     """بازگرداندن ستون وضعیت ثبت‌نام با حفظ مقادیر ۰/۱/۳.
 
     این تابع فقط جایگزین امن برای مقادیر خالی است و مقدار موجود را تغییر نمی‌دهد.
+    ارقام فارسی/عربی را به رقم لاتین تبدیل می‌کند تا مقادیر ۳ به درستی شناسایی شوند.
 
     مثال::
         >>> s = pd.Series([0, 3, None])
@@ -1056,7 +1056,9 @@ def _normalize_registration_status(series: pd.Series) -> pd.Series:
     """
 
     normalized = ensure_series(series)
-    numeric = pd.to_numeric(normalized, errors="coerce")
+    as_string = normalized.astype("string")
+    translated = as_string.str.translate(_DIGIT_TRANSLATION).str.strip()
+    numeric = pd.to_numeric(translated, errors="coerce")
     blank_mask = numeric.isna()
     filled = numeric.mask(blank_mask, 0)
     return filled.astype("Int64")
