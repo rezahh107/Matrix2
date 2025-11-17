@@ -20,6 +20,8 @@ from app.core.common.phone_rules import (
 )
 from app.infra.excel._writer import ensure_text_columns
 from app.core.pipeline import (
+    REGISTRATION_STATUS_CANDIDATES,
+    debug_registration_distribution,
     enrich_student_contacts,
 )
 from app.infra.excel.common import attach_contact_columns
@@ -193,9 +195,23 @@ def prepare_allocation_export_frame(
     """ادغام ستون‌های دانش‌آموز و پشتیبان روی دیتافریم تخصیص."""
 
     alloc = canonicalize_headers(allocations_df, header_mode="en").copy()
+    status_debug: list[dict[str, Any]] = []
+
+    def _capture_status(label: str, frame: pd.DataFrame) -> None:
+        status_debug.append(
+            {"label": label, **debug_registration_distribution(frame, REGISTRATION_STATUS_CANDIDATES)}
+        )
+
+    _capture_status("students_raw", students_df)
+
     students_contacts = enrich_student_contacts(students_df)
+    _capture_status("students_contacts", students_contacts)
+
     students = canonicalize_headers(students_df, header_mode="en").copy()
+    _capture_status("students_canonical", students)
+
     students = attach_contact_columns(students, students_contacts)
+    _capture_status("students_with_contacts", students)
     mentors = canonicalize_headers(mentors_df, header_mode="en").copy()
 
     dedupe_logs: list[dict[str, list[str]]] = []
@@ -307,7 +323,10 @@ def prepare_allocation_export_frame(
     merged.index = alloc.index
     if dedupe_logs:
         merged.attrs["dedupe_logs"] = dedupe_logs
+    _capture_status("merged_before_enrich", merged)
     merged = enrich_student_contacts(merged)
+    _capture_status("merged_after_enrich", merged)
+    merged.attrs["registration_status_debug"] = status_debug
     return merged
 
 
@@ -918,7 +937,26 @@ def build_sheet2_frame(
 
     if today is None:
         today = datetime.today()
+    debug_log: list[dict[str, Any]] = []
+
+    existing_debug = df_alloc.attrs.get("registration_status_debug")
+    if isinstance(existing_debug, list):
+        debug_log.extend(existing_debug)
+
+    debug_log.append(
+        {
+            "label": "sheet2_input",
+            **debug_registration_distribution(df_alloc, REGISTRATION_STATUS_CANDIDATES),
+        }
+    )
+
     df_alloc = enrich_student_contacts(df_alloc)
+    debug_log.append(
+        {
+            "label": "sheet2_after_enrich",
+            **debug_registration_distribution(df_alloc, REGISTRATION_STATUS_CANDIDATES),
+        }
+    )
     if "student_registration_status" not in df_alloc.columns:
         df_alloc["student_registration_status"] = pd.Series(
             [pd.NA] * len(df_alloc), index=df_alloc.index, dtype="Int64"
@@ -942,9 +980,40 @@ def build_sheet2_frame(
         series = _apply_normalizers(series, spec.get("normalize"))
 
         if column_name == "وضعیت ثبت نام":
+            debug_log.append(
+                {
+                    "label": "sheet2_status_raw_series",
+                    **debug_registration_distribution(
+                        pd.DataFrame({"candidate": series}), ("candidate",)
+                    ),
+                }
+            )
             series = _normalize_registration_status(series)
+            debug_log.append(
+                {
+                    "label": "sheet2_status_normalized",
+                    **debug_registration_distribution(
+                        pd.DataFrame({"candidate": series}), ("candidate",)
+                    ),
+                }
+            )
+            map_dict = _resolve_map(spec.get("map"), exporter_cfg)
+            if map_dict:
+                numeric_map: dict[int, Any] = {}
+                for key, value in map_dict.items():
+                    try:
+                        numeric_key = int(str(key))
+                    except (TypeError, ValueError):
+                        continue
+                    numeric_map[numeric_key] = value
 
-        map_dict = _resolve_map(spec.get("map"), exporter_cfg)
+                mapped_numeric = series.map(numeric_map)
+                mapped_text = series.astype("string").map(map_dict)
+                series = mapped_numeric.fillna(mapped_text).fillna(series)
+            map_dict = None
+        else:
+            map_dict = _resolve_map(spec.get("map"), exporter_cfg)
+
         if map_dict:
             mapped = series.astype("string").map(map_dict)
             series = mapped.fillna(series)
@@ -986,6 +1055,7 @@ def build_sheet2_frame(
 
     sheet = sheet.astype({column: "string" for column in sheet.columns})
     sheet.attrs["exporter_config"] = exporter_cfg
+    sheet.attrs["registration_status_debug"] = debug_log
     return sheet
 
 
@@ -993,6 +1063,7 @@ def _normalize_registration_status(series: pd.Series) -> pd.Series:
     """بازگرداندن ستون وضعیت ثبت‌نام با حفظ مقادیر ۰/۱/۳.
 
     این تابع فقط جایگزین امن برای مقادیر خالی است و مقدار موجود را تغییر نمی‌دهد.
+    ارقام فارسی/عربی را به رقم لاتین تبدیل می‌کند تا مقادیر ۳ به درستی شناسایی شوند.
 
     مثال::
         >>> s = pd.Series([0, 3, None])
@@ -1001,7 +1072,9 @@ def _normalize_registration_status(series: pd.Series) -> pd.Series:
     """
 
     normalized = ensure_series(series)
-    numeric = pd.to_numeric(normalized, errors="coerce")
+    as_string = normalized.astype("string")
+    translated = as_string.str.translate(_DIGIT_TRANSLATION).str.strip()
+    numeric = pd.to_numeric(translated, errors="coerce")
     blank_mask = numeric.isna()
     filled = numeric.mask(blank_mask, 0)
     return filled.astype("Int64")

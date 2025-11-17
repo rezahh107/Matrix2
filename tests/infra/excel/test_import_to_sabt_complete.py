@@ -226,6 +226,54 @@ class TestRegistrationStatusPreservation:
 
         assert sheet2["وضعیت ثبت نام"].tolist() == ["عادی", "حکمت", "عادی"]
 
+    def test_registration_status_persian_digits(self, exporter_config: dict) -> None:
+        minimal_df = pd.DataFrame(
+            {
+                "student_id": ["s1", "s2"],
+                "mentor_id": [1, 2],
+                "student_first_name": ["الف", "ب"],
+                "student_last_name": ["یک", "دو"],
+                "student_gender": ["M", "F"],
+                "student_registration_status": ["۰", "۳"],
+            }
+        )
+
+        sheet2 = build_sheet2_frame(minimal_df, exporter_config)
+
+        assert sheet2.loc[0, "وضعیت ثبت نام"] == "عادی"
+        assert sheet2.loc[1, "وضعیت ثبت نام"] == "حکمت"
+
+    def test_debug_log_traces_registration_status(
+        self, exporter_config: dict
+    ) -> None:
+        allocations_df = pd.DataFrame({"student_id": ["s1", "s2"], "mentor_id": [1, 2]})
+        students_df = pd.DataFrame(
+            {
+                "student_id": ["s1", "s2"],
+                "student_first_name": ["الف", "ب"],
+                "student_last_name": ["یک", "دو"],
+                "student_gender": ["M", "F"],
+                "وضعیت ثبت نام": [0, 3],
+            }
+        )
+        mentors_df = pd.DataFrame({"mentor_id": [1, 2]})
+
+        prepared = prepare_allocation_export_frame(
+            allocations_df, students_df, mentors_df, student_ids=allocations_df["student_id"]
+        )
+
+        debug_log = prepared.attrs.get("registration_status_debug")
+        assert isinstance(debug_log, list)
+        debug_lookup = {entry.get("label"): entry for entry in debug_log}
+        assert debug_lookup["students_raw"]["threes"] == 1
+        assert debug_lookup["merged_after_enrich"]["zeros"] == 1
+
+        sheet2 = build_sheet2_frame(prepared, exporter_config)
+        sheet_debug = sheet2.attrs.get("registration_status_debug")
+        assert isinstance(sheet_debug, list)
+        sheet_lookup = {entry.get("label"): entry for entry in sheet_debug}
+        assert sheet_lookup["sheet2_status_normalized"]["threes"] == 1
+
 
 class TestDerivedFields:
     def test_city_derived_from_school_code(
