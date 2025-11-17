@@ -8,10 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 import logging
-import re
-from typing import Dict
 
 from PySide6.QtCore import QEasingCurve, QObject, QPropertyAnimation, Qt
 from PySide6.QtGui import QColor, QPalette
@@ -29,7 +26,6 @@ __all__ = [
     "apply_layout_direction",
     "apply_global_font",
     "apply_palette",
-    "load_stylesheet",
     "apply_theme",
     "apply_card_shadow",
     "setup_button_hover_animation",
@@ -212,79 +208,6 @@ def apply_palette(app: QApplication, theme: Theme) -> None:
 
     palette = _create_palette_from_theme(theme)
     app.setPalette(palette)
-
-
-def _token_mapping(theme: Theme) -> Dict[str, str]:
-    return {
-        "background": theme.colors.background,
-        "card": theme.colors.card,
-        "surface_alt": theme.colors.surface_alt,
-        "text": theme.colors.text,
-        "text_muted": theme.colors.text_muted,
-        "primary": theme.colors.primary,
-        "primary_soft": theme.accent_soft,
-        "success": theme.colors.success,
-        "warning": theme.colors.warning,
-        "error": theme.colors.error,
-        "log_background": theme.colors.log_background,
-        "log_foreground": theme.colors.log_foreground,
-        "log_border": theme.colors.log_border,
-        "log_success": theme.colors.log_success,
-        "log_warning": theme.colors.log_warning,
-        "log_error": theme.colors.log_error,
-        "border": theme.colors.border,
-        "font_fa": theme.typography.font_fa_stack,
-        "font_en": theme.typography.font_en_stack,
-        "title_size": str(theme.typography.title_size),
-        "card_title_size": str(theme.typography.card_title_size),
-        "body_size": str(theme.typography.body_size),
-        "spacing_xs": str(theme.spacing_xs),
-        "spacing_sm": str(theme.spacing_sm),
-        "spacing_md": str(theme.spacing_md),
-        "spacing_lg": str(theme.spacing_lg),
-        "radius_sm": str(theme.radius_sm),
-        "radius_md": str(theme.radius_md),
-        "radius_lg": str(theme.radius_lg),
-    }
-
-
-def load_stylesheet(theme: Theme) -> str:
-    """خواندن QSS و جایگذاری ایمن توکن‌های تم.
-
-    - فقط الگوهای {TOKEN} با حروف/عدد/underline جایگزین می‌شوند.
-    - براکت‌های ساختاری CSS (مثلاً ``QWidget {``) دست‌نخورده می‌مانند.
-    - در صورت وجود توکن ناشناخته، خطای واضح ایجاد می‌شود.
-    """
-
-    # NOTE: اعمال QSS در apply_theme فعلاً غیرفعال است؛ این تابع برای استفاده‌های
-    # محلی/آتی نگه داشته شده است.
-    qss_path = Path(__file__).with_name("styles.qss")
-    qss = qss_path.read_text(encoding="utf-8")
-    return _render_stylesheet(qss, _token_mapping(theme))
-
-
-_TOKEN_PATTERN = re.compile(r"\{([A-Za-z0-9_]+)\}")
-
-
-def _render_stylesheet(qss: str, mapping: Dict[str, str]) -> str:
-    """جایگزینی امن توکن‌های `{TOKEN}` در QSS.
-
-    مثال:
-        >>> _render_stylesheet("QWidget { background: {background}; }", {"background": "#fff"})
-        'QWidget { background: #fff; }'
-    """
-
-    placeholders = {match.group(1) for match in _TOKEN_PATTERN.finditer(qss)}
-    missing = sorted(token for token in placeholders if token not in mapping)
-    if missing:
-        missing_str = ", ".join(missing)
-        raise ValueError(f"Unknown stylesheet tokens: {missing_str}")
-
-    def _replace(match: re.Match[str]) -> str:
-        key = match.group(1)
-        return str(mapping[key])
-
-    return _TOKEN_PATTERN.sub(_replace, qss)
 
 
 def _create_palette_from_theme(theme: Theme) -> QPalette:
