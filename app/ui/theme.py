@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
 from app.ui.fonts import create_app_font
 from app.ui.i18n import Language
-from app.ui.effects import DebugDropShadowEffect
+from app.ui.effects import SafeDropShadowEffect
 
 __all__ = [
     "ThemeColors",
@@ -330,7 +330,7 @@ def apply_card_shadow(widget: QWidget) -> None:
         widget: ویجتی که باید سایه بگیرد.
     """
 
-    shadow = DebugDropShadowEffect(
+    shadow = SafeDropShadowEffect(
         f"card_shadow[{widget.objectName() or widget.__class__.__name__}]",
         widget,
     )

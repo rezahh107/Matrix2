@@ -1,8 +1,9 @@
-"""Instrumentation helpers for graphics effects.
+"""افکت‌های گرافیکی ایمن برای سایه و شفافیت."""
 
-Temporary debug utilities to trace QPainter usage in graphics effects.
-"""
+from .debug_effects import (
+    DEBUG_PAINT_EFFECTS,
+    SafeDropShadowEffect,
+    SafeOpacityEffect,
+)
 
-from .debug_effects import DebugDropShadowEffect, DebugOpacityEffect, log_painter_state
-
-__all__ = ["DebugDropShadowEffect", "DebugOpacityEffect", "log_painter_state"]
+__all__ = ["SafeDropShadowEffect", "SafeOpacityEffect", "DEBUG_PAINT_EFFECTS"]

@@ -94,7 +94,7 @@ from .preferences import (
 )
 from .preferences.language_dialog import LanguageDialog
 from .log_panel import LogPanel
-from .effects import DebugOpacityEffect
+from .effects import SafeOpacityEffect
 from .theme import (
     Theme,
     apply_card_shadow,
@@ -395,7 +395,7 @@ class MainWindow(QMainWindow):
         self._progress_caption = QLabel(f"0% | {self._t('status.ready', 'آماده')}")
         self._progress_caption.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._progress_caption.setObjectName("progressCaption")
-        caption_effect = DebugOpacityEffect(
+        caption_effect = SafeOpacityEffect(
             "progress_caption_opacity",
             self._progress_caption,
         )
@@ -649,7 +649,7 @@ class MainWindow(QMainWindow):
         widget = self._tabs.widget(index)
         if widget is None:
             return
-        effect = DebugOpacityEffect(f"tab_change[{widget.objectName() or index}]", widget)
+        effect = SafeOpacityEffect(f"tab_change[{widget.objectName() or index}]", widget)
         widget.setGraphicsEffect(effect)
         logger.debug(
             "tab change effect installed | widget=%s effect=%s index=%s",
