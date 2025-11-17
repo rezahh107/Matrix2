@@ -213,14 +213,30 @@ class AccentSplitterHandle(QSplitterHandle):
         self.update()
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
-        painter = QPainter(self)
-        base_color = self._theme.border if self._theme else QPalette().color(QPalette.ColorRole.Mid)
-        hover_color = self._theme.accent if self._theme else QPalette().color(QPalette.ColorRole.Highlight)
-        painter.fillRect(self.rect(), hover_color if self._hover else base_color)
-        painter.setPen(self._theme.text_muted if self._theme else QPalette().color(QPalette.ColorRole.Text))
-        grip = "⋮" if self.orientation() == Qt.Vertical else "⋯"
-        painter.drawText(self.rect(), Qt.AlignCenter, grip)
-        painter.end()
+        painter = QPainter()
+        if not painter.begin(self):
+            return
+        try:
+            base_color = (
+                self._theme.border
+                if self._theme
+                else QPalette().color(QPalette.ColorRole.Mid)
+            )
+            hover_color = (
+                self._theme.accent
+                if self._theme
+                else QPalette().color(QPalette.ColorRole.Highlight)
+            )
+            painter.fillRect(self.rect(), hover_color if self._hover else base_color)
+            painter.setPen(
+                self._theme.text_muted
+                if self._theme
+                else QPalette().color(QPalette.ColorRole.Text)
+            )
+            grip = "⋮" if self.orientation() == Qt.Vertical else "⋯"
+            painter.drawText(self.rect(), Qt.AlignCenter, grip)
+        finally:
+            painter.end()
 
 
 class AccentSplitter(QSplitter):
