@@ -318,9 +318,6 @@ class MainWindow(QMainWindow):
         self._current_action: str = self._translator.text("status.ready", "آماده")
         self._status_bar: ThemedStatusBar | None = None
         self._excel_loaders: set[ExcelLoader] = set()
-        self._log_line = 0
-        self._log_buffer: list[str] = []
-        self._log: QTextEdit | None = None
         policy_file = resource_path("config", "policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
         exporter_config = resource_path("config", "SmartAlloc_Exporter_Config_v1.json")
