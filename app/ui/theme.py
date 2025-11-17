@@ -17,11 +17,12 @@ from PySide6.QtCore import QEasingCurve, QObject, QPropertyAnimation, Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
-from app.ui.fonts import create_app_font, get_app_font
+from app.ui.fonts import create_app_font
 from app.ui.i18n import Language
 from app.ui.effects import SafeDropShadowEffect
 
 __all__ = [
+    "BASE_FONT_PT",
     "ThemeColors",
     "ThemeTypography",
     "Theme",
@@ -35,6 +36,10 @@ __all__ = [
     "build_theme",
     "apply_theme_mode",
 ]
+
+
+# اندازهٔ پایهٔ فونت برنامه (بدنه): ۹ پوینت.
+BASE_FONT_PT = 9
 
 
 LOGGER = logging.getLogger(__name__)
@@ -58,9 +63,12 @@ class ThemeColors:
     success: str = "#16a34a"
     warning: str = "#f59e0b"
     error: str = "#dc2626"
-    log_background: str = "#edeff3"
-    log_foreground: str = "#111827"
-    log_border: str = "#cfd4dc"
+    log_background: str = "#f6f7fb"
+    log_foreground: str = "#1f2937"
+    log_border: str = "#d5d9e3"
+    log_success: str = "#15803d"
+    log_warning: str = "#b45309"
+    log_error: str = "#b91c1c"
     border: str = "#d1d5db"
     surface_alt: str = "#f3f4f6"
 
@@ -79,7 +87,7 @@ class ThemeTypography:
     font_en_stack: str = "Segoe UI, system-ui, sans-serif"
     title_size: int = 13
     card_title_size: int = 11
-    body_size: int = 9
+    body_size: int = BASE_FONT_PT
 
 
 @dataclass(frozen=True)
@@ -196,7 +204,7 @@ class Theme:
 def apply_global_font(app: QApplication) -> None:
     """اعمال فونت پیش‌فرض برنامه بر اساس وزیر یا تاهوما."""
 
-    app.setFont(get_app_font())
+    app.setFont(create_app_font(point_size=BASE_FONT_PT))
 
 
 def apply_palette(app: QApplication, theme: Theme) -> None:
@@ -221,6 +229,9 @@ def _token_mapping(theme: Theme) -> Dict[str, str]:
         "log_background": theme.colors.log_background,
         "log_foreground": theme.colors.log_foreground,
         "log_border": theme.colors.log_border,
+        "log_success": theme.colors.log_success,
+        "log_warning": theme.colors.log_warning,
+        "log_error": theme.colors.log_error,
         "border": theme.colors.border,
         "font_fa": theme.typography.font_fa_stack,
         "font_en": theme.typography.font_en_stack,
@@ -305,7 +316,7 @@ def apply_theme(app: QApplication, theme: Theme | str | None = None) -> Theme:
     """
 
     app.setStyle("Fusion")
-    app.setFont(get_app_font())
+    apply_global_font(app)
     app.setStyleSheet("")
 
     if isinstance(theme, Theme):
@@ -411,6 +422,9 @@ def build_theme(mode: str | None = None) -> Theme:
             log_background="#171717",
             log_foreground="#e5e7eb",
             log_border="#0f172a",
+            log_success="#22c55e",
+            log_warning="#f59e0b",
+            log_error="#f87171",
             border="#3a3a3a",
             surface_alt="#353535",
         )
