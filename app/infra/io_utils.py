@@ -144,6 +144,7 @@ def _coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
             result[label] = subset
         else:
             filled = subset.bfill(axis=1)
+            filled = filled.infer_objects(copy=False)
             result[label] = filled.iloc[:, 0]
     return result
 
