@@ -7,6 +7,7 @@ import pandas as pd
 from app.core.allocate_students import _normalize_students
 from app.core.common.columns import CANON_EN_TO_FA
 from app.core.policy_loader import load_policy
+from app.core.build_matrix import build_school_maps, _detect_school_lookup_mismatches, BuildConfig
 
 
 def _base_student_frame(values: list[str | None]) -> pd.DataFrame:
@@ -54,3 +55,39 @@ def test_school_status_false_for_zero_or_empty() -> None:
         assert norm_values[1] == 0
     else:
         assert pd.isna(norm_values[1])
+
+
+def test_build_school_maps_normalizes_codes_and_names() -> None:
+    cfg = BuildConfig()
+    schools_df = pd.DataFrame(
+        {
+            "کد مدرسه": ["00123", "0456"],
+            "نام مدرسه": ["مدرسه الف", "مدرسه ب"],
+            "نام مدرسه انگلیسی": ["Alpha", "Beta"],
+        }
+    )
+
+    code_to_name, name_to_code = build_school_maps(schools_df, cfg=cfg)
+
+    assert code_to_name == {"123": "مدرسه الف", "456": "مدرسه ب"}
+    assert name_to_code["مدرسه الف"] == "123"
+    assert name_to_code["مدرسه ب"] == "456"
+
+    insp = pd.DataFrame(
+        {
+            CANON_EN_TO_FA["school_code"]: ["00123", "456", "مدرسه ب"],
+            "پشتیبان": ["a", "b", "c"],
+            "مدیر": ["m1", "m2", "m3"],
+        }
+    )
+
+    issues, count, refs = _detect_school_lookup_mismatches(
+        insp,
+        school_columns=[CANON_EN_TO_FA["school_code"]],
+        code_to_name_school=code_to_name,
+        school_name_to_code=name_to_code,
+    )
+
+    assert count == 0
+    assert refs == 3
+    assert issues.empty
