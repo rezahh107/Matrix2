@@ -89,12 +89,12 @@ class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
         )
         if pixmap.isNull():
             self._log("draw.skip(null_pixmap)", painter)
+            self.drawSource(painter)
             return
 
         self._log("draw.begin", painter)
         painter.save()
         try:
-            painter.setWorldTransform(QTransform())
             painter.setOpacity(self.opacity())
             painter.drawPixmap(offset, pixmap)
         finally:
@@ -120,6 +120,7 @@ class SafeDropShadowEffect(_LoggingMixin, QGraphicsDropShadowEffect):
         )
         if pixmap.isNull():
             self._log("draw.skip(null_pixmap)", painter)
+            self.drawSource(painter)
             return
 
         self._log("draw.begin", painter)
