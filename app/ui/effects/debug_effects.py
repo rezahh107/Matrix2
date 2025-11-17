@@ -56,7 +56,7 @@ class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
 
     def __init__(self, effect_name: str, parent: Any | None = None) -> None:
         super().__init__(parent)
-        object.__setattr__(self, "_effect_meta", _EffectMeta(effect_name))
+        self._effect_meta = _EffectMeta(effect_name)
 
     def draw(self, painter: QPainter) -> None:  # type: ignore[override]
         if not painter.isActive():
@@ -86,7 +86,7 @@ class SafeDropShadowEffect(_LoggingMixin, QGraphicsDropShadowEffect):
 
     def __init__(self, effect_name: str, parent: Any | None = None) -> None:
         super().__init__(parent)
-        object.__setattr__(self, "_effect_meta", _EffectMeta(effect_name))
+        self._effect_meta = _EffectMeta(effect_name)
 
     def _build_shadow_image(self, pixmap: QPixmap, radius: float, offset: QPointF, color: QColor) -> QImage:
         margin = int(radius * 2)
