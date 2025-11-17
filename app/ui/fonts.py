@@ -63,7 +63,7 @@ def _iter_windows_sources() -> Iterable[List[Path]]:
         if candidate.is_file():
             yield [candidate]
         else:
-            fonts = sorted(candidate.glob("Vazir*.ttf"))
+            fonts = sorted(candidate.rglob("Vazir*.ttf"))
             if fonts:
                 yield fonts
 
