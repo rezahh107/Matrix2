@@ -5,7 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLineEdit, QPushButton, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QFileIconProvider,
+    QFileInfo,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QWidget,
+)
 
 __all__ = ["FilePicker"]
 
@@ -24,17 +35,29 @@ class FilePicker(QWidget):
         super().__init__(parent)
         self._save = save
         self._dialog_filter = dialog_filter
+        self._icon_provider = QFileIconProvider()
 
         self._edit = QLineEdit(self)
         self._edit.setPlaceholderText(placeholder)
+        self._edit.textChanged.connect(self._sync_icon)
 
         self._button = QPushButton("انتخاب…", self)
+        self._button.setObjectName("secondaryButton")
         self._button.clicked.connect(self._pick)
+
+        self._icon_label = QLabel(self)
+        self._icon_label.setObjectName("fileIconLabel")
+        self._icon_label.setFixedWidth(20)
+        self._icon_label.setAlignment(Qt.AlignCenter)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self._icon_label)
         layout.addWidget(self._edit)
         layout.addWidget(self._button)
+
+        self._sync_icon("")
 
     def set_placeholder_text(self, text: str) -> None:
         """تنظیم placeholder فیلد ورودی."""
@@ -76,3 +99,14 @@ class FilePicker(QWidget):
 
         if path:
             self._edit.setText(path)
+
+    def _sync_icon(self, text: str) -> None:
+        """همگام‌سازی آیکون فایل بر اساس مسیر فعلی."""
+
+        if not text:
+            self._icon_label.setText("📁")
+            return
+        info = QFileInfo(text)
+        icon: QIcon = self._icon_provider.icon(info)
+        self._icon_label.clear()
+        self._icon_label.setPixmap(icon.pixmap(16, 16))
