@@ -77,7 +77,21 @@ def _get_style_strategy_flags(*names: str) -> int:
         except AttributeError:
             LOGGER.debug("StyleStrategy.%s در این نسخه یافت نشد", name)
             continue
-        flags |= int(value)
+        try:
+            flags |= int(value)
+            continue
+        except TypeError:
+            pass
+
+        raw_value = getattr(value, "value", None)
+        if isinstance(raw_value, int):
+            flags |= raw_value
+            continue
+
+        try:
+            flags |= int(raw_value)
+        except Exception:  # pragma: no cover - صرفاً برای سازگاری نسخه‌ها
+            LOGGER.debug("StyleStrategy.%s قابل تبدیل به int نبود", name)
     return flags
 
 
