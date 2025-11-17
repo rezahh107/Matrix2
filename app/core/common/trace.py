@@ -239,6 +239,38 @@ def _initial_stage_flags() -> dict[TraceStageLiteral, bool]:
     return {stage: False for stage in CANONICAL_TRACE_ORDER}
 
 
+def _extract_student_fields(student: Mapping[str, object]) -> dict[str, object]:
+    """استخراج فیلدهای اصلی دانش‌آموز برای گزارش‌گیری summary_df.
+
+    ستون‌های زیر (در صورت وجود) با کلیدهای ثابت ذخیره می‌شوند تا در summary_df
+    و خروجی‌های دیباگ از بین نروند:
+
+    - ``student_educational_status`` / «وضعیت تحصیلی»
+    - ``student_registration_status`` / «وضعیت ثبت نام»
+    - ``student_national_code`` / «کدملی»
+    - ``student_first_name`` / ``student_last_name``
+
+    هر کلید به صورت اولین مقدار غیرخالی در بین برچسب‌های هم‌معنی پر می‌شود.
+    """
+
+    field_map: dict[str, object] = {}
+
+    def _copy_first(target: str, *candidates: str) -> None:
+        for label in candidates:
+            value = student.get(label)
+            if value is not None and value is not pd.NA:
+                field_map.setdefault(target, value)
+                break
+
+    _copy_first("student_educational_status", "student_educational_status", "وضعیت تحصیلی")
+    _copy_first("student_registration_status", "student_registration_status", "وضعیت ثبت نام")
+    _copy_first("student_national_code", "student_national_code", "کدملی", "کد ملی")
+    _copy_first("student_first_name", "first_name", "نام")
+    _copy_first("student_last_name", "family_name", "نام خانوادگی")
+
+    return field_map
+
+
 def _stage_flags_from_counts(
     stage_counts: Mapping[str, int] | None,
     *,
@@ -432,7 +464,18 @@ def summarize_trace_outcome(
     *,
     policy: PolicyConfig | None = None,
 ) -> TraceOutcome:
-    """استخراج وضعیت نهایی تخصیص از روی تریس و لاگ."""
+    """استخراج وضعیت نهایی تخصیص از روی تریس و لاگ.
+
+    خروجی این تابع در نهایت به ``summary_df`` تبدیل می‌شود که یک ردیف
+    برای هر دانش‌آموز دارد و ستون‌های زیر را تضمین می‌کند:
+
+    - شناسه و وضعیت نهایی: ``student_id``, ``final_status``, ``failure_stage``, ``final_reason``
+    - شمارنده‌های کاندیدا: ``candidate_count``, ``has_candidates``,
+      ``capacity_candidate_count``، ``stage_candidate_counts``
+    - کلیدهای join شش‌گانه‌ی Policy و ستون‌های مرحله‌ای (gender/center/...)
+    - فلگ‌های عبور مرحله: ``passed_<stage>`` برای هر یک از ۸ مرحلهٔ استاندارد
+    - متادیتای دانش‌آموز: وضعیت تحصیلی/ثبت‌نام/کدملی در صورت موجود بودن.
+    """
 
     if policy is None:
         policy = load_policy()
@@ -510,6 +553,8 @@ def summarize_trace_outcome(
         if column not in metadata:
             metadata[column] = student.get(column)
 
+    metadata.update(_extract_student_fields(student))
+
     metadata["candidate_count"] = candidate_count
     metadata["stage_candidate_counts"] = dict(stage_counts)
     metadata["rule_reason_code"] = rule_reason_code
@@ -534,7 +579,12 @@ def find_allocation_policy_violations(
     policy: PolicyConfig | None = None,
     capacity_column: str | None = None,
 ) -> pd.DataFrame:
-    """جستجوی موارد مغایر با سیاست: ظرفیت مثبت ولی تخصیص‌نیافته."""
+    """جستجوی موارد مغایر با سیاست: ظرفیت مثبت ولی تخصیص‌نیافته.
+
+    خروجی شامل همان ستون‌های ``summary_df`` برای دانش‌آموزان است که
+    کلیدهای join برابر و ظرفیت استخرشان (بر اساس حداکثر ظرفیت گروه) مثبت است
+    اما ``final_status`` آن‌ها «ALLOCATED» نیست و از نوع «RULE_EXCLUDED» هم نیست.
+    """
 
     if policy is None:
         policy = load_policy()
@@ -543,14 +593,19 @@ def find_allocation_policy_violations(
     for column in required_columns:
         if column not in pool_df.columns:
             raise KeyError(f"Pool missing required column for violation check: {column}")
+    pool_slice = pool_df[list(policy.join_keys) + [capacity_col]].copy()
+    for key in policy.join_keys:
+        pool_slice[key] = pd.to_numeric(pool_slice[key], errors="coerce")
+
+    summary_slice = summary_df.copy()
+    for key in policy.join_keys:
+        if key in summary_slice.columns:
+            summary_slice[key] = pd.to_numeric(summary_slice[key], errors="coerce")
+
     capacity_by_keys = (
-        pool_df[list(policy.join_keys) + [capacity_col]]
-        .copy()
-        .groupby(list(policy.join_keys))[capacity_col]
-        .max()
-        .reset_index()
+        pool_slice.groupby(list(policy.join_keys))[capacity_col].max().reset_index()
     )
-    merged = summary_df.merge(
+    merged = summary_slice.merge(
         capacity_by_keys,
         how="left",
         on=policy.join_keys,
@@ -566,7 +621,11 @@ def find_allocation_policy_violations(
 def build_unallocated_summary(
     summary_df: pd.DataFrame, *, policy: PolicyConfig | None = None
 ) -> pd.DataFrame:
-    """خلاصهٔ فشردهٔ دانش‌آموزان تخصیص‌نیافته برای دیباگ."""
+    """خلاصهٔ فشردهٔ دانش‌آموزان تخصیص‌نیافته برای دیباگ.
+
+    ستون‌های پایه (شناسه، FinalStatus، دلایل و شمارنده‌ها) را به‌همراه کلیدهای
+    join و فلگ‌های «passed_» برمی‌گرداند تا در شیت‌های تشخیصی استفاده شود.
+    """
 
     if policy is None:
         policy = load_policy()
@@ -593,6 +652,15 @@ def build_unallocated_summary(
     ):
         if extra in summary_df.columns and extra not in base_columns:
             base_columns.append(extra)
+    for column in (
+        "student_registration_status",
+        "student_educational_status",
+        "student_national_code",
+        "student_first_name",
+        "student_last_name",
+    ):
+        if column in summary_df.columns and column not in base_columns:
+            base_columns.append(column)
     for column in summary_df.columns:
         if column.startswith("student_educational") and column not in base_columns:
             base_columns.append(column)

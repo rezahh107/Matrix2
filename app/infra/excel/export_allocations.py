@@ -24,6 +24,7 @@ __all__ = [
     "AllocationExportColumn",
     "load_sabt_export_profile",
     "build_sabt_export_frame",
+    "collect_trace_debug_sheets",
     "export_sabt_excel",
     "DEFAULT_SABT_PROFILE_PATH",
 ]
@@ -237,10 +238,44 @@ def _resolve_fallback_student_column(
     return None
 
 
+def _enrich_students_with_summary(
+    students_en: pd.DataFrame, summary_df: pd.DataFrame | None
+) -> pd.DataFrame:
+    """ادغام فیلدهای هویتی از ``summary_df`` روی دیتافریم دانش‌آموزان."""
+
+    if summary_df is None or summary_df.empty or "student_id" not in summary_df.columns:
+        return students_en
+    summary_en = canonicalize_headers(summary_df, header_mode="en")
+    if "student_id" not in summary_en.columns:
+        return students_en
+    summary_en = summary_en.drop_duplicates("student_id", keep="first").copy()
+    summary_indexed = summary_en.set_index("student_id", drop=False)
+    students_indexed = students_en.set_index("student_id", drop=False)
+
+    for column in (
+        "student_educational_status",
+        "student_registration_status",
+        "student_national_code",
+        "student_first_name",
+        "student_last_name",
+    ):
+        if column in summary_indexed.columns:
+            aligned = summary_indexed[column].reindex(students_indexed.index)
+            base = (
+                students_indexed[column]
+                if column in students_indexed.columns
+                else pd.Series(pd.NA, index=students_indexed.index)
+            )
+            students_indexed[column] = base.where(base.notna(), aligned)
+    return students_indexed.reset_index(drop=True)
+
+
 def build_sabt_export_frame(
     allocation_df: pd.DataFrame,
     students_df: pd.DataFrame,
     profile: Sequence[AllocationExportColumn],
+    *,
+    summary_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """ساخت دیتافریم Sabt با join روی student_id و مرتب‌سازی پایدار.
 
@@ -255,6 +290,8 @@ def build_sabt_export_frame(
     students_contacts = enrich_student_contacts(students_df)
     students_en = canonicalize_headers(students_df, header_mode="en").copy()
     students_en = attach_contact_columns(students_en, students_contacts)
+    if "student_id" in students_en.columns:
+        students_en = _enrich_students_with_summary(students_en, summary_df)
 
     if "student_id" not in alloc_en.columns:
         raise KeyError("allocation_df must include 'student_id' column")
@@ -307,6 +344,39 @@ def build_sabt_export_frame(
     return export_df
 
 
+def collect_trace_debug_sheets(trace_df: pd.DataFrame | None) -> dict[str, pd.DataFrame]:
+    """ساخت شیت‌های تشخیصی از تریس برای خروجی Excel بدون تغییر رفتار اصلی.
+
+    اگر ``trace_df.attrs`` شامل ``summary_df``، ``unallocated_summary`` یا
+    ``policy_violations`` باشد، آن‌ها را در یک دیکشنری با کلیدهای ایمن برمی‌گرداند
+    تا توسط :func:`write_xlsx_atomic` روی شیت‌های مجزا (summary_df،
+    unallocated_summary، policy_violations، FinalStatus_counts) نوشته شوند.
+    """
+
+    if trace_df is None:
+        return {}
+
+    sheets: dict[str, pd.DataFrame] = {}
+    summary_df = trace_df.attrs.get("summary_df")
+    if isinstance(summary_df, pd.DataFrame) and not summary_df.empty:
+        sheets["summary_df"] = summary_df.copy()
+        value_counts = trace_df.attrs.get("final_status_counts")
+        if hasattr(value_counts, "reset_index"):
+            counts_df = value_counts.reset_index()
+            counts_df.columns = ["final_status", "count"]
+            sheets["FinalStatus_counts"] = counts_df
+
+    unallocated_summary = trace_df.attrs.get("unallocated_summary")
+    if isinstance(unallocated_summary, pd.DataFrame) and not unallocated_summary.empty:
+        sheets["unallocated_summary"] = unallocated_summary.copy()
+
+    policy_violations = trace_df.attrs.get("policy_violations")
+    if isinstance(policy_violations, pd.DataFrame) and not policy_violations.empty:
+        sheets["policy_violations"] = policy_violations.copy()
+
+    return sheets
+
+
 def export_sabt_excel(
     allocation_df: pd.DataFrame,
     students_df: pd.DataFrame,
@@ -315,11 +385,14 @@ def export_sabt_excel(
     *,
     sheet_name: str = "Sabt",
     extra_sheets: Mapping[str, pd.DataFrame] | None = None,
+    summary_df: pd.DataFrame | None = None,
 ) -> Path:
     """نوشتن خروجی Sabt در فایل Excel مستقل با ساختار پایدار."""
 
     profile = load_sabt_export_profile(profile_path or DEFAULT_SABT_PROFILE_PATH)
-    export_df = build_sabt_export_frame(allocation_df, students_df, profile)
+    export_df = build_sabt_export_frame(
+        allocation_df, students_df, profile, summary_df=summary_df
+    )
     sheets: dict[str, pd.DataFrame] = {sheet_name: export_df}
     if extra_sheets:
         sheets.update(extra_sheets)

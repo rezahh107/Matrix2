@@ -36,6 +36,7 @@ from app.infra.excel_writer import write_selection_reasons_sheet
 from app.infra.excel.export_allocations import (
     DEFAULT_SABT_PROFILE_PATH,
     build_sabt_export_frame,
+    collect_trace_debug_sheets,
     load_sabt_export_profile,
 )
 from app.infra.excel.import_to_sabt import (
@@ -1173,6 +1174,7 @@ def _allocate_and_write(
             allocations_df,
             students_for_export,
             profile=sabt_profile,
+            summary_df=trace_df.attrs.get("summary_df"),
         )
 
     # --- پاک‌سازی جامع خروجی قبل از نوشتن ---
@@ -1232,6 +1234,11 @@ def _allocate_and_write(
     sheets["logs"] = logs_df
     sheets["trace"] = trace_df
     sheets[sheet_name] = selection_reasons_df
+
+    debug_sheets = collect_trace_debug_sheets(trace_df)
+    for name, df in debug_sheets.items():
+        sheets[name] = _make_excel_safe(df)
+        header_overrides[name] = None
 
     header_internal = policy.excel.header_mode_internal
     prepared_sheets: dict[str, pd.DataFrame] = {}

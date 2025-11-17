@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+import pandas as pd
+
 from app.core.allocate_students import allocate_batch
 from app.core.common.trace import FinalStatus, find_allocation_policy_violations
 from app.core.policy_loader import load_policy
