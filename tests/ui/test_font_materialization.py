@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("PySide6.QtGui", reason="PySide6 not available in test environment")
+
 from app.ui import fonts
+from PySide6.QtGui import QFont
 
 
 def test_embedded_vazirmatn_materialized(tmp_path, monkeypatch):
@@ -21,3 +26,12 @@ def test_embedded_vazirmatn_materialized(tmp_path, monkeypatch):
     fonts.ensure_vazir_local_fonts()
     files_again = list(fonts_dir.glob("*.ttf"))
     assert files_again == files
+
+
+def test_create_app_font_defaults_to_antialias_and_size(monkeypatch):
+    monkeypatch.setattr(fonts, "load_vazir_font", lambda point_size=None: None)
+
+    font = fonts.create_app_font()
+
+    assert font.pointSize() == fonts.DEFAULT_POINT_SIZE
+    assert font.styleStrategy() == QFont.StyleStrategy.PreferAntialias
