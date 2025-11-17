@@ -15,6 +15,8 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsEffect, QGraphicsOpacityEffect
 
+from app.ui.utils import painter_state
+
 LOGGER = logging.getLogger(__name__)
 DEBUG_PAINT_EFFECTS = False
 
@@ -111,12 +113,11 @@ class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
             return
 
         self._log("draw.begin", painter)
-        painter.save()
         try:
-            painter.setOpacity(self.opacity())
-            painter.drawPixmap(offset, pixmap)
+            with painter_state(painter):
+                painter.setOpacity(self.opacity())
+                painter.drawPixmap(offset, pixmap)
         finally:
-            painter.restore()
             self._log("draw.end", painter)
 
 
@@ -142,9 +143,9 @@ class SafeDropShadowEffect(_LoggingMixin, QGraphicsDropShadowEffect):
             return
 
         self._log("draw.begin", painter)
-        painter.save()
         try:
-            painter.setWorldTransform(QTransform())
-            super().draw(painter)
+            with painter_state(painter):
+                painter.setWorldTransform(QTransform())
+                super().draw(painter)
         finally:
             self._log("draw.end", painter)
