@@ -286,10 +286,17 @@ def setup_application() -> QApplication:
         app = QApplication.instance()
         if app is None:
             app = QApplication(sys.argv)
-        
-        # فعال‌سازی High DPI با fallback
-        app.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
-        app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+
+        # فعال‌سازی High DPI با fallback روی نسخه‌های جدیدتر Qt
+        for attr in (
+            "AA_EnableHighDpiScaling",
+            "AA_UseHighDpiPixmaps",
+        ):
+            value = getattr(Qt.ApplicationAttribute, attr, None)
+            if value is None:
+                logger.debug("ApplicationAttribute.%s در این نسخه موجود نیست", attr)
+                continue
+            app.setAttribute(value, True)
         
         # تنظیمات برنامه
         app.setApplicationName("AllocationApp")

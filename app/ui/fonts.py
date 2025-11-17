@@ -48,6 +48,60 @@ DEBUG_LOG_ENV = "MATRIX_FONT_LOG"
 _FONT_DEBUG_HANDLER: logging.Handler | None = None
 
 
+def _get_style_strategy_flags(*names: str) -> int:
+    """دریافت OR ایمن از مقادیر StyleStrategy در دسترس.
+
+    پارامترها:
+        names: نام ویژگی‌های ``QFont.StyleStrategy`` که باید ترکیب شوند.
+
+    بازگشت:
+        عدد صحیح حاصل از OR مقادیر موجود. اگر یکی از پرچم‌ها در نسخهٔ
+        فعلی PySide6/Qt موجود نباشد، نادیده گرفته می‌شود تا از وقوع
+        ``AttributeError`` جلوگیری شود.
+
+    مثال::
+        >>> from PySide6.QtGui import QFont  # doctest: +SKIP
+        >>> _get_style_strategy_flags("PreferAntialias", "PreferQuality")  # doctest: +SKIP
+        <int مقدار پرچم‌ها>
+    """
+
+    try:
+        from PySide6.QtGui import QFont
+    except Exception:  # pragma: no cover - در نبود PySide6 فقط صفر بازمی‌گردد
+        return 0
+
+    def _to_int(flag: object) -> int | None:
+        try:
+            return int(flag)
+        except TypeError:
+            pass
+        try:
+            value = getattr(flag, "value")
+        except Exception:
+            return None
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    flags = 0
+    for name in names:
+        try:
+            value = getattr(QFont.StyleStrategy, name)
+        except AttributeError:
+            LOGGER.debug("StyleStrategy.%s در این نسخه یافت نشد", name)
+            continue
+
+        coerced = _to_int(value)
+        if coerced is None:
+            LOGGER.debug("عدم امکان تبدیل StyleStrategy.%s به int", name)
+            continue
+
+        flags |= coerced
+
+    return flags
+
+
 def _init_font_debug_log() -> None:
     """فعال‌سازی لاگ فایل در صورت ست شدن متغیر محیطی.
 
@@ -307,11 +361,50 @@ def create_app_font(
         vazir_font.setWeight(_resolve_weight())
         return _with_antialias(vazir_font)
 
-    family = (fallback_family and fallback_family.strip()) or FALLBACK_FAMILY
+    family = _select_fallback_family(fallback_family)
     LOGGER.debug("استفاده از فونت جایگزین %s", family)
     fallback = QFont(family, size)
     fallback.setWeight(_resolve_weight())
     return _with_antialias(fallback)
+
+
+def _select_fallback_family(preferred: str | None) -> str:
+    """انتخاب خانوادهٔ جایگزین به‌صورت قابل پیش‌بینی و سازگار.
+
+    پارامترها:
+        preferred: نام خانوادهٔ پیشنهادی که توسط Caller ارسال شده است.
+
+    بازگشت:
+        اولین خانوادهٔ موجود از میان گزینه‌های ارائه‌شده؛ در صورت عدم دسترسی
+        به PySide6 یا بانک فونت، همان مقدار پیشنهادی یا ``FALLBACK_FAMILY``
+        بازگردانده می‌شود.
+
+    مثال::
+        >>> _select_fallback_family("Segoe UI")  # doctest: +SKIP
+        'Segoe UI'
+    """
+
+    candidates: list[str] = []
+    if preferred:
+        preferred = preferred.strip()
+        if preferred:
+            candidates.append(preferred)
+    candidates.extend([FALLBACK_FAMILY, "Segoe UI", "Arial"])
+
+    try:
+        from PySide6.QtGui import QFontDatabase
+
+        families = set(QFontDatabase().families())
+        for name in candidates:
+            if name in families:
+                return name
+    except Exception:
+        LOGGER.debug("عدم دسترسی به QFontDatabase برای انتخاب fallback")
+
+    for name in candidates:
+        if name:
+            return name
+    return FALLBACK_FAMILY
 
 
 def get_app_font(point_size: int | None = None) -> "QFont":
@@ -377,15 +470,39 @@ def apply_default_font(
 
 
 def _with_antialias(font: "QFont") -> "QFont":
+    """اعمال استراتژی ضد‌الیاسینگ با رعایت سازگاری نسخه‌ای.
+
+    در صورتی که برخی پرچم‌های StyleStrategy یا HintingPreference در نسخهٔ
+    فعلی PySide6/Qt موجود نباشند، از آنها صرف نظر می‌شود تا راه‌اندازی
+    برنامه در نسخه‌های قدیمی‌تر نیز بدون خطا ادامه یابد.
+    """
+
     from PySide6.QtGui import QFont
 
-    strategy = (
-        QFont.StyleStrategy.PreferAntialias
-        | QFont.StyleStrategy.PreferFullHinting
-        | QFont.StyleStrategy.PreferQuality
+    strategy = _get_style_strategy_flags(
+        "PreferAntialias",
+        "PreferFullHinting",
+        "PreferQuality",
     )
-    font.setStyleStrategy(strategy)
-    font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+    if strategy:
+        try:
+            font.setStyleStrategy(QFont.StyleStrategy(strategy))
+        except Exception:
+            font.setStyleStrategy(strategy)
+
+    hinting_candidates = [
+        "PreferFullHinting",
+        "PreferVerticalHinting",
+        "PreferDefaultHinting",
+    ]
+    for candidate in hinting_candidates:
+        preference = getattr(QFont.HintingPreference, candidate, None)
+        if preference is None:
+            LOGGER.debug("HintingPreference.%s در دسترس نیست", candidate)
+            continue
+        font.setHintingPreference(preference)
+        break
+
     return font
 
 
