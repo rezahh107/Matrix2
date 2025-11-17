@@ -103,5 +103,5 @@ def normalize_mobile_series_for_export(series: pd.Series) -> pd.Series:
     """
 
     normalized = series.astype("object").map(normalize_mobile)
-    result = pd.Series(normalized, index=series.index, dtype="string")
-    return result
+    # normalize_mobile already returns 11-digit strings when valid; no extra padding needed.
+    return pd.Series(normalized, index=series.index, dtype="string")
