@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from string import Formatter
 from typing import Dict
 
 from PySide6.QtCore import QEasingCurve, QObject, QPropertyAnimation
@@ -242,34 +241,7 @@ def load_stylesheet(theme: Theme) -> str:
 
     qss_path = Path(__file__).with_name("styles.qss")
     qss = qss_path.read_text(encoding="utf-8")
-    return _inject_tokens(qss, _token_mapping(theme))
-
-
-def _inject_tokens(qss: str, tokens: Dict[str, str]) -> str:
-    """جایگذاری امن توکن‌ها بدون درگیر شدن با آکولادهای QSS.
-
-    این تابع به‌جای ``str.format`` از جایگزینی ساده استفاده می‌کند تا آکولادهای
-    بلاکی QSS (``{`` و ``}``) به‌اشتباه به‌عنوان placeholder تفسیر نشوند.
-
-    پارامترها:
-        qss: متن خام QSS.
-        tokens: نگاشت کلید به مقدار برای جایگذاری.
-
-    مثال:
-        >>> sample = "QWidget { background: {background}; }"
-        >>> _inject_tokens(sample, {"background": "#fff"})
-        'QWidget { background: #fff; }'
-    """
-
-    for key, value in tokens.items():
-        qss = qss.replace(f"{{{key}}}", value)
-
-    unresolved = [field for _, field, _, _ in Formatter().parse(qss) if field]
-    if unresolved:
-        missing = ", ".join(unresolved)
-        raise KeyError(f"unresolved stylesheet tokens: {missing}")
-
-    return qss
+    return qss.format(**_token_mapping(theme))
 
 
 def apply_theme(app: QApplication, theme: Theme | None = None) -> Theme:
