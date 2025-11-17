@@ -23,9 +23,24 @@ __all__ = [
 ]
 
 _CODE_HEADER_KEYWORDS = ("کد", "شماره", "رهگیری", "قبض")
-_CODE_FIELD_HINTS = frozenset(
-    normalize_fa(value)
-    for value in (
+
+
+def _code_field_hints(values: Iterable[str]) -> frozenset[str]:
+    """تولید مجموعهٔ کلیدواژه‌های کد با پشتیبانی از فارسی و معادل انگلیسی."""
+
+    hints: set[str] = set()
+    for value in values:
+        normalized = normalize_fa(value)
+        ascii_hint = str(value).strip().lower()
+        if normalized:
+            hints.add(normalized)
+        if ascii_hint:
+            hints.add(ascii_hint)
+    return frozenset(hints)
+
+
+_CODE_FIELD_HINTS = _code_field_hints(
+    (
         "mentor_id",
         "mentor_alias_code",
         "student_id",
@@ -46,7 +61,10 @@ _CODE_FIELD_HINTS = frozenset(
 def _normalize_hint(value: str | None) -> str:
     """نرمال‌سازی متن برای مقایسهٔ ستونی."""
 
-    return normalize_fa(value or "").strip()
+    hint = normalize_fa(value or "").strip()
+    if hint:
+        return hint
+    return str(value or "").strip().lower()
 
 
 def identify_code_headers(
@@ -60,7 +78,10 @@ def identify_code_headers(
             continue
         header_hint = _normalize_hint(column.header)
         field_hint = _normalize_hint(column.source_field)
-        if field_hint in _CODE_FIELD_HINTS or header_hint in _CODE_FIELD_HINTS:
+        if field_hint and field_hint in _CODE_FIELD_HINTS:
+            headers.add(column.header)
+            continue
+        if header_hint and header_hint in _CODE_FIELD_HINTS:
             headers.add(column.header)
             continue
         if any(keyword in header_hint for keyword in _CODE_HEADER_KEYWORDS):

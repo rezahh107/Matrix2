@@ -57,6 +57,16 @@ def _expand_with_student_prefix(candidates: Iterable[str]) -> tuple[str, ...]:
     return tuple(expanded)
 
 
+def _unique_preserve(items: Sequence[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            unique.append(item)
+    return tuple(unique)
+
+
 _STUDENT_MOBILE_CANDIDATES: tuple[str, ...] = (
     "student_mobile",
     "student_mobile_raw",
@@ -93,29 +103,33 @@ _LANDLINE_CANDIDATES: tuple[str, ...] = (
     *_optional_names(CANON_EN_TO_FA.get("student_landline")),
     *_alias_names("student_landline"),
 )
-_STATUS_EXTRA: tuple[str, ...] = _optional_names(
-    CANON_EN_TO_FA.get("student_registration_status"),
-    CANON_EN_TO_FA.get("finance"),
-    *_alias_names("student_registration_status"),
-    "registration_status",
-)
-_TRACKING_EXTRA: tuple[str, ...] = _optional_names(
-    CANON_EN_TO_FA.get("hekmat_tracking"),
-    *_alias_names("hekmat_tracking"),
-)
-_STATUS_CANDIDATES: tuple[str, ...] = (
-    *_expand_with_student_prefix(
+_STATUS_PRIMARY: tuple[str, ...] = _unique_preserve(
+    _expand_with_student_prefix(
         (
             "student_registration_status",
             "reg_status",
             "registration_status",
+            *_optional_names(CANON_EN_TO_FA.get("student_registration_status")),
+            *_alias_names("student_registration_status"),
+            "student_reg_status",
+            "وضعیت ثبت نام",
+        )
+    )
+)
+_STATUS_FALLBACK: tuple[str, ...] = _unique_preserve(
+    _expand_with_student_prefix(
+        (
             "student_finance",
             "finance",
             "student_finance_status",
             "student_finance_code",
-            *_STATUS_EXTRA,
+            *_optional_names(CANON_EN_TO_FA.get("finance")),
         )
-    ),
+    )
+)
+_TRACKING_EXTRA: tuple[str, ...] = _optional_names(
+    CANON_EN_TO_FA.get("hekmat_tracking"),
+    *_alias_names("hekmat_tracking"),
 )
 _TRACKING_CODE_CANDIDATES: tuple[str, ...] = (
     "hekmat_tracking",
@@ -126,23 +140,8 @@ _TRACKING_CODE_CANDIDATES: tuple[str, ...] = (
 )
 
 
-def _unique_preserve(items: Sequence[str]) -> tuple[str, ...]:
-    seen: set[str] = set()
-    unique: list[str] = []
-    for item in items:
-        if item not in seen:
-            seen.add(item)
-            unique.append(item)
-    return tuple(unique)
-
-
 REGISTRATION_STATUS_CANDIDATES: tuple[str, ...] = _unique_preserve(
-    (
-        "student_registration_status",
-        *_STATUS_CANDIDATES,
-        "student_reg_status",
-        "وضعیت ثبت نام",
-    )
+    (*_STATUS_PRIMARY, *_STATUS_FALLBACK)
 )
 
 
@@ -151,6 +150,57 @@ def _first_existing(df: pd.DataFrame, candidates: Iterable[str], default: str) -
         if column in df.columns:
             return column
     return default
+
+
+def _first_present(df: pd.DataFrame, candidates: Iterable[str]) -> str | None:
+    """برگرداندن اولین ستون موجود از بین نام‌های ورودی یا None در صورت نبود.
+
+    مثال::
+        >>> df = pd.DataFrame({"a": [1], "b": [2]})
+        >>> _first_present(df, ["x", "b", "a"])
+        'b'
+    """
+
+    for column in candidates:
+        if column in df.columns:
+            return column
+    return None
+
+
+def _normalize_registration_status(series: pd.Series, *, index: pd.Index) -> pd.Series:
+    """تبدیل ستون وضعیت ثبت‌نام به کدهای عددی ۰/۱/۳ با dtype=Int64."""
+
+    status_raw = series.astype("string").str.translate(_DIGIT_TRANSLATION)
+    status_numeric = pd.to_numeric(status_raw, errors="coerce")
+    return pd.Series(status_numeric, index=index).astype("Int64")
+
+
+def _select_registration_status(df: pd.DataFrame) -> tuple[str, pd.Series]:
+    """انتخاب ستون وضعیت ثبت‌نام با تقدم صریح بر fallback مالی.
+
+    ترتیب انتخاب:
+    1. ستون‌های صریح «وضعیت ثبت نام» (و معادل‌های انگلیسی/دانش‌آموزی).
+    2. فقط در نبود گزینهٔ ۱، ستون‌های مالی به‌عنوان fallback استفاده می‌شوند.
+
+    مثال::
+        >>> frame = pd.DataFrame({
+        ...     "student_id": [1, 2],
+        ...     "وضعیت ثبت نام": [0, 3],
+        ...     "مالی حکمت بنیاد": [0, 0],
+        ... })
+        >>> column, series = _select_registration_status(frame)
+        >>> column
+        'وضعیت ثبت نام'
+        >>> series.tolist()
+        [0, 3]
+    """
+
+    primary = _first_present(df, _STATUS_PRIMARY)
+    fallback = _first_present(df, _STATUS_FALLBACK)
+    source_column = primary or fallback or "student_registration_status"
+    _ensure_column(df, source_column)
+    normalized = _normalize_registration_status(df[source_column], index=df.index)
+    return source_column, normalized
 
 
 def _ensure_column(df: pd.DataFrame, column: str) -> None:
@@ -230,14 +280,11 @@ def enrich_student_contacts(df: pd.DataFrame) -> pd.DataFrame:
     if landline_column != "student_landline":
         result["student_landline"] = landline_normalized
 
-    status_column = _first_existing(result, _STATUS_CANDIDATES, "student_registration_status")
-    _ensure_column(result, status_column)
-    status_raw = result[status_column].astype("string").str.translate(_DIGIT_TRANSLATION)
-    status_numeric = pd.to_numeric(status_raw, errors="coerce")
+    status_column, status_numeric = _select_registration_status(result)
     canonical_status_column = "student_registration_status"
-    result[canonical_status_column] = status_numeric.astype("Int64")
+    result[canonical_status_column] = status_numeric
     if status_column != canonical_status_column:
-        result[status_column] = status_numeric.astype("Int64")
+        result[status_column] = status_numeric
 
     tracking_column = _first_existing(result, _TRACKING_CODE_CANDIDATES, _TRACKING_CODE_CANDIDATES[0])
     _ensure_column(result, tracking_column)

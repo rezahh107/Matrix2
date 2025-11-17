@@ -239,6 +239,45 @@ def test_build_sabt_export_frame_matches_profile_against_english_headers() -> No
     assert export_df.loc[0, "جنسیت"] == "1"
 
 
+def test_build_sabt_export_frame_preserves_registration_status_over_finance() -> None:
+    allocations_df = pd.DataFrame(
+        {
+            "student_id": [1, 2, 3],
+            "mentor_id": ["M-1", "M-2", "M-3"],
+            "mentor_alias_code": ["A-1", "A-2", "A-3"],
+        }
+    )
+    students_df = pd.DataFrame(
+        {
+            "student_id": [1, 2, 3],
+            "student_registration_status": [0, 1, 3],
+            "student_finance": [3, 0, 0],
+        }
+    )
+    profile = [
+        AllocationExportColumn(
+            key="student_id",
+            header="کد ثبت نام",
+            source_kind="allocation",
+            source_field="student_id",
+            literal_value=None,
+            order=1,
+        ),
+        AllocationExportColumn(
+            key="student_registration_status",
+            header="وضعیت ثبت نام",
+            source_kind="student",
+            source_field="وضعیت ثبت نام",
+            literal_value=None,
+            order=2,
+        ),
+    ]
+
+    export_df = build_sabt_export_frame(allocations_df, students_df, profile)
+
+    assert export_df["وضعیت ثبت نام"].tolist() == [0, 1, 3]
+
+
 def test_export_sabt_excel_headers_and_types(tmp_path: Path) -> None:
     allocations_df = pd.DataFrame(
         {
