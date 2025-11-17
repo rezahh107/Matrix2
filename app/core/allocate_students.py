@@ -39,7 +39,15 @@ from .common.rules import (
     SchoolStudentPriorityGuard,
     default_stage_rule_map,
 )
-from .common.trace import TraceStagePlan, build_allocation_trace, build_trace_plan
+from .common.trace import (
+    FinalStatus,
+    TraceOutcome,
+    TraceStagePlan,
+    build_allocation_trace,
+    build_trace_plan,
+    build_unallocated_summary,
+    summarize_trace_outcome,
+)
 from .common.types import (
     AllocationAlertRecord,
     AllocationLogRecord,
@@ -1612,6 +1620,7 @@ def allocate_batch(
     allocations: List[Mapping[str, object]] = []
     logs: List[AllocationLogRecord] = []
     trace_rows: List[Mapping[str, object]] = []
+    trace_outcomes: List[TraceOutcome] = []
     stage_rules = default_stage_rule_map()
 
     total = max(int(students_norm.shape[0]), 1)
@@ -1719,6 +1728,15 @@ def allocate_batch(
             for stage in result.trace:
                 trace_rows.append({"student_id": result.log["student_id"], **stage})
 
+            outcome = summarize_trace_outcome(
+                student_dict, result.trace, result.log, policy=policy
+            )
+            trace_outcomes.append(outcome)
+            result.log["trace_final_status"] = outcome.final_status
+            result.log["trace_failure_stage"] = outcome.failure_stage
+            result.log["trace_final_reason"] = outcome.final_reason
+            result.log["trace_stage_flags"] = dict(outcome.stage_flags)
+
             if result.mentor_row is not None:
                 chosen_index = result.mentor_row.name
                 mentor_identifier = _resolve_mentor_identifier(result, policy=policy)
@@ -1791,6 +1809,24 @@ def allocate_batch(
     allocations_df = pd.DataFrame(allocations, columns=_ALLOCATION_OUTPUT_COLUMNS)
     logs_df = pd.DataFrame(logs)
     trace_df = pd.DataFrame(trace_rows)
+
+    if trace_outcomes:
+        outcome_records: list[dict[str, object]] = []
+        for outcome in trace_outcomes:
+            record: dict[str, object] = {
+                "student_id": outcome.student_id,
+                "final_status": outcome.final_status,
+                "failure_stage": outcome.failure_stage,
+                "final_reason": outcome.final_reason,
+            }
+            record.update({f"passed_{k}": v for k, v in outcome.stage_flags.items()})
+            record.update(outcome.metadata)
+            outcome_records.append(record)
+        trace_summary_df = pd.DataFrame(outcome_records)
+        trace_df.attrs["summary_df"] = trace_summary_df
+        trace_df.attrs["unallocated_summary"] = build_unallocated_summary(
+            trace_summary_df, policy=policy
+        )
 
     pool_output = pool_with_ids.copy()
     original_columns = list(candidate_pool.columns)

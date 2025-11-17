@@ -183,7 +183,12 @@ def _sanitize_selection_reasons_frame(
         0         1  الف
     """
 
-    ordered_columns: Tuple[str, ...] = tuple(columns)
+    base_columns: Tuple[str, ...] = tuple(columns)
+    extra_columns: Tuple[str, ...] = tuple(
+        column for column in (df_reasons.columns if df_reasons is not None else [])
+        if column not in base_columns
+    )
+    ordered_columns: Tuple[str, ...] = base_columns + extra_columns
     if df_reasons is None or df_reasons.empty:
         sanitized = pd.DataFrame(columns=ordered_columns)
     else:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import math
 import re
 from pathlib import Path
-from typing import Iterable, Literal, Sequence
+from typing import Iterable, Literal, Mapping, Sequence
 
 import pandas as pd
 
@@ -218,6 +218,25 @@ def _build_students_lookup(df: pd.DataFrame) -> dict[str, str]:
     return lookup
 
 
+def _resolve_fallback_student_column(
+    column: AllocationExportColumn, students: pd.DataFrame
+) -> str | None:
+    """یافتن ستون جایگزین برای مواردی مانند «وضعیت تحصیلی» زمانی که مپ اولیه پیدا نشد."""
+
+    normalized_candidates = {
+        _normalize_lookup_key(token)
+        for token in _iter_mapping_candidates(column.header)
+    }
+    normalized_candidates.add(_normalize_lookup_key(column.source_field or column.header))
+    for candidate in normalized_candidates:
+        for col in students.columns:
+            if _normalize_lookup_key(str(col)) == candidate:
+                return col
+    if "student_educational_status" in students.columns:
+        return "student_educational_status"
+    return None
+
+
 def build_sabt_export_frame(
     allocation_df: pd.DataFrame,
     students_df: pd.DataFrame,
@@ -266,6 +285,10 @@ def build_sabt_export_frame(
         elif column.source_kind == "student":
             resolved = _resolve_student_column(column, lookup)
             if resolved is None or resolved not in students_indexed.columns:
+                fallback_column = _resolve_fallback_student_column(column, students_en)
+                if fallback_column and fallback_column in students_indexed.columns:
+                    resolved = fallback_column
+            if resolved is None or resolved not in students_indexed.columns:
                 missing_columns.add(column.source_field or column.header)
                 series = pd.Series(pd.NA, index=alloc_en.index, dtype="object")
             else:
@@ -291,13 +314,17 @@ def export_sabt_excel(
     profile_path: Path | None = None,
     *,
     sheet_name: str = "Sabt",
+    extra_sheets: Mapping[str, pd.DataFrame] | None = None,
 ) -> Path:
     """نوشتن خروجی Sabt در فایل Excel مستقل با ساختار پایدار."""
 
     profile = load_sabt_export_profile(profile_path or DEFAULT_SABT_PROFILE_PATH)
     export_df = build_sabt_export_frame(allocation_df, students_df, profile)
+    sheets: dict[str, pd.DataFrame] = {sheet_name: export_df}
+    if extra_sheets:
+        sheets.update(extra_sheets)
     write_xlsx_atomic(
-        {sheet_name: export_df},
+        sheets,
         output_path,
         header_mode=None,
         sheet_header_modes={sheet_name: None},

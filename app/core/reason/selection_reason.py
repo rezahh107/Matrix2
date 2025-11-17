@@ -209,6 +209,8 @@ def build_selection_reason_rows(
             "شناسه پشتیبان",
             "دلیل انتخاب پشتیبان",
         ]
+    if "student_id" not in output_columns:
+        output_columns.append("student_id")
 
     def _empty_frame() -> pd.DataFrame:
         frame = pd.DataFrame(columns=output_columns)
@@ -363,6 +365,12 @@ def build_selection_reason_rows(
         mentor_name = mentor_lookup.get(mentor_id, mentor_id)
 
         national_id = _student_value(student_id, "national_id", "کدملی", "کد ملی")
+        if not national_id:
+            fallback_national = row.get("student_national_code") or row.get(
+                "national_code"
+            )
+            if pd.notna(fallback_national):
+                national_id = str(fallback_national).strip()
         first_name = _student_value(student_id, "first_name", "نام")
         last_name = _student_value(student_id, "last_name", "family_name", "نام خانوادگی")
         gender_value = _student_value(student_id, gender_column, gender_alias, "gender")
@@ -481,6 +489,7 @@ def build_selection_reason_rows(
 
         records.append(
             {
+                "student_id": student_id,
                 "شمارنده": counter_value,
                 "کدملی": sanitize_bidi(national_id),
                 "نام": sanitize_bidi(first_name),
@@ -499,7 +508,9 @@ def build_selection_reason_rows(
         if column not in reason_df.columns:
             reason_df[column] = ""
 
-    internal_columns = list(dict.fromkeys(output_columns + ["__mentor_id__"]))
+    internal_columns = list(
+        dict.fromkeys(output_columns + ["__mentor_id__", "student_id"])
+    )
     reason_df = reason_df.reindex(columns=internal_columns)
     if "شمارنده" in reason_df.columns:
         reason_df["شمارنده"] = pd.to_numeric(reason_df["شمارنده"], errors="coerce")
