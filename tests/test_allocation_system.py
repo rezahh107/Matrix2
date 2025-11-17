@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 import logging
-import sys
-from pathlib import Path
-
 import pandas as pd
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.allocate_students import allocate_batch
 from app.core.common.normalization import normalize_fa, resolve_group_code

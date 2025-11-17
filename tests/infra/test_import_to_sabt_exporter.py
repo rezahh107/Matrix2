@@ -2,13 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-import sys
 
 import pandas as pd
 import pytest
 from openpyxl import Workbook
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.infra.excel.import_to_sabt import (  # noqa: E402
     apply_alias_rule,

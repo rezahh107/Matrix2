@@ -1,8 +1,3 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
 from app.core.center_preferences import normalize_center_priority, parse_center_manager_config
 from app.core.policy_loader import load_policy
 

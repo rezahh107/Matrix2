@@ -2,12 +2,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-import sys
-from pathlib import Path
-
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.common.policy import load_selection_reason_policy
 from app.core.policy import compute_schema_hash, validate_policy_columns

@@ -1,13 +1,4 @@
-from pathlib import Path
-import sys
-
 import pandas as pd
-
-_HERE = Path(__file__).resolve()
-for candidate in _HERE.parents:
-    if (candidate / "pyproject.toml").exists():
-        sys.path.insert(0, str(candidate))
-        break
 
 from app.core.common.phone_rules import (
     HEKMAT_LANDLINE_FALLBACK,

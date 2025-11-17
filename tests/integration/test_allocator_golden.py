@@ -1,11 +1,7 @@
 import math
-import sys
-from pathlib import Path
 
 import pandas as pd
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.allocate_students import allocate_batch, _normalize_pool, _normalize_students
 from app.core.policy_loader import PolicyConfig, load_policy

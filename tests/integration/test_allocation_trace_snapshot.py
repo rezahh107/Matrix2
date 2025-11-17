@@ -2,15 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import sys
 from typing import Iterable
 
 import pandas as pd
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:  # pragma: no cover - تنظیم مسیر اجرای مستقیم
-    sys.path.insert(0, str(REPO_ROOT))
 
 from app.core.common.reasons import ReasonCode
 from app.core.common.trace import build_allocation_trace

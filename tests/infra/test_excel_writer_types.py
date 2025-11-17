@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pandas as pd
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.policy_loader import load_policy
 from app.infra.excel.exporter import write_selection_reasons_sheet

@@ -2,15 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import importlib
-import sys
 import warnings
 from pathlib import Path
 
 import pandas as pd
 import pytest
-
-# مسیر پروژه برای ایمپورت ماژول
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import app.infra.io_utils as io_utils  # noqa: E402
 from app.infra.io_utils import ALT_CODE_COLUMN, write_xlsx_atomic  # noqa: E402

@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sys
 
 import pandas as pd
 import pandas.testing as pd_testing
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.allocate_students import allocate_batch, build_selection_reason_rows
 from app.core.policy_loader import load_policy

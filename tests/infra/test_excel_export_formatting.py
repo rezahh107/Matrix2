@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sys
 import logging
 from typing import List, Set, Tuple
 
@@ -14,8 +13,6 @@ import pandas.testing as tm
 import pytest
 from openpyxl import load_workbook
 from pandas.api.types import is_datetime64_any_dtype
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.infra.excel import exporter as excel_exporter  # noqa: E402
 from app.infra.io_utils import write_xlsx_atomic  # noqa: E402

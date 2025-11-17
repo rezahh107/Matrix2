@@ -1,9 +1,4 @@
-from pathlib import Path
-import sys
-
 import pandas as pd
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core import allocate_students as allocator
 from app.core.policy_loader import load_policy
