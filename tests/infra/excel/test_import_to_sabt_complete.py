@@ -19,6 +19,7 @@ from app.infra.excel.import_to_sabt import (
     write_import_to_sabt_excel,
     _apply_normalizers,
     _normalize_mobile_ir,
+    map_registration_status_column,
 )
 
 
@@ -256,6 +257,16 @@ class TestRegistrationStatusPreservation:
         assert isinstance(sheet_debug, list)
         sheet_lookup = {entry.get("label"): entry for entry in sheet_debug}
         assert sheet_lookup["sheet2_status_normalized"]["threes"] == 1
+
+    def test_map_registration_status_column_basic(self) -> None:
+        series = pd.Series([0, 3, 0], dtype="Int64")
+        mapped = map_registration_status_column(series)
+        assert mapped.tolist() == ["عادی", "حکمت", "عادی"]
+
+    def test_map_registration_status_column_invalid_values(self) -> None:
+        series = pd.Series([0, 7, None], dtype="Int64")
+        mapped = map_registration_status_column(series)
+        assert mapped.tolist() == ["عادی", "عادی", "عادی"]
 
 
 class TestDerivedFields:
