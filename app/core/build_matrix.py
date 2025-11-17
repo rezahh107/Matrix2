@@ -766,13 +766,39 @@ def prepare_crosswalk_mappings(
 def expand_group_token(
     token: str,
     name_to_code: dict[str, int],
+    code_to_name: Mapping[int, str],
     buckets: dict[str, list[tuple[str, int]]],
     synonyms: dict[str, str],
 ) -> list[tuple[str, int]]:
+    """گسترش توکن گروه آزمایشی به زوج‌های (نام، کد) با پشتیبانی از کد عددی.
+
+    مثال::
+
+        >>> mappings = {"یازدهم ریاضی": 27}
+        >>> expand_group_token("27", mappings, {27: "یازدهم ریاضی"}, {}, {})
+        [('یازدهم ریاضی', 27)]
+
+    Args:
+        token: مقدار خام ستون گروه آزمایشی (نام یا کد).
+        name_to_code: نگاشت نام نرمال‌شده → کد گروه.
+        code_to_name: نگاشت کد → نام گروه برای resolve ورودی عددی.
+        buckets: نگاشت عنوان مقطع → لیست زوج‌های (نام، کد).
+        synonyms: نگاشت نام/کلید نرمال‌شده → نام/باکت مقصد.
+
+    Returns:
+        فهرست یکتا از زوج‌های (نام، کد) به ترتیب کشف‌شده.
+    """
+
     t = normalize_fa(token)
     if not t:
         return []
+
     out: list[tuple[str, int]] = []
+
+    numeric = _coerce_int_like(t)
+    if numeric is not None and numeric in code_to_name:
+        out.append((code_to_name[numeric], int(numeric)))
+
     # 1) Synonym
     if t in synonyms:
         syn = synonyms[t]
@@ -1270,7 +1296,7 @@ def _prepare_base_rows(
         if not used_included:
             expanded: list[tuple[str, int]] = []
             for tok in raw_groups or []:
-                ex = expand_group_token(tok, name_to_code, buckets, synonyms)
+                ex = expand_group_token(tok, name_to_code, code_to_name, buckets, synonyms)
                 if not ex:
                     unseen_groups.append(
                         {"group_token": str(tok), "supporter": mentor_name, "manager": manager_name}
