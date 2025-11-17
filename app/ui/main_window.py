@@ -13,7 +13,6 @@ from PySide6.QtCore import (
     QEasingCurve,
     QPropertyAnimation,
     QSettings,
-    QSize,
     Qt,
     Slot,
     QTimer,
@@ -52,7 +51,6 @@ from PySide6.QtWidgets import (
     QSplitter,
     QSplitterHandle,
     QStatusBar,
-    QStyle,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -95,7 +93,14 @@ from .preferences import (
 )
 from .preferences.language_dialog import LanguageDialog
 from .log_panel import LogPanel
-from .theme import Theme, apply_card_shadow, apply_theme, build_theme, apply_theme_mode
+from .theme import (
+    Theme,
+    apply_card_shadow,
+    apply_layout_direction,
+    apply_theme,
+    apply_theme_mode,
+    build_theme,
+)
 from .texts import UiTranslator
 
 _EN_TEXT_DEFAULTS: Dict[str, str] = {
@@ -258,12 +263,12 @@ class MainWindow(QMainWindow):
             frame = self.frameGeometry()
             frame.moveCenter(geom.center())
             self.move(frame.topLeft())
-        self.setLayoutDirection(Qt.RightToLeft if self._language == "fa" else Qt.LeftToRight)
         self._theme_name: str = self._prefs.theme or "light"
         self._theme: Theme = self._load_theme(self._theme_name)
         self._theme_selector: QComboBox | None = None
         app = QApplication.instance()
         if app is not None:
+            apply_layout_direction(app, self._language)
             apply_theme(app, self._theme)
 
         self._worker: Worker | None = None
@@ -443,40 +448,26 @@ class MainWindow(QMainWindow):
         """ایجاد نوار ابزار بالایی با الهام از Ribbon Office."""
 
         toolbar = QToolBar(self._t("ribbon.actions", "اکشن‌ها"), self)
-        toolbar.setIconSize(QSize(28, 28))
         toolbar.setMovable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
         toolbar.setContentsMargins(6, 6, 6, 6)
         toolbar.setObjectName("mainToolbar")
-        style = self.style()
 
-        build_action = QAction(
-            style.standardIcon(QStyle.SP_FileDialogNewFolder),
-            self._t("action.build", "ساخت ماتریس"),
-            self,
-        )
+        build_action = QAction(self._t("action.build", "ساخت ماتریس"), self)
         build_action.setShortcut(QKeySequence("Ctrl+B"))
         build_action.setShortcutVisibleInContextMenu(True)
         build_action.triggered.connect(self._start_build)
         toolbar.addAction(build_action)
         self._toolbar_actions["build"] = build_action
 
-        allocate_action = QAction(
-            style.standardIcon(QStyle.SP_ComputerIcon),
-            self._t("action.allocate", "تخصیص"),
-            self,
-        )
+        allocate_action = QAction(self._t("action.allocate", "تخصیص"), self)
         allocate_action.setShortcut(QKeySequence("Ctrl+L"))
         allocate_action.setShortcutVisibleInContextMenu(True)
         allocate_action.triggered.connect(self._start_allocate)
         toolbar.addAction(allocate_action)
         self._toolbar_actions["allocate"] = allocate_action
 
-        rule_action = QAction(
-            style.standardIcon(QStyle.SP_FileDialogDetailedView),
-            self._t("action.rule_engine", "اجرای Rule Engine"),
-            self,
-        )
+        rule_action = QAction(self._t("action.rule_engine", "اجرای Rule Engine"), self)
         rule_action.setShortcut(QKeySequence("Ctrl+R"))
         rule_action.setShortcutVisibleInContextMenu(True)
         rule_action.triggered.connect(self._start_rule_engine)
@@ -486,7 +477,6 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         output_action = QAction(
-            style.standardIcon(QStyle.SP_DirOpenIcon),
             self._t("dashboard.button.output", "پوشه خروجی"),
             self,
         )
@@ -497,11 +487,7 @@ class MainWindow(QMainWindow):
         self._toolbar_actions["output"] = output_action
 
         toolbar.addSeparator()
-        prefs_action = QAction(
-            style.standardIcon(QStyle.SP_FileDialogInfoView),
-            self._t("action.preferences", "تنظیمات"),
-            self,
-        )
+        prefs_action = QAction(self._t("action.preferences", "تنظیمات"), self)
         prefs_action.triggered.connect(self._open_language_dialog)
         toolbar.addAction(prefs_action)
         self._toolbar_actions["prefs"] = prefs_action
@@ -652,7 +638,9 @@ class MainWindow(QMainWindow):
 
         self._prefs.language = language
         self._translator = UiTranslator(language)
-        self.setLayoutDirection(Qt.RightToLeft if language == "fa" else Qt.LeftToRight)
+        app = QApplication.instance()
+        if app is not None:
+            apply_layout_direction(app, language)
         self.setWindowTitle(self._t("app.title", "سامانه تخصیص دانشجو-منتور"))
         if hasattr(self, "_language_label"):
             self._language_label.setText(
@@ -728,16 +716,12 @@ class MainWindow(QMainWindow):
         text: str,
         tooltip: str,
         callback: Callable[[], None],
-        icon_role: QStyle.StandardPixmap,
     ) -> QToolButton:
-        """ساخت دکمه میان‌بر داشبورد با آیکون استاندارد."""
+        """ساخت دکمه میان‌بر داشبورد با تکیه بر سبک پیش‌فرض Fusion."""
 
         button = QToolButton(self)
         button.setObjectName("dashboardShortcut")
-        button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        button.setIcon(self.style().standardIcon(icon_role))
-        icon_size = self.style().pixelMetric(QStyle.PM_SmallIconSize) or 16
-        button.setIconSize(QSize(icon_size, icon_size))
+        button.setToolButtonStyle(Qt.ToolButtonTextOnly)
         button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         button.setFixedHeight(32)
         button.setText(text)
@@ -803,29 +787,25 @@ class MainWindow(QMainWindow):
                 self._t("dashboard.button.build", "ساخت ماتریس"),
                 self._t("tooltip.build", "اجرای کامل سناریوی ساخت ماتریس"),
                 self._start_build,
-                QStyle.StandardPixmap.SP_FileDialogNewFolder,
             ),
             (
                 self._t("dashboard.button.allocate", "تخصیص"),
                 self._t("tooltip.allocate", "اجرای تخصیص دانش‌آموز به منتور"),
                 self._start_allocate,
-                QStyle.StandardPixmap.SP_ComputerIcon,
             ),
             (
                 self._t("dashboard.button.rule_engine", "موتور قواعد"),
                 self._t("tooltip.rule_engine", "اجرای Rule Engine برای تست سیاست"),
                 self._start_rule_engine,
-                QStyle.StandardPixmap.SP_BrowserReload,
             ),
         ]
-        for idx, (text, tooltip, callback, icon_role) in enumerate(buttons):
-            button = self._create_dashboard_shortcut(text, tooltip, callback, icon_role)
+        for idx, (text, tooltip, callback) in enumerate(buttons):
+            button = self._create_dashboard_shortcut(text, tooltip, callback)
             buttons_row.addWidget(button, idx // 2, idx % 2)
         self._btn_open_output_shortcut = self._create_dashboard_shortcut(
             self._t("dashboard.button.output", "پوشه خروجی"),
             self._t("tooltip.output_folder", "آخرین پوشه خروجی تولید شده را باز می‌کند"),
             self._open_last_output_folder,
-            QStyle.StandardPixmap.SP_DirHomeIcon,
         )
         buttons_row.addWidget(
             self._btn_open_output_shortcut, len(buttons) // 2, len(buttons) % 2
