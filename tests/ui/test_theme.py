@@ -7,6 +7,7 @@ import re
 import pytest
 
 pytest.importorskip("PySide6.QtWidgets", reason="PySide6 not available in test environment")
+from PySide6.QtWidgets import QApplication
 
 from app.ui import theme
 
@@ -27,3 +28,14 @@ def test_render_stylesheet_raises_on_unknown_placeholder() -> None:
     qss = "QWidget { color: {text}; border: 1px solid {UNKNOWN}; }"
     with pytest.raises(ValueError, match="UNKNOWN"):
         theme._render_stylesheet(qss, {"text": "#111111"})
+
+
+def test_apply_theme_resets_global_stylesheet() -> None:
+    app = QApplication.instance() or QApplication([])
+    app.setStyleSheet("QWidget { background: red; }")
+
+    applied_theme = theme.apply_theme(app)
+
+    assert applied_theme is not None
+    assert app.styleSheet() == ""
+    assert app.palette() == app.style().standardPalette()
