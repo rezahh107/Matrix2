@@ -63,8 +63,9 @@ class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
             LOGGER.warning("%s | painter inactive on entry", self._effect_meta.name)
             return
 
-        pixmap, offset = self.sourcePixmap(
-            Qt.DeviceCoordinates, mode=QGraphicsEffect.PadToEffectiveBoundingRect
+        offset = QPoint()
+        pixmap = self.sourcePixmap(
+            Qt.LogicalCoordinates, offset, QGraphicsEffect.PadToEffectiveBoundingRect
         )
         if pixmap.isNull():
             self._log("draw.skip(null_pixmap)", painter)
@@ -111,8 +112,9 @@ class SafeDropShadowEffect(_LoggingMixin, QGraphicsDropShadowEffect):
             LOGGER.warning("%s | painter inactive on entry", self._effect_meta.name)
             return
 
-        pixmap, offset = self.sourcePixmap(
-            Qt.DeviceCoordinates, mode=QGraphicsEffect.PadToEffectiveBoundingRect
+        offset = QPoint()
+        pixmap = self.sourcePixmap(
+            Qt.LogicalCoordinates, offset, QGraphicsEffect.PadToEffectiveBoundingRect
         )
         if pixmap.isNull():
             self._log("draw.skip(null_pixmap)", painter)
