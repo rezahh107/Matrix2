@@ -11,6 +11,7 @@ import pandas as pd
 from PySide6.QtCore import (
     QByteArray,
     QDateTime,
+    QEasingCurve,
     QPropertyAnimation,
     QSettings,
     Qt,
