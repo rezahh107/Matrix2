@@ -14,9 +14,9 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, List
+from typing import TYPE_CHECKING, Iterable, List, Sequence
 
-from app.ui.assets.font_data_vazirmatn import VAZIRMATN_REGULAR_TTF_BASE64
+from app.ui.assets.font_data_vazirmatn import VAZIRMATN_REGULAR_BASE64, VAZIRMATN_REGULAR_TTF_BASE64
 
 if TYPE_CHECKING:  # pragma: no cover
     from PySide6.QtGui import QFont
@@ -30,6 +30,7 @@ __all__ = [
     "prepare_default_font",
     "apply_default_font",
     "collect_font_diagnostics",
+    "resolve_vazir_family_name",
 ]
 
 LOGGER = logging.getLogger(__name__)
@@ -90,13 +91,14 @@ def _teardown_font_debug_log() -> None:
         _FONT_DEBUG_HANDLER = None
 
 
-def ensure_vazir_local_fonts() -> None:
-    """اطمینان از وجود فایل‌های وزیر در مسیر محلی برنامه.
+def ensure_vazir_local_fonts() -> Path:
+    """اطمینان از وجود فایل‌های وزیر/وزیرمتن در مسیر محلی برنامه.
 
-    - اگر پوشهٔ ``app/ui/fonts`` خالی باشد و سیستم‌عامل ویندوز باشد،
-      تلاش می‌شود فایل‌های ``Vazir*.ttf`` از مسیرهای توسعه‌دهنده
-      کپی شوند.
-    - در سایر سیستم‌ها یا در صورت نبود مسیرها، بدون خطا رد می‌شود.
+    مسیر ``app/ui/fonts`` همیشه ساخته می‌شود. ابتدا اگر فونت‌های محلی
+    موجود باشند بدون اقدام اضافی بازگردانده می‌شود. در غیر این صورت
+    تلاش می‌شود فونت تعبیه‌شدهٔ «وزیرمتن Regular» روی دیسک نوشته شود؛
+    اگر ناکام بود و سیستم ویندوز بود از مسیرهای رایج توسعه‌دهنده کپی
+    می‌شود. نتیجهٔ نهایی مسیر پوشهٔ فونت است.
     """
 
     FONTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -104,23 +106,23 @@ def ensure_vazir_local_fonts() -> None:
 
     if _has_vazir_files(FONTS_DIR.glob("*.ttf")):
         LOGGER.debug("فایل وزیر موجود است؛ بدون اقدام اضافی")
-        return
+        return FONTS_DIR
 
-    if _materialize_embedded_font(FONTS_DIR):
-        LOGGER.debug("فونت تعبیه‌شده استخراج شد")
-        return
-
-    if _materialize_embedded_font(FONTS_DIR):
-        return
+    materialized = _materialize_embedded_font(FONTS_DIR)
+    if materialized is not None:
+        LOGGER.debug("فونت تعبیه‌شده استخراج شد: %s", materialized.name)
+        return FONTS_DIR
 
     if os.name != "nt":
         LOGGER.debug("سیستم ویندوز نیست؛ عبور بدون کپی")
-        return
+        return FONTS_DIR
 
     for source in _iter_windows_sources():
         for path in source:
             LOGGER.debug("تلاش برای کپی فونت از %s", path)
             _safe_copy_font(path, FONTS_DIR / path.name)
+
+    return FONTS_DIR
 
 
 def _iter_windows_sources() -> Iterable[List[Path]]:
@@ -181,7 +183,8 @@ def _materialize_embedded_font(target_dir: Path) -> Path | None:
         return target
 
     try:
-        data = base64.b64decode(VAZIRMATN_REGULAR_TTF_BASE64)
+        base64_data = VAZIRMATN_REGULAR_TTF_BASE64 or VAZIRMATN_REGULAR_BASE64
+        data = base64.b64decode(base64_data)
     except (binascii.Error, ValueError) as exc:  # pragma: no cover - دادهٔ تعبیه‌شده ثابت است
         LOGGER.warning("دادهٔ فونت وزیرمتن نامعتبر بود: %s", exc)
         return None
@@ -206,6 +209,11 @@ def _install_fonts_from_directory(directory: Path) -> list[str]:
             continue
         families.extend(QFontDatabase.applicationFontFamilies(font_id))
         LOGGER.debug("فونت %s ثبت شد با خانواده‌ها: %s", ttf, families)
+    if families:
+        db = QFontDatabase()
+        resolved = resolve_vazir_family_name(db, candidates=families)
+        if resolved:
+            LOGGER.debug("خانوادهٔ اصلی وزیر تشخیص داده شد: %s", resolved)
     return families
 
 
@@ -214,26 +222,54 @@ def _load_vazir_font_family_names() -> list[str]:
 
     ensure_vazir_local_fonts()
     families = _install_fonts_from_directory(FONTS_DIR)
-    LOGGER.debug("خانواده‌های ثبت‌شده: %s", families)
-    return [
+    from PySide6.QtGui import QFontDatabase
+
+    db = QFontDatabase()
+    all_families = list(db.families()) + families
+    vazir_like = [
         fam
-        for fam in families
+        for fam in all_families
         if "vazir" in fam.casefold() or "وزیر" in fam
     ]
+    unique_sorted = sorted(dict.fromkeys(vazir_like), key=str.casefold)
+    LOGGER.debug("خانواده‌های ثبت‌شده: %s", unique_sorted)
+    return unique_sorted
+
+
+def resolve_vazir_family_name(
+    db: "QFontDatabase", *, candidates: Sequence[str] | None = None
+) -> str | None:
+    """انتخاب نام خانوادهٔ اصلی وزیر/وزیرمتن از میان خانواده‌های موجود."""
+
+    pool: list[str] = []
+    if candidates:
+        pool.extend(candidates)
+    pool.extend(db.families())
+
+    ordered_unique = sorted(dict.fromkeys(pool), key=str.casefold)
+    needles = ("vazirmatn", "vazir", "وزیر")
+    for needle in needles:
+        for family in ordered_unique:
+            if needle in family.casefold() or (needle == "وزیر" and "وزیر" in family):
+                return family
+    return None
 
 
 def load_vazir_font(point_size: int | None = None) -> "QFont" | None:
     """در صورت دسترسی به وزیر، نمونهٔ فونت آن را می‌سازد."""
 
     from PySide6.QtGui import QFont
+    from PySide6.QtGui import QFontDatabase
 
     families = _load_vazir_font_family_names()
-    if not families:
+    db = QFontDatabase()
+    family = resolve_vazir_family_name(db, candidates=families)
+    if not family:
         LOGGER.debug("هیچ خانوادهٔ وزیر ثبت نشد")
         return None
     size = point_size or DEFAULT_POINT_SIZE
-    LOGGER.debug("فونت وزیر با خانوادهٔ %s و اندازهٔ %s ساخته شد", families[0], size)
-    return QFont(families[0], size)
+    LOGGER.debug("فونت وزیر با خانوادهٔ %s و اندازهٔ %s ساخته شد", family, size)
+    return QFont(family, size)
 
 
 def create_app_font(
