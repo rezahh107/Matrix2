@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.ui import fonts, theme
 from app.ui.i18n import Language
-from app.ui.fonts import create_app_font
+from app.ui.fonts import create_app_font, resolve_vazir_family_name
 
 
 @pytest.fixture()
@@ -33,6 +33,32 @@ def test_create_app_font_prefers_vazir(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fonts, "load_vazir_font", lambda point_size=None: fake)
     font = create_app_font()
     assert font.family().lower().startswith("vazir")
+
+
+def test_resolve_vazir_family_prefers_vazirmatn(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeDB:
+        def __init__(self, families: list[str]):
+            self._families = families
+
+        def families(self) -> list[str]:
+            return self._families
+
+    db = _FakeDB(["Tahoma", "Vazir", "Vazirmatn", "Vazir Code"])
+    family = resolve_vazir_family_name(db)
+    assert family == "Vazirmatn"
+
+
+def test_apply_global_font_sets_qapplication_font(qapp: QApplication, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fonts_dir = tmp_path / "fonts"
+    monkeypatch.setattr(fonts, "FONTS_DIR", fonts_dir)
+    monkeypatch.setattr(fonts, "_windows_candidates", lambda: [])
+
+    # نصب فونت و اعمال تم روی اپلیکیشن
+    fonts.ensure_vazir_local_fonts()
+    fonts._install_fonts_from_directory(fonts_dir)
+    theme.apply_global_font(qapp)
+
+    assert qapp.font().family().casefold().startswith(("vazir", "vazirmatn"))
 
 
 def test_layout_direction_for_languages(qapp: QApplication) -> None:
