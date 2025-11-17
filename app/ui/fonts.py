@@ -379,12 +379,13 @@ def apply_default_font(
 def _with_antialias(font: "QFont") -> "QFont":
     from PySide6.QtGui import QFont
 
-    antialias_strategy = QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality
-    strategy = QFont.StyleStrategy(font.styleStrategy()) | antialias_strategy
-    font.setStyleHint(QFont.StyleHint.SansSerif, antialias_strategy)
+    strategy = (
+        QFont.StyleStrategy(font.styleStrategy())
+        | QFont.StyleStrategy.PreferAntialias
+        | QFont.StyleStrategy.PreferQuality
+    )
     font.setStyleStrategy(strategy)
     font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-    font.setKerning(True)
     return font
 
 

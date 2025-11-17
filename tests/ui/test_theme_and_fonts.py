@@ -80,9 +80,7 @@ def test_apply_global_font_sets_qapplication_font(qapp: QApplication, tmp_path, 
     assert app_font.pointSize() == fonts.DEFAULT_POINT_SIZE
     assert app_font.styleStrategy() & QFont.StyleStrategy.PreferAntialias
     assert app_font.styleStrategy() & QFont.StyleStrategy.PreferQuality
-    assert app_font.styleHint() == QFont.StyleHint.SansSerif
     assert app_font.hintingPreference() == QFont.HintingPreference.PreferFullHinting
-    assert app_font.kerning()
 
 
 def test_widgets_inherit_global_font(qapp: QApplication, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
