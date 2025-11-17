@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QToolButton,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from app.core.common.columns import (
@@ -71,7 +72,12 @@ from .preferences import (
 )
 from .preferences.language_dialog import LanguageDialog
 from .log_panel import LogPanel
-from .theme import Theme, apply_theme, build_system_light_theme
+from .theme import (
+    Theme,
+    apply_theme,
+    build_system_dark_theme,
+    build_system_light_theme,
+)
 from .texts import UiTranslator
 
 __all__ = ["MainWindow", "run_demo", "FilePicker"]
@@ -87,7 +93,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(self._translator.text("app.title", "سامانه تخصیص دانشجو-منتور"))
         self.setMinimumSize(960, 640)
         self.setLayoutDirection(Qt.RightToLeft if self._prefs.language == "fa" else Qt.LeftToRight)
-        self._theme: Theme = build_system_light_theme()
+        self._theme: Theme = self._load_theme(self._prefs.theme)
+        self._theme_selector: QComboBox | None = None
         app = QApplication.instance()
         if app is not None:
             apply_theme(app, self._theme)
@@ -105,6 +112,7 @@ class MainWindow(QMainWindow):
         self._checklist_card: DashboardCard | None = None
         self._actions_card: DashboardCard | None = None
         self._toolbar_actions: Dict[str, QAction] = {}
+        self._toolbar_theme_label: QLabel | None = None
         self._stage_badge: QLabel | None = None
         self._stage_detail: QLabel | None = None
         self._progress_caption: QLabel | None = None
@@ -231,6 +239,13 @@ class MainWindow(QMainWindow):
 
         return self._translator.text(key, fallback)
 
+    def _load_theme(self, name: str) -> Theme:
+        """بارگذاری تم بر اساس نام ذخیره‌شده."""
+
+        if name == "dark":
+            return build_system_dark_theme()
+        return build_system_light_theme()
+
     # ------------------------------------------------------------------ UI setup
     def _build_ribbon(self) -> None:
         """ایجاد نوار ابزار بالایی با الهام از Ribbon Office."""
@@ -238,54 +253,58 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar(self._t("ribbon.actions", "اکشن‌ها"), self)
         toolbar.setIconSize(QSize(20, 20))
         toolbar.setMovable(False)
+        toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
 
-        build_action = QAction(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder),
-            self._t("action.build", "ساخت ماتریس"),
-            self,
-        )
+        build_action = QAction(self._t("action.build", "ساخت ماتریس"), self)
         build_action.triggered.connect(self._start_build)
         toolbar.addAction(build_action)
         self._toolbar_actions["build"] = build_action
 
-        allocate_action = QAction(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon),
-            self._t("action.allocate", "تخصیص"),
-            self,
-        )
+        allocate_action = QAction(self._t("action.allocate", "تخصیص"), self)
         allocate_action.triggered.connect(self._start_allocate)
         toolbar.addAction(allocate_action)
         self._toolbar_actions["allocate"] = allocate_action
 
-        rule_action = QAction(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload),
-            self._t("action.rule_engine", "اجرای Rule Engine"),
-            self,
-        )
+        rule_action = QAction(self._t("action.rule_engine", "اجرای Rule Engine"), self)
         rule_action.triggered.connect(self._start_rule_engine)
         toolbar.addAction(rule_action)
         self._toolbar_actions["rule_engine"] = rule_action
 
         toolbar.addSeparator()
 
-        output_action = QAction(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon),
-            self._t("dashboard.button.output", "پوشه خروجی"),
-            self,
-        )
+        output_action = QAction(self._t("dashboard.button.output", "پوشه خروجی"), self)
         output_action.triggered.connect(self._open_last_output_folder)
         toolbar.addAction(output_action)
         self._toolbar_actions["output"] = output_action
 
         toolbar.addSeparator()
-        prefs_action = QAction(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView),
-            self._t("action.preferences", "تنظیمات"),
-            self,
-        )
+        prefs_action = QAction(self._t("action.preferences", "تنظیمات"), self)
         prefs_action.triggered.connect(self._open_language_dialog)
         toolbar.addAction(prefs_action)
         self._toolbar_actions["prefs"] = prefs_action
+
+        toolbar.addSeparator()
+        theme_widget = QWidget(self)
+        theme_layout = QHBoxLayout(theme_widget)
+        theme_layout.setContentsMargins(4, 0, 4, 0)
+        theme_layout.setSpacing(6)
+        theme_label = QLabel(self._t("theme.label", "تم"), theme_widget)
+        theme_label.setObjectName("themeSelectorLabel")
+        selector = QComboBox(theme_widget)
+        selector.setObjectName("themeSelector")
+        selector.addItem(self._t("theme.light", "روشن"), userData="light")
+        selector.addItem(self._t("theme.dark", "تیره"), userData="dark")
+        selector.currentIndexChanged.connect(self._on_theme_changed)
+        theme_layout.addWidget(theme_label)
+        theme_layout.addWidget(selector)
+        widget_action = QWidgetAction(self)
+        widget_action.setDefaultWidget(theme_widget)
+        toolbar.addAction(widget_action)
+        self._theme_selector = selector
+        self._toolbar_theme_label = theme_label
+        active_index = selector.findData(self._prefs.theme)
+        if active_index >= 0:
+            selector.setCurrentIndex(active_index)
 
         self.addToolBar(toolbar)
         self._toolbar = toolbar
@@ -319,6 +338,11 @@ class MainWindow(QMainWindow):
             action.setText(text)
             if tooltip:
                 action.setToolTip(tooltip)
+        if self._toolbar_theme_label is not None:
+            self._toolbar_theme_label.setText(self._t("theme.label", "تم"))
+        if self._theme_selector is not None:
+            self._theme_selector.setItemText(0, self._t("theme.light", "روشن"))
+            self._theme_selector.setItemText(1, self._t("theme.dark", "تیره"))
 
     def _refresh_tab_texts(self) -> None:
         """به‌روزرسانی عنوان تب‌ها با مترجم جدید."""
@@ -661,8 +685,17 @@ class MainWindow(QMainWindow):
             f"#labelStageDetail, #labelStatus, #lastRunBadge{{color:{self._theme.text_muted.name()};}}"
             f"QToolBar{{padding:6px;}}"
             f"QStatusBar{{padding:4px 8px;}}"
+            f"#themeSelectorLabel{{color:{self._theme.text_muted.name()};padding-left:4px;}}"
         )
         self.setStyleSheet(extra)
+
+        if self._theme_selector is not None:
+            self._theme_selector.setStyleSheet("")
+            active_index = self._theme_selector.findData(self._prefs.theme)
+            if active_index >= 0:
+                self._theme_selector.blockSignals(True)
+                self._theme_selector.setCurrentIndex(active_index)
+                self._theme_selector.blockSignals(False)
 
     def _set_stage(self, title: str | None, detail: str | None = None) -> None:
         """به‌روزرسانی عنوان و توضیح مرحلهٔ فعال."""
@@ -679,6 +712,18 @@ class MainWindow(QMainWindow):
             return
         safe_message = message or self._status.text() or "در حال پردازش"
         self._progress_caption.setText(f"{pct}% | {safe_message}")
+
+    def _on_theme_changed(self, index: int) -> None:
+        """تغییر تم بر اساس انتخاب کاربر."""
+
+        if self._theme_selector is None:
+            return
+        chosen = self._theme_selector.itemData(index)
+        if chosen not in {"light", "dark"}:
+            return
+        self._prefs.theme = str(chosen)
+        self._theme = self._load_theme(str(chosen))
+        self._apply_theme()
 
     def _build_build_page(self) -> QWidget:
         """فرم ورودی‌های سناریوی ساخت ماتریس."""

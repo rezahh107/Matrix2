@@ -11,7 +11,13 @@ from dataclasses import dataclass
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
-__all__ = ["Theme", "build_system_light_theme", "apply_theme", "relative_luminance"]
+__all__ = [
+    "Theme",
+    "build_system_light_theme",
+    "build_system_dark_theme",
+    "apply_theme",
+    "relative_luminance",
+]
 
 
 @dataclass(frozen=True)
@@ -77,16 +83,17 @@ def build_system_light_theme() -> Theme:
     """ساخت تم روشن نزدیک به Windows 11 بر پایه پالت سیستم."""
 
     palette = QApplication.instance().palette() if QApplication.instance() else QPalette()
-    window = _from_palette(palette, QPalette.ColorRole.Window, "#f7f7f8")
+    window = _from_palette(palette, QPalette.ColorRole.Window, "#f6f7fb")
     base = _from_palette(palette, QPalette.ColorRole.Base, "#ffffff")
-    text = _from_palette(palette, QPalette.ColorRole.Text, "#111827")
-    highlight = _from_palette(palette, QPalette.ColorRole.Highlight, "#2563eb")
+    text = _from_palette(palette, QPalette.ColorRole.Text, "#0f172a")
+    highlight = _from_palette(palette, QPalette.ColorRole.Highlight, "#4f46e5")
 
-    card = _blend(base, window, 0.08)
-    border = _blend(text, window, 0.15)
-    accent = highlight if highlight.isValid() else QColor("#2563eb")
-    accent_soft = _blend(accent, window, 0.8)
-    muted = _blend(text, window, 0.55)
+    card = _blend(base, window, 0.06)
+    border = _blend(text, window, 0.18)
+    accent = highlight if highlight.isValid() else QColor("#4f46e5")
+    complement = QColor("#f97316")
+    accent_soft = _blend(complement, window, 0.2)
+    muted = _blend(text, window, 0.45)
 
     return Theme(
         window=window,
@@ -106,6 +113,38 @@ def build_system_light_theme() -> Theme:
     )
 
 
+def build_system_dark_theme() -> Theme:
+    """ساخت تم تیره با کنتراست بالا و رنگ مکمل برای هایلایت‌ها."""
+
+    window = QColor("#0b1220")
+    base = QColor("#111827")
+    text = QColor("#e2e8f0")
+    accent = QColor("#22d3ee")
+    complement = QColor("#f59e0b")
+
+    card = _blend(base, window, 0.3)
+    border = _blend(text, window, 0.35)
+    accent_soft = _blend(complement, window, 0.3)
+    muted = _blend(text, window, 0.4)
+
+    return Theme(
+        window=window,
+        surface=base,
+        surface_alt=_blend(window, base, 0.25),
+        card=card,
+        accent=accent,
+        accent_soft=accent_soft,
+        border=border,
+        text_primary=text,
+        text_muted=muted,
+        success=QColor("#34d399"),
+        warning=QColor("#f59e0b"),
+        error=QColor("#f87171"),
+        log_bg=_blend(base, window, 0.18),
+        log_border=_blend(text, window, 0.25),
+    )
+
+
 def _stylesheet(theme: Theme) -> str:
     """تولید StyleSheet یکپارچه برای کنترل‌های کلیدی."""
 
@@ -113,7 +152,7 @@ def _stylesheet(theme: Theme) -> str:
         QWidget {{
             color: {theme.text_primary.name()};
             background-color: {theme.window.name()};
-            font-size: 10pt;
+            font-size: 11pt;
         }}
         QMainWindow, QDialog {{
             background-color: {theme.window.name()};
@@ -152,12 +191,16 @@ def _stylesheet(theme: Theme) -> str:
         }}
         QToolButton, QPushButton {{
             border: 1px solid {theme.border.name()};
-            border-radius: {theme.radius - 2}px;
-            padding: 6px 10px;
+            border-radius: {theme.radius}px;
+            padding: 6px 14px;
             background: {theme.surface_alt.name()};
         }}
         QToolButton:hover, QPushButton:hover {{
             background: {theme.surface.name()};
+        }}
+        QToolButton:checked {{
+            background: {theme.accent_soft.name()};
+            border-color: {theme.accent.name()};
         }}
         QPushButton#primaryButton {{
             background: {theme.accent.name()};
@@ -166,6 +209,22 @@ def _stylesheet(theme: Theme) -> str:
         }}
         QPushButton#primaryButton:hover {{
             background: {theme.accent.darker(110).name()};
+        }}
+        QComboBox {{
+            border: 1px solid {theme.border.name()};
+            border-radius: {theme.radius}px;
+            padding: 6px 10px;
+            background: {theme.surface_alt.name()};
+            color: {theme.text_primary.name()};
+        }}
+        QComboBox::drop-down {{
+            border: none;
+        }}
+        QComboBox QAbstractItemView {{
+            background: {theme.surface.name()};
+            color: {theme.text_primary.name()};
+            selection-background-color: {theme.accent_soft.name()};
+            selection-color: {theme.text_primary.name()};
         }}
         QProgressBar {{
             border: 1px solid {theme.border.name()};
@@ -222,6 +281,7 @@ def apply_theme(app: QApplication, theme: Theme) -> None:
     palette.setColor(QPalette.ColorRole.Base, theme.surface)
     palette.setColor(QPalette.ColorRole.Button, theme.surface_alt)
     palette.setColor(QPalette.ColorRole.Text, theme.text_primary)
+    palette.setColor(QPalette.ColorRole.AlternateBase, theme.surface_alt)
     palette.setColor(QPalette.ColorRole.WindowText, theme.text_primary)
     palette.setColor(QPalette.ColorRole.ButtonText, theme.text_primary)
     palette.setColor(QPalette.ColorRole.Highlight, theme.accent)
