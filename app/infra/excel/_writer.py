@@ -7,39 +7,11 @@ from typing import Iterable, Sequence
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
+from app.core.common.contact_columns import MOBILE_COLUMN_NAMES
+
 __all__ = ["ensure_text_columns", "TEXT_COLUMN_NAMES"]
 
-TEXT_COLUMN_NAMES = frozenset(
-    {
-        "student_mobile",
-        "student_mobile_raw",
-        "student_mobile_number",
-        "student_contact1_mobile",
-        "student_contact2_mobile",
-        "contact1_mobile",
-        "contact2_mobile",
-        "student_landline",
-        "landline",
-        "student_phone",
-        "student_home_phone",
-        "hekmat_tracking",
-        "student_hekmat_tracking_code",
-        "student_hekmat_tracking",
-        "student_tracking_code",
-        "tracking_code",
-        "tracking_code_hekmat",
-        "تلفن همراه",
-        "موبایل دانش آموز",
-        "موبایل دانش‌آموز",
-        "موبایل رابط 1",
-        "تلفن رابط 1",
-        "موبایل رابط 2",
-        "تلفن رابط 2",
-        "تلفن ثابت",
-        "تلفن",
-        "کد رهگیری حکمت",
-    }
-)
+TEXT_COLUMN_NAMES = frozenset(MOBILE_COLUMN_NAMES)
 
 
 def ensure_text_columns(
