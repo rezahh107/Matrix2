@@ -57,7 +57,9 @@ def build_font_config(
     return FontConfig(name=font_name, size=size)
 
 
-def ensure_xlsxwriter_format(workbook: Any, font: FontConfig, *, header: bool = False):
+def ensure_xlsxwriter_format(
+    workbook: Any, font: FontConfig, *, header: bool = False, align_right: bool = False
+):
     """ساخت Format مشترک xlsxwriter فقط با تنظیمات فونت.
 
     مثال::
@@ -72,8 +74,8 @@ def ensure_xlsxwriter_format(workbook: Any, font: FontConfig, *, header: bool = 
 
     if not hasattr(workbook, "_em_format_cache"):
         workbook._em_format_cache = {}  # type: ignore[attr-defined]
-    cache: Dict[Tuple[Optional[str], Optional[int], bool], Any] = workbook._em_format_cache  # type: ignore[attr-defined]
-    key = (font.name, font.size, header)
+    cache: Dict[Tuple[Optional[str], Optional[int], bool, bool], Any] = workbook._em_format_cache  # type: ignore[attr-defined]
+    key = (font.name, font.size, header, align_right)
     if key in cache:
         return cache[key]
     options: Dict[str, Any] = {}
@@ -83,6 +85,8 @@ def ensure_xlsxwriter_format(workbook: Any, font: FontConfig, *, header: bool = 
         options["font_size"] = font.size
     if header:
         options["bold"] = True
+    if align_right:
+        options["align"] = "right"
     fmt = workbook.add_format(options)
     cache[key] = fmt
     return fmt

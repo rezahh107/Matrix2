@@ -2,12 +2,8 @@
 QWidget {
     background-color: {background};
     color: {text};
-    font-family: {font_fa};
-    font-size: {body_size}pt;
-}
-
-*[lang="en"] {
     font-family: {font_en};
+    font-size: {body_size}pt;
 }
 
 QMainWindow, QDialog {
