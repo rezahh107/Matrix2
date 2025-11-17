@@ -303,6 +303,9 @@ class MainWindow(QMainWindow):
         self._center_manager_combos: Dict[int, QComboBox] = {}
         self._manager_names_cache: list[str] = []
         self._btn_reset_managers: QPushButton | None = None
+        self._log: QTextEdit | None = None
+        self._log_buffer: list[str] = []
+        self._log_line = 0
         self._shortcut_buttons: List[QToolButton] = []
         self._btn_open_output_shortcut: QToolButton | None = None
         self._files_card: DashboardCard | None = None
