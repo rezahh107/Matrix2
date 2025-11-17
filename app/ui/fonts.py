@@ -70,20 +70,6 @@ def _get_style_strategy_flags(*names: str) -> int:
     except Exception:  # pragma: no cover - در نبود PySide6 فقط صفر بازمی‌گردد
         return 0
 
-    def _to_int(flag: object) -> int | None:
-        try:
-            return int(flag)
-        except TypeError:
-            pass
-        try:
-            value = getattr(flag, "value")
-        except Exception:
-            return None
-        try:
-            return int(value)
-        except Exception:
-            return None
-
     flags = 0
     for name in names:
         try:
@@ -91,14 +77,7 @@ def _get_style_strategy_flags(*names: str) -> int:
         except AttributeError:
             LOGGER.debug("StyleStrategy.%s در این نسخه یافت نشد", name)
             continue
-
-        coerced = _to_int(value)
-        if coerced is None:
-            LOGGER.debug("عدم امکان تبدیل StyleStrategy.%s به int", name)
-            continue
-
-        flags |= coerced
-
+        flags |= int(value)
     return flags
 
 
@@ -485,10 +464,7 @@ def _with_antialias(font: "QFont") -> "QFont":
         "PreferQuality",
     )
     if strategy:
-        try:
-            font.setStyleStrategy(QFont.StyleStrategy(strategy))
-        except Exception:
-            font.setStyleStrategy(strategy)
+        font.setStyleStrategy(strategy)
 
     hinting_candidates = [
         "PreferFullHinting",
