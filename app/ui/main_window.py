@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -56,7 +55,6 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTextEdit,
     QToolBar,
-    QToolButton,
     QGraphicsOpacityEffect,
     QVBoxLayout,
     QWidget,
@@ -75,15 +73,11 @@ from app.ui.loaders import ExcelLoader
 from app.ui.policy_cache import get_cached_policy
 from app.ui.fonts import get_app_font
 from .task_runner import ProgressFn, Worker
-from .widgets import DashboardCard, FilePicker, ThemedStatusBar
+from .widgets import FilePicker, ThemedStatusBar
 from .app_preferences import AppPreferences
 from .i18n import Language
 from .preferences import (
-    FileStatusLevel,
-    FileStatusViewModel,
-    collect_file_statuses,
     format_last_run_label,
-    load_dashboard_texts,
     read_last_run_info,
 )
 from .preferences.language_dialog import LanguageDialog
@@ -298,8 +292,6 @@ class MainWindow(QMainWindow):
 
         self._worker: Worker | None = None
         self._success_hook: Callable[[], None] | None = None
-        self._dashboard_texts = load_dashboard_texts(self._translator)
-        self._dashboard_frame: QFrame | None = None
         self._btn_open_output_folder: QPushButton | None = None
         self._center_manager_combos: Dict[int, QComboBox] = {}
         self._manager_names_cache: list[str] = []
@@ -307,18 +299,12 @@ class MainWindow(QMainWindow):
         self._log: QTextEdit | None = None
         self._log_buffer: list[str] = []
         self._log_line = 0
-        self._shortcut_buttons: List[QToolButton] = []
-        self._btn_open_output_shortcut: QToolButton | None = None
-        self._files_card: DashboardCard | None = None
-        self._checklist_card: DashboardCard | None = None
-        self._actions_card: DashboardCard | None = None
         self._toolbar_actions: Dict[str, QAction] = {}
         self._toolbar_theme_label: QLabel | None = None
         self._stage_badge: QLabel | None = None
         self._stage_detail: QLabel | None = None
         self._progress_caption: QLabel | None = None
         self._last_run_badge: QLabel | None = None
-        self._file_status_rows: Dict[str, Tuple[QLabel, QLabel]] = {}
         self._current_action: str = self._translator.text("status.ready", "آماده")
         self._status_bar: ThemedStatusBar | None = None
         self._excel_loaders: set[ExcelLoader] = set()
@@ -337,9 +323,6 @@ class MainWindow(QMainWindow):
         top_layout = QVBoxLayout(top_pane)
         top_layout.setContentsMargins(12, 12, 12, 6)
         top_layout.setSpacing(12)
-
-        dashboard = self._build_dashboard()
-        top_layout.addWidget(dashboard)
 
         self._tabs = QTabWidget(self)
         self._tabs.setDocumentMode(True)
@@ -471,7 +454,7 @@ class MainWindow(QMainWindow):
         self._register_interactive_controls()
         self._update_output_folder_button_state()
         self._apply_theme()
-        self._refresh_dashboard_state()
+        self._refresh_last_run_badge()
         self._animate_tab_change(self._tabs.currentIndex())
 
     def _t(self, key: str, fallback: str) -> str:
@@ -689,8 +672,6 @@ class MainWindow(QMainWindow):
             self._language_label.setText(
                 f"{self._t('status.language', 'زبان فعال')}: {language.code.upper()}"
             )
-        self._dashboard_texts = load_dashboard_texts(self._translator)
-        self._populate_dashboard_cards()
         self._refresh_tab_texts()
         self._refresh_action_texts()
         self._refresh_last_run_badge()
@@ -712,209 +693,6 @@ class MainWindow(QMainWindow):
                     self._progress.value(), self._t("status.ready", "آماده")
                 )
             self._update_status_bar_state("ready")
-
-    def _build_dashboard(self) -> QWidget:
-        """ایجاد پانل داشبورد با کارت‌های وضعیت، چک‌لیست و میانبرها."""
-
-        frame = QFrame(self)
-        frame.setObjectName("dashboardPanel")
-        frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        frame.setMaximumHeight(180)
-        layout = QHBoxLayout(frame)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(10)
-        self._dashboard_frame = frame
-
-        self._files_card = DashboardCard(
-            self._dashboard_texts.files_title,
-            self._dashboard_texts.files_description,
-            self,
-            max_height=140,
-            theme=self._theme,
-        )
-        layout.addWidget(self._files_card, 1)
-
-        self._checklist_card = DashboardCard(
-            self._dashboard_texts.checklist_title,
-            self._dashboard_texts.checklist_description,
-            self,
-            max_height=140,
-            theme=self._theme,
-        )
-        layout.addWidget(self._checklist_card, 1)
-
-        self._actions_card = DashboardCard(
-            self._dashboard_texts.actions_title,
-            self._dashboard_texts.actions_description,
-            self,
-            theme=self._theme,
-        )
-        layout.addWidget(self._actions_card, 1)
-
-        self._populate_dashboard_cards()
-        return frame
-
-    def _create_dashboard_shortcut(
-        self,
-        text: str,
-        tooltip: str,
-        callback: Callable[[], None],
-    ) -> QToolButton:
-        """ساخت دکمه میان‌بر داشبورد با تکیه بر سبک پیش‌فرض Fusion."""
-
-        button = QToolButton(self)
-        button.setObjectName("dashboardShortcut")
-        button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        button.setFixedHeight(32)
-        button.setText(text)
-        button.setToolTip(tooltip)
-        button.clicked.connect(callback)
-        self._shortcut_buttons.append(button)
-        return button
-
-    def _populate_dashboard_cards(self) -> None:
-        """بازسازی محتوا و ترجمه کارت‌های داشبورد."""
-
-        self._dashboard_texts = load_dashboard_texts(self._translator)
-        if self._files_card is None or self._checklist_card is None or self._actions_card is None:
-            return
-
-        self._file_status_rows = {}
-        self._files_card.set_header(
-            self._dashboard_texts.files_title, self._dashboard_texts.files_description
-        )
-        self._files_card.clear_body()
-        for status in collect_file_statuses(self._prefs, self._translator):
-            self._files_card.body_layout().addWidget(self._create_file_status_row(status))
-
-        self._checklist_card.set_header(
-            self._dashboard_texts.checklist_title, self._dashboard_texts.checklist_description
-        )
-        self._checklist_card.clear_body()
-        if self._dashboard_texts.checklist_items:
-            for item in self._dashboard_texts.checklist_items:
-                label = QLabel(f"• {item.text}")
-                label.setWordWrap(True)
-                label.setObjectName("dashboardChecklistItem")
-                self._checklist_card.body_layout().addWidget(label)
-        else:
-            placeholder = QLabel(self._t("dashboard.no_checklist", "چک‌لیستی تعریف نشده است"))
-            placeholder.setObjectName("dashboardChecklistItem")
-            self._checklist_card.body_layout().addWidget(placeholder)
-
-        self._actions_card.set_header(
-            self._dashboard_texts.actions_title, self._dashboard_texts.actions_description
-        )
-        self._actions_card.clear_body()
-        policy_display = self._default_policy_path or "config/policy.json"
-        policy_label = QLabel(
-            f"<b>{self._t('dashboard.policy.info', 'سیاست فعال:')}</b> {policy_display}<br>"
-            "نسخه Policy: 1.0.3 • نسخه SSoT: 1.0.2"
-        )
-        policy_label.setTextFormat(Qt.RichText)
-        policy_label.setWordWrap(True)
-        policy_label.setObjectName("dashboardPolicyInfo")
-        self._actions_card.body_layout().addWidget(policy_label)
-
-        self._shortcut_buttons.clear()
-        buttons_container = QWidget(self)
-        buttons_row = QGridLayout(buttons_container)
-        buttons_row.setContentsMargins(0, 0, 0, 0)
-        buttons_row.setHorizontalSpacing(6)
-        buttons_row.setVerticalSpacing(6)
-        buttons_row.setColumnStretch(0, 1)
-        buttons_row.setColumnStretch(1, 1)
-        buttons = [
-            (
-                self._t("dashboard.button.build", "ساخت ماتریس"),
-                self._t("tooltip.build", "اجرای کامل سناریوی ساخت ماتریس"),
-                self._start_build,
-            ),
-            (
-                self._t("dashboard.button.allocate", "تخصیص"),
-                self._t("tooltip.allocate", "اجرای تخصیص دانش‌آموز به منتور"),
-                self._start_allocate,
-            ),
-            (
-                self._t("dashboard.button.rule_engine", "موتور قواعد"),
-                self._t("tooltip.rule_engine", "اجرای Rule Engine برای تست سیاست"),
-                self._start_rule_engine,
-            ),
-        ]
-        for idx, (text, tooltip, callback) in enumerate(buttons):
-            button = self._create_dashboard_shortcut(text, tooltip, callback)
-            buttons_row.addWidget(button, idx // 2, idx % 2)
-        self._btn_open_output_shortcut = self._create_dashboard_shortcut(
-            self._t("dashboard.button.output", "پوشه خروجی"),
-            self._t("tooltip.output_folder", "آخرین پوشه خروجی تولید شده را باز می‌کند"),
-            self._open_last_output_folder,
-        )
-        buttons_row.addWidget(
-            self._btn_open_output_shortcut, len(buttons) // 2, len(buttons) % 2
-        )
-        self._actions_card.body_layout().addWidget(buttons_container)
-
-    def _create_file_status_row(self, model: FileStatusViewModel) -> QWidget:
-        """ساخت ردیف وضعیت فایل بر اساس مدل نمایشی."""
-
-        row = QFrame(self)
-        row.setObjectName("fileStatusRow")
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        indicator = QLabel("●", row)
-        indicator.setObjectName("fileStatusIndicator")
-        indicator.setAlignment(Qt.AlignCenter)
-        indicator.setFixedWidth(18)
-        layout.addWidget(indicator, 0, Qt.AlignTop)
-
-        text_label = QLabel(row)
-        text_label.setWordWrap(True)
-        text_label.setObjectName("fileStatusText")
-        layout.addWidget(text_label, 1)
-
-        row.setToolTip(model.description)
-        self._file_status_rows[model.key] = (indicator, text_label)
-        self._apply_file_status_model(model)
-        return row
-
-    def _apply_file_status_model(self, model: FileStatusViewModel) -> None:
-        """به‌روزرسانی نما با توجه به وضعیت فایل."""
-
-        widgets = self._file_status_rows.get(model.key)
-        if widgets is None:
-            return
-        indicator, text_label = widgets
-        color = (
-            self._theme.colors.success
-            if model.level is FileStatusLevel.READY
-            else self._theme.colors.warning
-        )
-        symbol = "●" if model.level is FileStatusLevel.READY else "▲"
-        indicator.setText(symbol)
-        indicator.setStyleSheet(f"color:{color};font-size:16px;")
-        path_display = model.path if model.path else self._t("status.waiting", "تنظیم نشده")
-        state_text = self._t("status.ready", "آماده") if model.exists else self._t("status.waiting", "در انتظار اجرا")
-        text_label.setText(
-            f"<b>{model.label}</b><br>"
-            f"<span style='color:{self._theme.colors.text_muted}'>{path_display}</span><br>"
-            f"<span style='color:{self._theme.colors.text}'>{state_text}</span>"
-        )
-
-    def _refresh_dashboard_state(self) -> None:
-        """به‌روزرسانی کارت وضعیت و برچسب آخرین اجرا."""
-
-        self._apply_file_statuses(collect_file_statuses(self._prefs, self._translator))
-        self._refresh_last_run_badge()
-
-    def _apply_file_statuses(self, statuses: Iterable[FileStatusViewModel]) -> None:
-        """اعمال وضعیت فایل‌ها روی ویجت‌های کارت."""
-
-        for model in statuses:
-            self._apply_file_status_model(model)
-
     def _refresh_last_run_badge(self) -> None:
         """به‌روزرسانی برچسب آخرین اجرای ثبت‌شده."""
 
@@ -981,10 +759,6 @@ class MainWindow(QMainWindow):
         self._apply_theme_styles()
 
     def _apply_theme_styles(self) -> None:
-        for card in (self._files_card, self._checklist_card, self._actions_card):
-            if card is not None:
-                card.apply_theme(self._theme)
-                apply_card_shadow(card)
         if hasattr(self, "_log_panel"):
             self._log_panel.apply_theme(self._theme)
         if self._status_bar is not None:
@@ -1647,7 +1421,6 @@ class MainWindow(QMainWindow):
             self._picker_rule_current_roster,
             self._btn_rule_autodetect,
         ]
-        self._interactive.extend(self._shortcut_buttons)
         self._interactive.extend(self._center_manager_combos.values())
         if self._btn_reset_managers is not None:
             self._interactive.append(self._btn_reset_managers)
@@ -1698,8 +1471,9 @@ class MainWindow(QMainWindow):
             output_path = self._picker_output_matrix.text().strip()
             if output_path:
                 self._prefs.last_matrix_path = output_path
+            self._update_output_folder_button_state()
             self._prefs.record_last_run("build")
-            self._refresh_dashboard_state()
+            self._refresh_last_run_badge()
 
         self._launch_cli(argv, "ساخت ماتریس", on_success=_remember_build_output)
 
@@ -1776,7 +1550,7 @@ class MainWindow(QMainWindow):
                 self._prefs.last_sabt_config_path = sabt_config
             self._update_output_folder_button_state()
             self._prefs.record_last_run("allocate")
-            self._refresh_dashboard_state()
+            self._refresh_last_run_badge()
 
         self._launch_cli(
             argv,
@@ -1858,7 +1632,7 @@ class MainWindow(QMainWindow):
                 self._prefs.last_sabt_config_path = sabt_config
             self._update_output_folder_button_state()
             self._prefs.record_last_run("rule-engine")
-            self._refresh_dashboard_state()
+            self._refresh_last_run_badge()
 
         self._launch_cli(
             argv,
@@ -2526,8 +2300,6 @@ class MainWindow(QMainWindow):
         available = bool(self._determine_last_output_path())
         if self._btn_open_output_folder is not None:
             self._btn_open_output_folder.setEnabled(available)
-        if self._btn_open_output_shortcut is not None:
-            self._btn_open_output_shortcut.setEnabled(available)
 
     def _ensure_filled(self, fields: Iterable[Tuple[FilePicker | QLineEdit, str]]) -> bool:
         """بررسی پر بودن فیلدهای ضروری و نمایش هشدار در صورت نقص."""
