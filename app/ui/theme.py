@@ -25,6 +25,7 @@ __all__ = [
     "ThemeColors",
     "ThemeTypography",
     "Theme",
+    "apply_layout_direction",
     "apply_global_font",
     "apply_palette",
     "load_stylesheet",
@@ -186,12 +187,18 @@ def apply_global_font(app: QApplication, typography: ThemeTypography = ThemeTypo
         >>> app = QApplication.instance() or QApplication([])
         >>> apply_global_font(app)
     """
+    app.setFont(_create_app_font())
 
-    font = QFont()
-    # UI بر اساس دستور کار انگلیسی است؛ از پشتهٔ فونت انگلیسی استفاده می‌کنیم.
-    font.setFamily(typography.font_en_stack)
-    font.setPointSize(typography.body_size)
-    app.setFont(font)
+
+def _create_app_font() -> QFont:
+    """ایجاد فونت سراسری برنامه بر پایهٔ Tahoma 8pt.
+
+    این فونت کوچک و خوانا بوده و در زبان‌های فارسی و انگلیسی رفتار باثباتی دارد.
+    """
+
+    font = QFont("Tahoma", 8)
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+    return font
 
 
 def apply_palette(app: QApplication, theme: Theme) -> None:
@@ -308,6 +315,7 @@ def apply_theme(app: QApplication, theme: Theme | str | None = None) -> Theme:
     """
 
     app.setStyle("Fusion")
+    app.setFont(_create_app_font())
     app.setStyleSheet("")
 
     if isinstance(theme, Theme):
@@ -321,6 +329,16 @@ def apply_theme(app: QApplication, theme: Theme | str | None = None) -> Theme:
 
     app.setPalette(palette)
     return resolved_theme
+
+
+def apply_layout_direction(app: QApplication, language_code: str) -> None:
+    """تنظیم جهت چیدمان اپلیکیشن بر اساس زبان."""
+
+    normalized = (language_code or "").lower()
+    if normalized.startswith("fa"):
+        app.setLayoutDirection(Qt.RightToLeft)
+    else:
+        app.setLayoutDirection(Qt.LeftToRight)
 
 
 def apply_card_shadow(widget: QWidget) -> None:
@@ -382,17 +400,17 @@ def build_theme(mode: str | None = None) -> Theme:
     normalized = "dark" if (mode or "").lower() == "dark" else "light"
     if normalized == "dark":
         colors = ThemeColors(
-            background="#1f1f1f",
-            card="#2b2b2b",
+            background="#202020",
+            card="#2a2a2a",
             text="#f2f2f2",
             text_muted="#c4c4c4",
             primary="#0078d7",
             success="#16a34a",
             warning="#f59e0b",
             error="#dc2626",
-            log_background="#0f172a",
+            log_background="#171717",
             border="#3a3a3a",
-            surface_alt="#333333",
+            surface_alt="#353535",
         )
     else:
         colors = ThemeColors()
