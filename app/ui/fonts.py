@@ -33,11 +33,6 @@ FONTS_DIR: Path = Path(__file__).resolve().parent / "fonts"
 FALLBACK_FAMILY = "Tahoma"
 DEFAULT_POINT_SIZE = 9
 
-_WINDOWS_CANDIDATES: list[Path] = [
-    Path(r"C:\\Users\\Nestech\\AppData\\Local\\Microsoft\\Windows\\Fonts\\Vazir.ttf"),
-    Path(r"C:\\Users\\Nestech\\Downloads\\Compressed\\vazir-font-v16.1.0\\vazir-font-v16.1.0"),
-]
-
 
 def ensure_vazir_local_fonts() -> None:
     """اطمینان از وجود فایل‌های وزیر در مسیر محلی برنامه.
@@ -62,7 +57,7 @@ def ensure_vazir_local_fonts() -> None:
 
 
 def _iter_windows_sources() -> Iterable[List[Path]]:
-    for candidate in _WINDOWS_CANDIDATES:
+    for candidate in _windows_candidates():
         if not candidate.exists():
             continue
         if candidate.is_file():
@@ -71,6 +66,24 @@ def _iter_windows_sources() -> Iterable[List[Path]]:
             fonts = sorted(candidate.glob("Vazir*.ttf"))
             if fonts:
                 yield fonts
+
+
+def _windows_candidates() -> list[Path]:
+    candidates: list[Path] = []
+
+    env_paths = os.environ.get("VAZIR_FONT_PATHS")
+    if env_paths:
+        for raw in env_paths.split(os.pathsep):
+            if raw:
+                candidates.append(Path(raw).expanduser())
+
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        candidates.append(Path(local_appdata) / "Microsoft" / "Windows" / "Fonts")
+
+    candidates.append(Path.home() / "Downloads")
+
+    return candidates
 
 
 def _safe_copy_font(src: Path, dst: Path) -> None:
