@@ -246,6 +246,8 @@ def load_stylesheet(theme: Theme) -> str:
     - در صورت وجود توکن ناشناخته، خطای واضح ایجاد می‌شود.
     """
 
+    # NOTE: اعمال QSS در apply_theme فعلاً غیرفعال است؛ این تابع برای استفاده‌های
+    # محلی/آتی نگه داشته شده است.
     qss_path = Path(__file__).with_name("styles.qss")
     qss = qss_path.read_text(encoding="utf-8")
     return _render_stylesheet(qss, _token_mapping(theme))
@@ -276,22 +278,26 @@ def _render_stylesheet(qss: str, mapping: Dict[str, str]) -> str:
 
 
 def apply_theme(app: QApplication, theme: Theme | None = None) -> Theme:
-    """اعمال تم پیش‌فرض روی برنامه و بارگذاری QSS.
+    """اعمال تم دیفالت Qt با پاک‌سازی QSS سفارشی.
 
-    پارامترها:
-        app: برنامه Qt فعال.
-        theme: تم انتخابی؛ اگر None باشد تم پیش‌فرض روشن اعمال می‌شود.
+    این پیاده‌سازی موقتاً هرگونه استایل‌شیت سفارشی را غیرفعال می‌کند تا
+    برنامه با پالت و استایل استاندارد Qt اجرا شود. امضای تابع ثابت می‌ماند
+    تا در آینده بتوان تم جدید را از همین نقطه فعال کرد.
 
     مثال:
         >>> app = QApplication.instance() or QApplication([])
         >>> apply_theme(app)
     """
 
-    theme = theme or Theme()
-    apply_global_font(app, theme.typography)
-    apply_palette(app, theme)
-    app.setStyleSheet(load_stylesheet(theme))
-    return theme
+    resolved_theme = theme or Theme()
+    # پاک کردن هر استایل سفارشی پیشین
+    app.setStyleSheet("")
+
+    # بازگرداندن پالت استاندارد Qt
+    style = app.style()
+    app.setPalette(style.standardPalette())
+
+    return resolved_theme
 
 
 def apply_card_shadow(widget: QWidget) -> None:
