@@ -11,12 +11,16 @@ from PySide6.QtWidgets import (
     QLabel,
     QScrollArea,
     QSizePolicy,
+    QStyle,
+    QStyleOption,
+    QStylePainter,
     QVBoxLayout,
     QWidget,
     QFrame,
 )
 
 from app.ui.theme import Theme, apply_card_shadow
+from app.ui.utils import assert_painter_active
 
 __all__ = ["DashboardCard"]
 
