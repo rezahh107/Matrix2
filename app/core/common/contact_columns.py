@@ -80,8 +80,8 @@ MOBILE_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
     }
 )
 
-TEXT_SENSITIVE_COLUMN_NAMES: Final[frozenset[str]] = MOBILE_COLUMN_NAMES.union(
-    TRACKING_CODE_COLUMN_NAMES
+TEXT_SENSITIVE_COLUMN_NAMES: Final[frozenset[str]] = (
+    MOBILE_COLUMN_NAMES | TRACKING_CODE_COLUMN_NAMES
 )
 
 MOBILE_COLUMN_KEYWORDS: Final[tuple[str, ...]] = (
