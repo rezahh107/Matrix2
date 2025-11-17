@@ -8,7 +8,7 @@ from datetime import datetime
 import hashlib
 import re
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, MutableMapping, NamedTuple, Sequence
+from typing import Any, Callable, Iterable, Mapping, MutableMapping, NamedTuple, Sequence, Final
 
 import pandas as pd
 
@@ -75,6 +75,12 @@ _DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "
 _HEADER_SPACE_PATTERN = re.compile(r"[\s\u200c\u200f]+")
 _HEADER_PUNCT_PATTERN = re.compile(r"[\-/]+")
 
+REGISTRATION_STATUS_LABELS: Final[dict[int, str]] = {
+    0: "عادی",
+    1: "بنیاد",
+    3: "حکمت",
+}
+
 __all__ = [
     "GF_FIELD_TO_COL",
     "load_exporter_config",
@@ -88,6 +94,7 @@ __all__ = [
     "write_import_to_sabt_excel",
     "build_header_signature",
     "ImportToSabtExportError",
+    "map_registration_status_column",
 ]
 
 
@@ -978,6 +985,7 @@ def build_sheet2_frame(
             series = pd.Series(series, index=df_alloc.index)
         series = series.reindex(df_alloc.index)
         series = _apply_normalizers(series, spec.get("normalize"))
+        map_dict = _resolve_map(spec.get("map"), exporter_cfg)
 
         if column_name == "وضعیت ثبت نام":
             debug_log.append(
@@ -988,15 +996,17 @@ def build_sheet2_frame(
                     ),
                 }
             )
-            series = _normalize_registration_status(series)
+            normalized_status = _normalize_registration_status(series)
             debug_log.append(
                 {
                     "label": "sheet2_status_normalized",
                     **debug_registration_distribution(
-                        pd.DataFrame({"candidate": series}), ("candidate",)
+                        pd.DataFrame({"candidate": normalized_status}), ("candidate",)
                     ),
                 }
             )
+            series = map_registration_status_column(normalized_status)
+            map_dict = None
 
         if map_dict:
             mapped = series.astype("string").map(map_dict)
@@ -1062,6 +1072,23 @@ def _normalize_registration_status(series: pd.Series) -> pd.Series:
     blank_mask = numeric.isna()
     filled = numeric.mask(blank_mask, 0)
     return filled.astype("Int64")
+
+
+def map_registration_status_column(series: pd.Series) -> pd.Series:
+    """نگاشت امن وضعیت ثبت‌نام از کد عددی به متن فارسی.
+
+    ورودی باید شامل کدهای ۰/۱/۳ (Int64 یا قابل تبدیل) باشد. مقادیر خالی یا
+    نامعتبر به صورت پیش‌فرض «عادی» می‌شوند تا خروجی شفاف و پایدار باشد.
+
+    مثال::
+        >>> s = pd.Series([0, 3, None], dtype="Int64")
+        >>> map_registration_status_column(s).tolist()
+        ['عادی', 'حکمت', 'عادی']
+    """
+
+    numeric = _normalize_registration_status(series)
+    mapped = numeric.map(REGISTRATION_STATUS_LABELS)
+    return mapped.fillna("عادی")
 
 
 def apply_alias_rule(sheet2: pd.DataFrame, df_alloc: pd.DataFrame) -> pd.DataFrame:
