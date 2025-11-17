@@ -101,9 +101,8 @@ class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
             self._mark_inactive_once()
             return
 
-        offset = QPoint()
-        pixmap = self.sourcePixmap(
-            Qt.LogicalCoordinates, offset, QGraphicsEffect.PadToEffectiveBoundingRect
+        pixmap, offset = self._source_with_offset(
+            Qt.LogicalCoordinates, QGraphicsEffect.PadToEffectiveBoundingRect
         )
         if pixmap.isNull():
             self._log("draw.skip(null_pixmap)", painter)
