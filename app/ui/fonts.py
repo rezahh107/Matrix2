@@ -145,6 +145,10 @@ def create_app_font(
 ) -> "QFont":
     """ساخت فونت سراسری برنامه با اولویت وزیر سپس تاهوما.
 
+    Args:
+        point_size: اندازهٔ فونت؛ در صورت None از مقدار پیش‌فرض استفاده می‌شود.
+        fallback_family: در صورت نیاز، خانوادهٔ فونت fallback سفارشی.
+
     مثال::
         >>> font = create_app_font(point_size=10, fallback_family="Arial")  # doctest: +SKIP
         >>> bool(font.family())  # doctest: +SKIP
@@ -158,7 +162,7 @@ def create_app_font(
     size = point_size or DEFAULT_POINT_SIZE
     from PySide6.QtGui import QFont
 
-    family = (fallback_family or FALLBACK_FAMILY).strip() or FALLBACK_FAMILY
+    family = (fallback_family and fallback_family.strip()) or FALLBACK_FAMILY
     fallback = QFont(family, size)
     fallback.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
     return fallback
