@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import importlib
 import json
-import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import List, Tuple
 
 import pandas as pd
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.allocate_students import (
     _normalize_pool,

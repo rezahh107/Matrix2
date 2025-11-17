@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sys
 from typing import List
 
 import importlib
@@ -11,8 +10,6 @@ import importlib
 import pandas as pd
 import pytest
 from openpyxl import load_workbook
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.infra.excel.tables import TableNameRegistry  # noqa: E402
 from app.infra.io_utils import write_xlsx_atomic  # noqa: E402

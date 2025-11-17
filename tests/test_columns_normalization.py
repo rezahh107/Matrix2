@@ -1,14 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
-
 import importlib
 
 import pandas as pd
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.common import columns
 from app.core.common.columns import ensure_required_columns

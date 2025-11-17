@@ -2,16 +2,8 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from datetime import datetime
-from pathlib import Path
-import sys
 
 import pandas as pd
-
-_HERE = Path(__file__).resolve()
-for candidate in _HERE.parents:
-    if (candidate / "pyproject.toml").exists():
-        sys.path.insert(0, str(candidate))
-        break
 
 from app.infra.excel.export_allocations import (
     AllocationExportColumn,
