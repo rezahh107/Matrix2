@@ -820,19 +820,28 @@ def expand_group_token(
 # =============================================================================
 # SCHOOL MAPPINGS
 # =============================================================================
-def build_school_maps(schools_df: pd.DataFrame) -> tuple[dict[str, str], dict[str, str]]:
+def build_school_maps(
+    schools_df: pd.DataFrame, *, cfg: BuildConfig | None = None
+) -> tuple[dict[str, str], dict[str, str]]:
+    """ساخت نگاشت‌های کد ↔ نام مدرسه با نرمال‌سازی عددی پایدار."""
+
     schools_df = ensure_required_columns(schools_df, {COL_SCHOOL_CODE}, "school")
+    cfg = cfg or BuildConfig()
     name_cols = [c for c in schools_df.columns if "نام مدرسه" in c]
     if not name_cols:
         raise ValueError("ستون نام مدرسه در SchoolReport یافت نشد")
-    code_to_name = dict(zip(schools_df[COL_SCHOOL_CODE].astype(str), schools_df[name_cols[0]].astype(str)))
+
+    code_to_name: dict[str, str] = {}
     name_to_code: dict[str, str] = {}
     for _, r in schools_df.iterrows():
-        code = str(r[COL_SCHOOL_CODE])
+        normalized_code = str(school_code_norm(r[COL_SCHOOL_CODE], cfg=cfg))
+        primary_name = str(r[name_cols[0]])
+        code_to_name.setdefault(normalized_code, primary_name)
         for col in name_cols:
             nm = normalize_fa(r[col])
             if nm:
-                name_to_code.setdefault(nm, code)
+                name_to_code.setdefault(nm, normalized_code)
+
     return code_to_name, name_to_code
 
 
@@ -1766,7 +1775,7 @@ def build_matrix(
         crosswalk_groups_df,
         crosswalk_synonyms_df,
     )
-    code_to_name_school, school_name_to_code = build_school_maps(schools_df)
+    code_to_name_school, school_name_to_code = build_school_maps(schools_df, cfg=cfg)
     school_lookup_issues, school_mismatch_count, school_reference_count = (
         _detect_school_lookup_mismatches(
             insp_df,
@@ -2227,7 +2236,7 @@ def validate_with_students(
     stud_raw = students_df.copy()
     stud_raw.columns = [normalize_header(col) for col in stud_raw.columns]
     schools = schools_df.copy()
-    _, school_name_to_code = build_school_maps(schools)
+    _, school_name_to_code = build_school_maps(schools, cfg=cfg)
     name_to_code, _, _, _ = prepare_crosswalk_mappings(
         crosswalk_groups_df,
         crosswalk_synonyms_df,
