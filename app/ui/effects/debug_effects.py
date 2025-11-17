@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QGraphicsEffect,
@@ -79,6 +79,24 @@ class _LoggingMixin:
             hex(id(self)),
         )
 
+    def _source_with_offset(
+        self,
+        coordinates: Qt.CoordinateSystem,
+        pad_mode: QGraphicsEffect.PixmapPadMode,
+    ) -> tuple[QPixmap, QPoint]:
+        """Normalize PySide/PyQt sourcePixmap return shapes."""
+
+        offset = QPoint()
+        source = self.sourcePixmap(coordinates, offset, pad_mode)
+        if isinstance(source, tuple):
+            pixmap, returned_offset = source
+            if isinstance(returned_offset, QPoint):
+                offset = returned_offset
+        else:
+            pixmap = source
+
+        return pixmap, offset
+
 
 class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
     """افکت شفافیت با نقاش محلی و بدون شروع/پایان دستی."""
@@ -91,9 +109,8 @@ class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
         if not painter.isActive():
             self._mark_inactive_once()
 
-        offset = QPoint()
-        pixmap = self.sourcePixmap(
-            Qt.LogicalCoordinates, offset, QGraphicsEffect.PadToEffectiveBoundingRect
+        pixmap, offset = self._source_with_offset(
+            Qt.LogicalCoordinates, QGraphicsEffect.PadToEffectiveBoundingRect
         )
         if pixmap.isNull():
             self._log("draw.skip(null_pixmap)", painter)
@@ -120,6 +137,14 @@ class SafeDropShadowEffect(_LoggingMixin, QGraphicsDropShadowEffect):
     def draw(self, painter: QPainter) -> None:  # type: ignore[override]
         if not painter.isActive():
             self._mark_inactive_once()
+
+        pixmap, _ = self._source_with_offset(
+            Qt.LogicalCoordinates, QGraphicsEffect.PadToEffectiveBoundingRect
+        )
+        if pixmap.isNull():
+            self._log("draw.skip(null_pixmap)", painter)
+            self.drawSource(painter)
+            return
 
         # rely on the built-in drop shadow drawing to avoid platform-specific artifacts
         self._log("draw.begin", painter)
