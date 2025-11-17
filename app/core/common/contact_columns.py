@@ -23,6 +23,9 @@ __all__ = [
 ]
 
 
+_HEADER_CLEANUP_RE: Final[re.Pattern[str]] = re.compile(r"[_\-|\u200c]")
+
+
 MOBILE_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
     {
         "student_mobile",
@@ -83,9 +86,7 @@ def is_mobile_header(label: object) -> bool:
     if label_text in MOBILE_COLUMN_NAMES:
         return True
 
-    normalized = " ".join(
-        re.sub(r"[_\-|\u200c]", " ", label_text).casefold().split()
-    )
+    normalized = " ".join(_HEADER_CLEANUP_RE.sub(" ", label_text).casefold().split())
 
     return any(keyword in normalized for keyword in MOBILE_COLUMN_KEYWORDS)
 
