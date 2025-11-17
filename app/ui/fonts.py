@@ -8,11 +8,15 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
 import os
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, List
+
+from app.ui.assets.font_data_vazirmatn import VAZIRMATN_REGULAR_TTF_BASE64
 
 if TYPE_CHECKING:  # pragma: no cover
     from PySide6.QtGui import QFont
@@ -46,6 +50,9 @@ def ensure_vazir_local_fonts() -> None:
     FONTS_DIR.mkdir(parents=True, exist_ok=True)
 
     if _has_vazir_files(FONTS_DIR.glob("*.ttf")):
+        return
+
+    if _materialize_embedded_font(FONTS_DIR):
         return
 
     if os.name != "nt":
@@ -100,6 +107,28 @@ def _has_vazir_files(paths: Iterable[Path]) -> bool:
         if name.startswith("vazir") and path.suffix.lower() == ".ttf":
             return True
     return False
+
+
+def _materialize_embedded_font(target_dir: Path) -> Path | None:
+    """استخراج فونت وزیرمتن از دادهٔ base64 در صورت نبود فایل محلی."""
+
+    target = target_dir / "Vazirmatn-Regular.ttf"
+    if target.exists():
+        return target
+
+    try:
+        data = base64.b64decode(VAZIRMATN_REGULAR_TTF_BASE64)
+    except (binascii.Error, ValueError) as exc:  # pragma: no cover - دادهٔ تعبیه‌شده ثابت است
+        LOGGER.warning("دادهٔ فونت وزیرمتن نامعتبر بود: %s", exc)
+        return None
+
+    try:
+        target.write_bytes(data)
+    except OSError as exc:  # pragma: no cover - خطای سیستم فایل
+        LOGGER.debug("نوشتن فونت تعبیه‌شده ناموفق بود: %s", exc)
+        return None
+
+    return target
 
 
 def _install_fonts_from_directory(directory: Path) -> list[str]:
