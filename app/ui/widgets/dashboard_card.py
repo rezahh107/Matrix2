@@ -126,17 +126,10 @@ class DashboardCard(QFrame):
         apply_card_shadow(self)
 
     def paintEvent(self, event: QPaintEvent) -> None:  # type: ignore[override]
-        painter = QStylePainter(self)
-        if not assert_painter_active(painter, "DashboardCard.paintEvent"):
-            return
-
-        option = QStyleOption()
-        option.initFrom(self)
-        painter.drawPrimitive(QStyle.PE_Widget, option)
-
         LOGGER.debug(
             "DashboardCard.paintEvent | widget=%s effect=%s rect=%s",
             self,
             self.graphicsEffect(),
             event.rect(),
         )
+        super().paintEvent(event)

@@ -73,7 +73,7 @@ class ThemeTypography:
         'Vazirmatn'
     """
 
-    font_fa_stack: str = "Vazirmatn, IRANSansX, Tahoma, sans-serif"
+    font_fa_stack: str = "Vazirmatn, Vazir, IRANSansX, Tahoma, sans-serif"
     font_en_stack: str = "Segoe UI, system-ui, sans-serif"
     title_size: int = 16
     card_title_size: int = 14

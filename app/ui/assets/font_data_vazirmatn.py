@@ -13333,3 +13333,6 @@ KysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysr
 KysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysr
 KysrKysrKysrKysrKysrKysrKysrKysd
 """
+
+# حفظ سازگاری با نام‌های قدیمی در صورت استفاده در ماژول‌های دیگر
+VAZIRMATN_REGULAR_BASE64 = VAZIRMATN_REGULAR_TTF_BASE64

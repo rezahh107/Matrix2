@@ -21,8 +21,6 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
 )
 
-from app.ui.utils import assert_painter_active
-
 LOGGER = logging.getLogger(__name__)
 DEBUG_PAINT_EFFECTS = False
 
@@ -61,7 +59,8 @@ class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
         object.__setattr__(self, "_effect_meta", _EffectMeta(effect_name))
 
     def draw(self, painter: QPainter) -> None:  # type: ignore[override]
-        if not assert_painter_active(painter, f"{self._effect_meta.name}.draw"):
+        if not painter.isActive():
+            LOGGER.warning("%s | painter inactive on entry", self._effect_meta.name)
             return
 
         pixmap, offset = self.sourcePixmap(
@@ -89,17 +88,13 @@ class SafeDropShadowEffect(_LoggingMixin, QGraphicsDropShadowEffect):
         super().__init__(parent)
         object.__setattr__(self, "_effect_meta", _EffectMeta(effect_name))
 
-    def _build_shadow_image(
-        self, pixmap: QPixmap, radius: float, offset: QPointF, color: QColor
-    ) -> QImage:
+    def _build_shadow_image(self, pixmap: QPixmap, radius: float, offset: QPointF, color: QColor) -> QImage:
         margin = int(radius * 2)
         image_size = pixmap.size() + QSize(margin * 2, margin * 2)
         shadow_source = QImage(image_size, QImage.Format_ARGB32_Premultiplied)
         shadow_source.fill(Qt.transparent)
 
         painter = QPainter(shadow_source)
-        if not assert_painter_active(painter, f"{self._effect_meta.name}.shadow_image"):
-            return shadow_source
         painter.setCompositionMode(QPainter.CompositionMode_Source)
         painter.drawPixmap(margin + int(offset.x()), margin + int(offset.y()), pixmap)
         painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
@@ -112,7 +107,8 @@ class SafeDropShadowEffect(_LoggingMixin, QGraphicsDropShadowEffect):
         return blurred
 
     def draw(self, painter: QPainter) -> None:  # type: ignore[override]
-        if not assert_painter_active(painter, f"{self._effect_meta.name}.draw"):
+        if not painter.isActive():
+            LOGGER.warning("%s | painter inactive on entry", self._effect_meta.name)
             return
 
         pixmap, offset = self.sourcePixmap(

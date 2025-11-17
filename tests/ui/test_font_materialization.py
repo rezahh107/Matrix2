@@ -14,7 +14,7 @@ def test_embedded_vazirmatn_materialized(tmp_path, monkeypatch):
 
     files = list(fonts_dir.glob("*.ttf"))
     assert files, "فونت تعبیه‌شده باید تولید شود"
-    assert any(path.name.startswith("Vazir") for path in files)
+    assert any(path.name.startswith("Vazirmatn") for path in files)
     assert all(path.stat().st_size > 0 for path in files)
 
     # فراخوانی مجدد باید idempotent باشد و فایل جدیدی اضافه نکند
