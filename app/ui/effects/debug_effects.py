@@ -11,15 +11,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from PySide6.QtCore import QMargins, QPoint, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
-    QGraphicsBlurEffect,
     QGraphicsDropShadowEffect,
     QGraphicsEffect,
     QGraphicsOpacityEffect,
-    QGraphicsPixmapItem,
-    QGraphicsScene,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -124,68 +121,9 @@ class SafeDropShadowEffect(_LoggingMixin, QGraphicsDropShadowEffect):
         if not painter.isActive():
             self._mark_inactive_once()
 
-        offset = QPoint()
-        pixmap = self.sourcePixmap(
-            Qt.LogicalCoordinates, offset, QGraphicsEffect.PadToEffectiveBoundingRect
-        )
-        if pixmap.isNull():
-            self._log("draw.skip(null_pixmap)", painter)
-            self.drawSource(painter)
-            return
-
-        radius = max(0.0, self.blurRadius())
-        shadow_offset = self.offset()
-        shadow_color = QColor(self.color())
-        shadow_color.setAlphaF(shadow_color.alphaF() * self.opacity())
-
-        shadow_image = self._build_shadow_image(pixmap, radius, shadow_color)
-        draw_offset = offset + QPoint(int(shadow_offset.x()), int(shadow_offset.y()))
-
+        # rely on the built-in drop shadow drawing to avoid platform-specific artifacts
         self._log("draw.begin", painter)
-        painter.save()
         try:
-            if not shadow_image.isNull():
-                painter.drawImage(draw_offset, shadow_image)
-            painter.setOpacity(self.opacity())
-            painter.drawPixmap(offset, pixmap)
+            super().draw(painter)
         finally:
-            painter.restore()
             self._log("draw.end", painter)
-
-    def _build_shadow_image(self, pixmap: QPixmap, radius: float, color: QColor) -> QImage:
-        """ساخت تصویر سایهٔ نرم با QGraphicsBlurEffect بدون نقاش مشترک.
-
-        سایز تصویر با حاشیهٔ شعاع blur بزرگ‌تر می‌شود تا افت کیفیت یا برش
-        رخ ندهد. برای جلوگیری از نشت نقاش، همهٔ painterهای موقت در همان scope
-        پایان می‌یابند.
-        """
-
-        margin = int(max(1.0, radius * 2.0))
-        shadow_rect = pixmap.rect().marginsAdded(QMargins(margin, margin, margin, margin))
-        shadow_source = QImage(shadow_rect.size(), QImage.Format_ARGB32_Premultiplied)
-        shadow_source.fill(Qt.transparent)
-
-        # قدم ۱: ماسک سایه را با رنگ وارد کنیم
-        mask_painter = QPainter(shadow_source)
-        mask_painter.drawPixmap(margin, margin, pixmap)
-        mask_painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-        mask_painter.fillRect(shadow_source.rect(), color)
-        mask_painter.end()
-
-        # قدم ۲: اعمال Blur با استفاده از صحنهٔ موقت تا از blurImage وابسته نشویم
-        blur_effect = QGraphicsBlurEffect()
-        blur_effect.setBlurRadius(radius)
-
-        item = QGraphicsPixmapItem(QPixmap.fromImage(shadow_source))
-        item.setGraphicsEffect(blur_effect)
-
-        scene = QGraphicsScene()
-        scene.addItem(item)
-
-        blurred = QImage(shadow_source.size(), QImage.Format_ARGB32_Premultiplied)
-        blurred.fill(Qt.transparent)
-        blur_painter = QPainter(blurred)
-        scene.render(blur_painter)
-        blur_painter.end()
-
-        return blurred
