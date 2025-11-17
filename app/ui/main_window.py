@@ -418,6 +418,11 @@ class MainWindow(QMainWindow):
         self._log_panel.connect_clear(self._clear_log)
         self._log_panel.connect_save(self._save_log_to_file)
         self._log = self._log_panel.text_edit
+        if self._log_buffer:
+            buffered_messages = self._log_buffer[:]
+            self._log_buffer.clear()
+            for message in buffered_messages:
+                self._append_log(message)
         bottom_layout.addWidget(self._log_panel, 1)
 
         controls_layout = QHBoxLayout()
@@ -458,7 +463,6 @@ class MainWindow(QMainWindow):
             self._splitter.restoreState(state)
 
         self._interactive: List[QWidget] = []
-        self._log_line = 0
         self._is_busy_cursor = False
         self._register_interactive_controls()
         self._update_output_folder_button_state()
@@ -2449,6 +2453,9 @@ class MainWindow(QMainWindow):
     def _append_log(self, text: str) -> None:
         """افزودن پیام به لاگ با برجسته کردن خطاها."""
 
+        if self._log is None:
+            self._log_buffer.append(text)
+            return
         message = str(text or "")
         self._log_line += 1
         timestamp = QDateTime.currentDateTime().toString("HH:mm:ss")
