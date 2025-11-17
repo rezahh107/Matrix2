@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Dict
 
 from PySide6.QtCore import QEasingCurve, QObject, QPropertyAnimation
@@ -238,11 +239,40 @@ def _token_mapping(theme: Theme) -> Dict[str, str]:
 
 
 def load_stylesheet(theme: Theme) -> str:
-    """خواندن QSS و جایگذاری توکن‌های تم."""
+    """خواندن QSS و جایگذاری ایمن توکن‌های تم.
+
+    - فقط الگوهای {TOKEN} با حروف/عدد/underline جایگزین می‌شوند.
+    - براکت‌های ساختاری CSS (مثلاً ``QWidget {``) دست‌نخورده می‌مانند.
+    - در صورت وجود توکن ناشناخته، خطای واضح ایجاد می‌شود.
+    """
 
     qss_path = Path(__file__).with_name("styles.qss")
     qss = qss_path.read_text(encoding="utf-8")
-    return qss.format(**_token_mapping(theme))
+    return _render_stylesheet(qss, _token_mapping(theme))
+
+
+_TOKEN_PATTERN = re.compile(r"\{([A-Za-z0-9_]+)\}")
+
+
+def _render_stylesheet(qss: str, mapping: Dict[str, str]) -> str:
+    """جایگزینی امن توکن‌های `{TOKEN}` در QSS.
+
+    مثال:
+        >>> _render_stylesheet("QWidget { background: {background}; }", {"background": "#fff"})
+        'QWidget { background: #fff; }'
+    """
+
+    placeholders = {match.group(1) for match in _TOKEN_PATTERN.finditer(qss)}
+    missing = sorted(token for token in placeholders if token not in mapping)
+    if missing:
+        missing_str = ", ".join(missing)
+        raise ValueError(f"Unknown stylesheet tokens: {missing_str}")
+
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        return str(mapping[key])
+
+    return _TOKEN_PATTERN.sub(_replace, qss)
 
 
 def apply_theme(app: QApplication, theme: Theme | None = None) -> Theme:
