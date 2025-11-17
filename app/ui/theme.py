@@ -296,16 +296,6 @@ def _create_palette_from_theme(theme: Theme) -> QPalette:
     return palette
 
 
-def _is_dark_theme_candidate(theme: Theme | str | None) -> bool:
-    """تشخیص تیره بودن تم از روی نام یا مشخصه‌های آن."""
-
-    if isinstance(theme, Theme):
-        return theme.mode.lower() == "dark"
-    if isinstance(theme, str):
-        return "dark" in theme.lower()
-    return False
-
-
 def apply_theme(app: QApplication, theme: Theme | str | None = None) -> Theme:
     """اعمال تم روشن/تیره صرفاً با QPalette و سبک Fusion.
 
