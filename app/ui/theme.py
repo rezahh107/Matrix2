@@ -30,6 +30,9 @@ __all__ = [
     "apply_theme",
     "apply_card_shadow",
     "setup_button_hover_animation",
+    "relative_luminance",
+    "build_light_theme",
+    "build_dark_theme",
     "build_theme",
     "apply_theme_mode",
 ]
@@ -171,6 +174,23 @@ class Theme:
     @property
     def log_border(self) -> QColor:
         return QColor("#0f172a")
+
+
+def relative_luminance(color: QColor) -> float:
+    """محاسبهٔ لومننس نسبی برای مقایسهٔ کنتراست رنگ‌ها.
+
+    فرمول بر اساس استاندارد W3C (sRGB) است و خروجی بین ۰ تا ۱ قرار می‌گیرد.
+    """
+
+    r, g, b, _ = color.getRgbF()
+
+    def _linearize(channel: float) -> float:
+        if channel <= 0.03928:
+            return channel / 12.92
+        return ((channel + 0.055) / 1.055) ** 2.4
+
+    r_l, g_l, b_l = (_linearize(c) for c in (r, g, b))
+    return 0.2126 * r_l + 0.7152 * g_l + 0.0722 * b_l
 
 
 def apply_global_font(app: QApplication, typography: ThemeTypography = ThemeTypography()) -> None:
@@ -319,10 +339,51 @@ def setup_button_hover_animation(button: QPushButton) -> None:
 def build_theme(mode: str | None = None) -> Theme:
     """ساخت تم بر اساس حالت مورد نظر (فعلاً فقط روشن)."""
 
-    return Theme()
+    mode = (mode or "light").lower()
+    if mode == "dark":
+        return build_dark_theme()
+    return build_light_theme()
 
 
 def apply_theme_mode(app: QApplication, mode: str | None = None) -> Theme:
     """اعمال تم بر اساس حالت درخواستی."""
 
     return apply_theme(app, build_theme(mode or "light"))
+
+
+def build_light_theme() -> Theme:
+    """تم روشن پیش‌فرض با پس‌زمینهٔ روشن و متن تیره."""
+
+    colors = ThemeColors(
+        background="#f5f6fa",
+        card="#ffffff",
+        surface_alt="#eef2f7",
+        text="#111827",
+        text_muted="#6b7280",
+        primary="#2563eb",
+        success="#16a34a",
+        warning="#f59e0b",
+        error="#dc2626",
+        log_background="#f8fafc",
+        border="#e5e7eb",
+    )
+    return Theme(colors=colors)
+
+
+def build_dark_theme() -> Theme:
+    """تم تیره با کنتراست مناسب نسبت به نسخهٔ روشن."""
+
+    colors = ThemeColors(
+        background="#0f172a",
+        card="#111827",
+        surface_alt="#1f2937",
+        text="#e5e7eb",
+        text_muted="#94a3b8",
+        primary="#3b82f6",
+        success="#22c55e",
+        warning="#fbbf24",
+        error="#ef4444",
+        log_background="#0b1220",
+        border="#1f2a44",
+    )
+    return Theme(colors=colors)
