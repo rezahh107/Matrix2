@@ -9,20 +9,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import logging
 import re
 from typing import Dict
 
 from PySide6.QtCore import QEasingCurve, QObject, QPropertyAnimation, Qt
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import (
-    QApplication,
-    QGraphicsDropShadowEffect,
-    QPushButton,
-    QWidget,
-)
+from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
 from app.ui.fonts import create_app_font
 from app.ui.i18n import Language
+from app.ui.effects import SafeDropShadowEffect
 
 __all__ = [
     "ThemeColors",
@@ -38,6 +35,9 @@ __all__ = [
     "build_theme",
     "apply_theme_mode",
 ]
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -330,11 +330,21 @@ def apply_card_shadow(widget: QWidget) -> None:
         widget: ویجتی که باید سایه بگیرد.
     """
 
-    shadow = QGraphicsDropShadowEffect(widget)
+    shadow = SafeDropShadowEffect(
+        f"card_shadow[{widget.objectName() or widget.__class__.__name__}]",
+        widget,
+    )
     shadow.setBlurRadius(24)
     shadow.setOffset(0, 10)
     shadow.setColor(QColor(0, 0, 0, 35))
     widget.setGraphicsEffect(shadow)
+    LOGGER.debug(
+        "card_shadow installed | widget=%s effect=%s blur=%s offset=%s",
+        widget,
+        hex(id(shadow)),
+        shadow.blurRadius(),
+        shadow.offset(),
+    )
 
 
 class _HoverAnimationFilter(QObject):

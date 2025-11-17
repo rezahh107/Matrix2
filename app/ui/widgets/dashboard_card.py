@@ -2,21 +2,30 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Iterable
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPaintEvent
 from PySide6.QtWidgets import (
     QLabel,
     QScrollArea,
     QSizePolicy,
+    QStyle,
+    QStyleOption,
+    QStylePainter,
     QVBoxLayout,
     QWidget,
     QFrame,
 )
 
 from app.ui.theme import Theme, apply_card_shadow
+from app.ui.utils import assert_painter_active
 
 __all__ = ["DashboardCard"]
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class DashboardCard(QFrame):
@@ -115,3 +124,19 @@ class DashboardCard(QFrame):
 
     def _apply_shadow(self, spec) -> None:
         apply_card_shadow(self)
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # type: ignore[override]
+        painter = QStylePainter(self)
+        if not assert_painter_active(painter, "DashboardCard.paintEvent"):
+            return
+
+        option = QStyleOption()
+        option.initFrom(self)
+        painter.drawPrimitive(QStyle.PE_Widget, option)
+
+        LOGGER.debug(
+            "DashboardCard.paintEvent | widget=%s effect=%s rect=%s",
+            self,
+            self.graphicsEffect(),
+            event.rect(),
+        )
