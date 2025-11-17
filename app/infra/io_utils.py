@@ -171,13 +171,7 @@ def _stringify_cell(value: object) -> str:
 def _is_mobile_column(label: object) -> bool:
     """تشخیص ستون‌های موبایل بر اساس SSOT تماس."""
 
-    if is_mobile_header(label):
-        return True
-
-    label_text = str(label)
-    normalized = " ".join(re.sub(r"[|_\-\u200c]", " ", label_text).casefold().split())
-
-    return any(keyword in normalized for keyword in MOBILE_COLUMN_KEYWORDS)
+    return is_mobile_header(label)
 
 
 def _normalize_mobile_columns(df: pd.DataFrame) -> None:

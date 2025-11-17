@@ -8,14 +8,12 @@
 
 from __future__ import annotations
 
+import re
 from typing import Final, Iterable
 
 import pandas as pd
 
-from app.core.common.phone_rules import (
-    MOBILE_REQUIRED_LENGTH,
-    normalize_mobile,
-)
+from app.core.common.phone_rules import normalize_mobile
 
 __all__ = [
     "MOBILE_COLUMN_NAMES",
@@ -86,13 +84,7 @@ def is_mobile_header(label: object) -> bool:
         return True
 
     normalized = " ".join(
-        str(label_text)
-        .casefold()
-        .replace("_", " ")
-        .replace("-", " ")
-        .replace("|", " ")
-        .replace("\u200c", " ")
-        .split()
+        re.sub(r"[_\-|\u200c]", " ", label_text).casefold().split()
     )
 
     return any(keyword in normalized for keyword in MOBILE_COLUMN_KEYWORDS)
@@ -112,6 +104,4 @@ def normalize_mobile_series_for_export(series: pd.Series) -> pd.Series:
 
     normalized = series.astype("object").map(normalize_mobile)
     result = pd.Series(normalized, index=series.index, dtype="string")
-    if result.empty:
-        return result
-    return result.where(result.isna(), result.str.zfill(MOBILE_REQUIRED_LENGTH))
+    return result
