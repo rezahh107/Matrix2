@@ -13,6 +13,7 @@ from app.core.common.normalization import (
         ("كريم ياسر ۱۲۳", "کریم یاسر 123"),
         ("\u200fسجاد\u200c", "سجاد"),
         ("ى", "ی"),
+        ("آزمون-1", "آزمون-1"),
     ],
 )
 def test_normalize_persian_text_unifies_variants(raw, expected):
