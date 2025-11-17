@@ -70,6 +70,24 @@ class _LoggingMixin:
             hex(id(self)),
         )
 
+    def _source_with_offset(
+        self,
+        coordinates: Qt.CoordinateSystem,
+        pad_mode: QGraphicsEffect.PixmapPadMode,
+    ) -> tuple[QPixmap, QPoint]:
+        """Normalize PySide/PyQt sourcePixmap return shapes."""
+
+        offset = QPoint()
+        source = self.sourcePixmap(coordinates, offset, pad_mode)
+        if isinstance(source, tuple):
+            pixmap, returned_offset = source
+            if isinstance(returned_offset, QPoint):
+                offset = returned_offset
+        else:
+            pixmap = source
+
+        return pixmap, offset
+
 
 class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
     """افکت شفافیت با نقاش محلی و بدون شروع/پایان دستی."""
@@ -129,5 +147,4 @@ class SafeDropShadowEffect(_LoggingMixin, QGraphicsDropShadowEffect):
             painter.setWorldTransform(QTransform())
             super().draw(painter)
         finally:
-            painter.restore()
             self._log("draw.end", painter)
