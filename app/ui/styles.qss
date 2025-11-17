@@ -1,0 +1,219 @@
+/* تم روشن مینیمال بدون ویژگی‌های غیرپشتیبانی شده */
+QWidget {
+    background-color: {background};
+    color: {text};
+    font-family: {font_fa};
+    font-size: {body_size}pt;
+}
+
+*[lang="en"] {
+    font-family: {font_en};
+}
+
+QMainWindow, QDialog {
+    background-color: {background};
+}
+
+QToolBar#mainToolbar {
+    background: {card};
+    border: 1px solid {border};
+    border-radius: {radius_md}px;
+    padding: {spacing_sm}px;
+    spacing: {spacing_sm}px;
+}
+
+QToolBar#mainToolbar QToolButton {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: {spacing_xs}px {spacing_md}px;
+    color: {text};
+    font-weight: 600;
+}
+
+QToolBar#mainToolbar QToolButton:hover {
+    background: {primary_soft};
+    border-color: {primary};
+    color: {primary};
+}
+
+QToolBar#mainToolbar QToolButton:pressed {
+    background: {primary};
+    color: #ffffff;
+}
+
+QGroupBox {
+    border: 1px solid {border};
+    border-radius: {radius_md}px;
+    margin-top: {spacing_sm}px;
+    background: {card};
+    padding: {spacing_md}px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: {spacing_sm}px;
+    padding: 0 {spacing_sm}px {spacing_xs}px {spacing_sm}px;
+    color: {text};
+    font-weight: 700;
+    font-size: {card_title_size}pt;
+}
+
+QPushButton, QToolButton, QComboBox {
+    border-radius: 999px;
+    padding: {spacing_xs}px {spacing_md}px;
+    font-weight: 600;
+    min-height: 32px;
+}
+
+QPushButton[variant="primary"], QToolButton[variant="primary"] {
+    background: {primary};
+    color: #ffffff;
+    border: 1px solid {primary};
+}
+
+QPushButton[variant="secondary"], QToolButton[variant="secondary"], QPushButton#secondaryButton, QToolButton#secondaryButton {
+    background: {card};
+    color: {text};
+    border: 1px solid {border};
+}
+
+QPushButton[variant="secondary"]:hover, QToolButton[variant="secondary"]:hover, QPushButton#secondaryButton:hover, QToolButton#secondaryButton:hover {
+    background: {surface_alt};
+}
+
+QPushButton:disabled, QToolButton:disabled, QComboBox:disabled {
+    background: {surface_alt};
+    color: {text_muted};
+    border-color: {border};
+}
+
+QComboBox {
+    border: 1px solid {border};
+    background: {card};
+    color: {text};
+    padding: {spacing_xs}px {spacing_md}px;
+}
+
+QComboBox QAbstractItemView {
+    background: {card};
+    selection-background-color: {primary_soft};
+    selection-color: {text};
+}
+
+QLineEdit, QTextEdit {
+    border: 1px solid {border};
+    border-radius: {radius_sm}px;
+    padding: {spacing_xs}px {spacing_md}px;
+    background: {card};
+}
+
+QLineEdit:focus, QTextEdit:focus {
+    border: 2px solid {primary};
+    background: {surface_alt};
+}
+
+QFrame#dashboardCard, QFrame#heroCard, QFrame#actionsCard {
+    background: {card};
+    border: 1px solid {border};
+    border-radius: {radius_md}px;
+    padding: {spacing_md}px;
+}
+
+QLabel#dashboardCardTitle, QLabel#heroTitle {
+    font-size: {card_title_size}pt;
+    font-weight: 700;
+    color: {text};
+}
+
+QLabel#dashboardCardDescription, QLabel#dashboardChecklistItem, QLabel#heroSubtitle {
+    color: {text_muted};
+    font-size: {body_size}pt;
+}
+
+QLabel#heroBadge {
+    background: {primary_soft};
+    border: 1px solid {border};
+    color: {text};
+    padding: {spacing_xs}px {spacing_md}px;
+    border-radius: {radius_sm}px;
+    font-weight: 700;
+}
+
+QLabel#themeSelectorLabel, QLabel#dashboardPolicyInfo, QLabel#labelStageDetail, QLabel#labelStatus, QLabel#lastRunBadge, QLabel#progressCaption {
+    color: {text_muted};
+}
+
+QLabel#lastRunBadge[empty="true"] {
+    background: {surface_alt};
+    border: 1px dashed {border};
+    padding: {spacing_xs}px {spacing_md}px;
+    border-radius: {radius_sm}px;
+}
+
+QStatusBar {
+    background: {card};
+    border-top: 1px solid {border};
+    padding: {spacing_xs}px {spacing_md}px;
+}
+
+QLabel#languagePill, QLabel#statusPill {
+    background: {surface_alt};
+    border: 1px solid {border};
+    border-radius: {radius_sm}px;
+    padding: {spacing_xs}px {spacing_md}px;
+    font-weight: 700;
+}
+
+QFrame#logPanel {
+    background: {log_background};
+    border: 1px solid {border};
+    border-radius: {radius_md}px;
+}
+
+QTextEdit#textLog {
+    background: transparent;
+    border: none;
+    color: #e5e7eb;
+    font-family: 'Fira Code','Cascadia Code','Segoe UI Mono','Courier New', monospace;
+    font-size: {body_size}pt;
+    padding: {spacing_sm}px;
+}
+
+QLabel#logPlaceholder {
+    color: {text_muted};
+}
+
+QPushButton#btnClearLog, QPushButton#btnSaveLog {
+    border: 1px solid {border};
+    background: {card};
+    border-radius: {radius_sm}px;
+    padding: {spacing_xs}px {spacing_md}px;
+}
+
+QPushButton#btnClearLog:hover, QPushButton#btnSaveLog:hover {
+    background: {surface_alt};
+}
+
+QSplitter::handle {
+    background: {border};
+    width: 5px;
+    margin: 2px 0;
+}
+
+QSplitter::handle:hover {
+    background: {primary};
+}
+
+QProgressBar {
+    border: 1px solid {border};
+    border-radius: {radius_sm}px;
+    background: {surface_alt};
+    text-align: center;
+    height: 8px;
+}
+
+QProgressBar::chunk {
+    background: {primary};
+    border-radius: {radius_sm}px;
+}

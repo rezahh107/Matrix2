@@ -21,6 +21,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
+    QColor,
     QDesktopServices,
     QGuiApplication,
     QKeySequence,
@@ -93,7 +94,7 @@ from .preferences import (
 )
 from .preferences.language_dialog import LanguageDialog
 from .log_panel import LogPanel
-from .theme import Theme, apply_theme, build_theme, apply_theme_mode
+from .theme import Theme, apply_card_shadow, apply_theme, build_theme, apply_theme_mode
 from .texts import UiTranslator
 
 __all__ = ["MainWindow", "run_demo", "FilePicker"]
@@ -771,9 +772,9 @@ class MainWindow(QMainWindow):
             return
         indicator, text_label = widgets
         color = (
-            self._theme.success.name()
+            self._theme.colors.success
             if model.level is FileStatusLevel.READY
-            else self._theme.warning.name()
+            else self._theme.colors.warning
         )
         symbol = "●" if model.level is FileStatusLevel.READY else "▲"
         indicator.setText(symbol)
@@ -782,8 +783,8 @@ class MainWindow(QMainWindow):
         state_text = self._t("status.ready", "آماده") if model.exists else self._t("status.waiting", "در انتظار اجرا")
         text_label.setText(
             f"<b>{model.label}</b><br>"
-            f"<span style='color:{self._theme.text_muted.name()}'>{path_display}</span><br>"
-            f"<span style='color:{self._theme.text_primary.name()}'>{state_text}</span>"
+            f"<span style='color:{self._theme.colors.text_muted}'>{path_display}</span><br>"
+            f"<span style='color:{self._theme.colors.text}'>{state_text}</span>"
         )
 
     def _refresh_dashboard_state(self) -> None:
@@ -816,7 +817,12 @@ class MainWindow(QMainWindow):
         frame = QFrame(self)
         frame.setObjectName("heroCard")
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setContentsMargins(
+            self._theme.spacing_lg,
+            self._theme.spacing_md,
+            self._theme.spacing_lg,
+            self._theme.spacing_md,
+        )
         layout.setSpacing(12)
 
         text_column = QVBoxLayout()
@@ -834,6 +840,8 @@ class MainWindow(QMainWindow):
         badge_label.setObjectName("heroBadge")
         badge_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(badge_label, 0, Qt.AlignVCenter)
+
+        apply_card_shadow(frame)
 
         return frame
 
@@ -857,55 +865,15 @@ class MainWindow(QMainWindow):
         self._apply_theme_styles()
 
     def _apply_theme_styles(self) -> None:
-        if self._files_card is not None:
-            self._files_card.apply_theme(self._theme)
-        if self._checklist_card is not None:
-            self._checklist_card.apply_theme(self._theme)
-        if self._actions_card is not None:
-            self._actions_card.apply_theme(self._theme)
+        for card in (self._files_card, self._checklist_card, self._actions_card):
+            if card is not None:
+                card.apply_theme(self._theme)
+                apply_card_shadow(card)
         if hasattr(self, "_log_panel"):
             self._log_panel.apply_theme(self._theme)
         if isinstance(self._splitter, AccentSplitter):
             self._splitter.set_theme(self._theme)
-        extra = (
-            f"#heroCard{{background:{self._theme.card.name()};border:1px solid {self._theme.border.name()};"
-            f"border-radius:{self._theme.radius_lg}px;"
-            f"padding:{self._theme.spacing_md}px;"
-            "box-shadow: 0 2px 8px rgba(0,0,0,0.08);}}"
-            f"#heroTitle{{color:{self._theme.text_primary.name()};font-weight:700;font-size:{self._theme.typography.headline}pt;}}"
-            f"#heroSubtitle{{color:{self._theme.text_muted.name()};font-size:{self._theme.typography.body_strong}pt;}}"
-            f"#heroBadge{{background:{self._theme.accent_soft.name()};"
-            f"border:1px solid {self._theme.border.name()};color:{self._theme.text_primary.name()};"
-            f"padding:{self._theme.spacing_xs + 2}px {self._theme.spacing_md}px;border-radius:{self._theme.radius_sm}px;"
-            f"font-weight:700;}}"
-            f"#progressCaption{{color:{self._theme.text_muted.name()};font-size:{self._theme.typography.caption}pt;}}"
-            f"#progressCaption[busy='true']{{color:{self._theme.accent.name()};}}"
-            f"#dashboardPolicyInfo{{color:{self._theme.text_muted.name()};font-size:{self._theme.typography.body}pt;}}"
-            f"#labelStageBadge{{background:{self._theme.accent_soft.name()};padding:{self._theme.spacing_xs}px {self._theme.spacing_md}px;"
-            f"border-radius:{self._theme.radius_sm}px;font-weight:700;}}"
-            f"#labelStageDetail, #labelStatus, #lastRunBadge{{color:{self._theme.text_muted.name()};font-size:{self._theme.typography.body}pt;}}"
-            f"#lastRunBadge[empty='true']{{background:{self._theme.accent_soft.name()};"
-            f"border:1px dashed {self._theme.border.name()};padding:{self._theme.spacing_xs}px {self._theme.spacing_md}px;"
-            f"border-radius:{self._theme.radius_sm}px;font-weight:700;color:{self._theme.text_primary.name()};}}"
-            f"#themeSelectorLabel{{color:{self._theme.text_muted.name()};padding-left:{self._theme.spacing_xs}px;}}"
-            f"QPushButton.secondary, QToolButton.secondary{{background:{self._theme.surface_alt.name()};"
-            f"color:{self._theme.text_primary.name()};border:1px solid {self._theme.border.name()};}}"
-            f"QPushButton.secondary:hover, QToolButton.secondary:hover{{background:{self._theme.surface.name()};}}"
-            f"QPushButton#primaryButton{{background:{self._theme.accent.name()};color:white;border:none;"
-            f"border-radius:{self._theme.radius_sm}px;font-size:{self._theme.typography.body_strong + 1}pt;font-weight:600;}}"
-            f"QPushButton#primaryButton:hover{{background:{self._theme.accent.darker(110).name()};}}"
-            "#heroCard:hover{box-shadow:0 4px 16px rgba(0,0,0,0.12);transform:translateY(-2px);}" 
-            f"#statusPill, #languagePill{{background:{self._theme.surface_alt.name()};border:1px solid {self._theme.border.name()};"
-            f"border-radius:{self._theme.radius_sm}px;padding:{self._theme.spacing_xs}px {self._theme.spacing_md}px;"
-            "font-weight:600;}"
-            f"#busyOverlay{{background:rgba(0,0,0,0.08);border-radius:{self._theme.radius_sm}px;}}"
-            f"#busyOverlayLabel{{color:{self._theme.text_primary.name()};font-weight:700;background:{self._theme.surface.name()};"
-            f"padding:{self._theme.spacing_sm}px {self._theme.spacing_md}px;border-radius:{self._theme.radius_sm}px;}}"
-        )
-        self.setStyleSheet(extra)
-
         if self._theme_selector is not None:
-            self._theme_selector.setStyleSheet("")
             active_index = self._theme_selector.findData(self._theme_name)
             if active_index >= 0:
                 self._theme_selector.blockSignals(True)
@@ -2387,23 +2355,23 @@ class MainWindow(QMainWindow):
         lowered = message.lower()
         background = None
         if message.strip().startswith("✅"):
-            background = self._theme.success.lighter(150).name()
+            background = QColor(self._theme.colors.success).lighter(150).name()
         elif message.strip().startswith("❌"):
-            background = self._theme.error.lighter(150).name()
+            background = QColor(self._theme.colors.error).lighter(150).name()
         elif message.strip().startswith("ℹ️") or message.strip().startswith("⚠️"):
-            background = self._theme.accent_soft.name()
+            background = self._theme.accent_soft
         elif ("error" in lowered or "خطا" in message) and "<span" not in message:
-            background = self._theme.error.lighter(150).name()
+            background = QColor(self._theme.colors.error).lighter(150).name()
         content = message
         if background:
             content = (
                 f"<span style=\"background:{background}; padding:2px 6px; "
                 f"border-radius:{self._theme.radius_sm}px; "
-                f"color:{self._theme.text_primary.name()};\">{message}</span>"
+                f"color:{self._theme.colors.text};\">{message}</span>"
             )
         html = (
             "<span style=\"font-family: 'Fira Code', 'Cascadia Code', 'Segoe UI Mono',"
-            " 'Courier New', monospace; color:" + self._theme.text_muted.name() + "\">"
+            " 'Courier New', monospace; color:" + self._theme.colors.text_muted + "\">"
             f"{prefix}</span> {content}"
         )
         self._log.append(html)
@@ -2514,16 +2482,16 @@ class MainWindow(QMainWindow):
         if error is not None:
             msg = str(error)
             if isinstance(error, FileNotFoundError):
-                color = self._theme.error.name()
+                color = self._theme.colors.error
                 QMessageBox.critical(self, self._t("status.error", "خطا"), msg)
             elif isinstance(error, PermissionError):
-                color = self._theme.error.name()
+                color = self._theme.colors.error
                 QMessageBox.critical(self, self._t("status.error", "خطا"), msg)
             elif isinstance(error, ValueError):
-                color = self._theme.warning.name()
+                color = self._theme.colors.warning
                 QMessageBox.warning(self, self._t("status.error", "خطا"), msg)
             else:
-                color = self._theme.error.name()
+                color = self._theme.colors.error
                 QMessageBox.critical(self, self._t("status.error", "خطا"), msg)
             self._status.setText(self._t("status.error", "خطا"))
             self._set_stage(self._t("status.error", "خطا"), msg)
@@ -2552,7 +2520,7 @@ class MainWindow(QMainWindow):
         )
         self._update_progress_caption(100, self._t("status.complete", "کامل"))
         self._append_log(
-            f'<span style="color:{self._theme.success.name()}">✅ {self._t("status.complete.detail", "عملیات با موفقیت پایان یافت")}</span>'
+            f'<span style="color:{self._theme.colors.success}">✅ {self._t("status.complete.detail", "عملیات با موفقیت پایان یافت")}</span>'
         )
         self._update_status_bar_state("ready")
         if hook is not None:
