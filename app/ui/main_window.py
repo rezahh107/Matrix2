@@ -2397,8 +2397,7 @@ class MainWindow(QMainWindow):
         content = message
         if background:
             content = (
-                f'<span style="background:{background}; padding:2px 6px;"
-                f" border-radius:{self._theme.radius_sm}px; color:{self._theme.text_primary.name()};">{message}</span>"
+                f"<span style=\"background:{background}; padding:2px 6px; border-radius:{self._theme.radius_sm}px; color:{self._theme.text_primary.name()};\">{message}</span>"
             )
         html = (
             "<span style=\"font-family: 'Fira Code', 'Cascadia Code', 'Segoe UI Mono',"
