@@ -9,31 +9,56 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any
 
-from PySide6.QtCore import QPoint, QPointF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QTransform
-from PySide6.QtWidgets import (
-    QGraphicsBlurEffect,
-    QGraphicsDropShadowEffect,
-    QGraphicsEffect,
-    QGraphicsOpacityEffect,
-)
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsEffect, QGraphicsOpacityEffect
 
 LOGGER = logging.getLogger(__name__)
 DEBUG_PAINT_EFFECTS = False
 
 
-@dataclass(frozen=True)
-class _EffectMeta:
-    """شناسهٔ انسانی برای لاگ‌گیری."""
-
-    name: str
-
-
 class _LoggingMixin:
-    _effect_meta: _EffectMeta
+    _effect_name_key = "_effect_name"
+    _logged_inactive_key = "_logged_inactive"
+
+    def _init_effect_name(self, effect_name: str) -> None:
+        """ثبت نام افکت با تکیه بر Qt dynamic property تا از TypeError جلوگیری شود."""
+
+        # برخی کلاس‌های Qt از __setattr__ پشتیبانی نمی‌کنند؛ setProperty همیشه قابل‌اتکا است.
+        self.setProperty(self._effect_name_key, effect_name)
+        self.setProperty(self._logged_inactive_key, False)
+
+    def _get_effect_name(self) -> str:
+        if hasattr(self, "property"):
+            prop_name = self.property(self._effect_name_key)
+            if isinstance(prop_name, str) and prop_name:
+                return prop_name
+        name = getattr(self, "_effect_name", None)
+        if isinstance(name, str) and name:
+            return name
+        return self.__class__.__name__
+
+    def _mark_inactive_once(self) -> None:
+        already_logged = False
+        if hasattr(self, "property"):
+            prop_flag = self.property(self._logged_inactive_key)
+            already_logged = bool(prop_flag)
+        else:
+            already_logged = getattr(self, "_logged_inactive", False)
+
+        if already_logged:
+            return
+
+        LOGGER.warning("%s | painter inactive on entry", self._get_effect_name())
+        if hasattr(self, "setProperty"):
+            self.setProperty(self._logged_inactive_key, True)
+        else:
+            try:
+                self._logged_inactive = True
+            except TypeError:
+                pass
 
     def _log(self, message: str, painter: QPainter) -> None:
         if not DEBUG_PAINT_EFFECTS:
@@ -41,7 +66,7 @@ class _LoggingMixin:
         device = painter.device() if painter.isActive() else None
         LOGGER.debug(
             "%s | %s | active=%s device=%s id=%s source=%s effect=%s",  # noqa: TRY003
-            self._effect_meta.name,
+            self._get_effect_name(),
             message,
             painter.isActive(),
             device.__class__.__name__ if device else "<none>",
@@ -56,24 +81,25 @@ class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
 
     def __init__(self, effect_name: str, parent: Any | None = None) -> None:
         super().__init__(parent)
-        self._effect_meta = _EffectMeta(effect_name)
+        self._init_effect_name(effect_name)
 
     def draw(self, painter: QPainter) -> None:  # type: ignore[override]
         if not painter.isActive():
-            LOGGER.warning("%s | painter inactive on entry", self._effect_meta.name)
+            self._mark_inactive_once()
             return
 
-        pixmap, offset = self.sourcePixmap(
-            Qt.DeviceCoordinates, mode=QGraphicsEffect.PadToEffectiveBoundingRect
+        offset = QPoint()
+        pixmap = self.sourcePixmap(
+            Qt.LogicalCoordinates, offset, QGraphicsEffect.PadToEffectiveBoundingRect
         )
         if pixmap.isNull():
             self._log("draw.skip(null_pixmap)", painter)
+            self.drawSource(painter)
             return
 
         self._log("draw.begin", painter)
         painter.save()
         try:
-            painter.setWorldTransform(QTransform())
             painter.setOpacity(self.opacity())
             painter.drawPixmap(offset, pixmap)
         finally:
@@ -82,56 +108,30 @@ class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
 
 
 class SafeDropShadowEffect(_LoggingMixin, QGraphicsDropShadowEffect):
-    """افکت سایه با چرخهٔ نقاش محلی و محاسبهٔ بلور روی QImage."""
+    """افکت سایه با چرخهٔ نقاش محلی و تکیه بر پیاده‌سازی پیش‌فرض Qt."""
 
     def __init__(self, effect_name: str, parent: Any | None = None) -> None:
         super().__init__(parent)
-        self._effect_meta = _EffectMeta(effect_name)
-
-    def _build_shadow_image(self, pixmap: QPixmap, radius: float, offset: QPointF, color: QColor) -> QImage:
-        margin = int(radius * 2)
-        image_size = pixmap.size() + QSize(margin * 2, margin * 2)
-        shadow_source = QImage(image_size, QImage.Format_ARGB32_Premultiplied)
-        shadow_source.fill(Qt.transparent)
-
-        painter = QPainter(shadow_source)
-        painter.setCompositionMode(QPainter.CompositionMode_Source)
-        painter.drawPixmap(margin + int(offset.x()), margin + int(offset.y()), pixmap)
-        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-        painter.fillRect(shadow_source.rect(), color)
-        painter.end()
-
-        blurred = QImage(image_size, QImage.Format_ARGB32_Premultiplied)
-        blurred.fill(Qt.transparent)
-        QGraphicsBlurEffect.blurImage(blurred, shadow_source, radius, True)
-        return blurred
+        self._init_effect_name(effect_name)
 
     def draw(self, painter: QPainter) -> None:  # type: ignore[override]
         if not painter.isActive():
-            LOGGER.warning("%s | painter inactive on entry", self._effect_meta.name)
+            self._mark_inactive_once()
             return
 
-        pixmap, offset = self.sourcePixmap(
-            Qt.DeviceCoordinates, mode=QGraphicsEffect.PadToEffectiveBoundingRect
+        offset = QPoint()
+        pixmap = self.sourcePixmap(
+            Qt.LogicalCoordinates, offset, QGraphicsEffect.PadToEffectiveBoundingRect
         )
         if pixmap.isNull():
             self._log("draw.skip(null_pixmap)", painter)
+            self.drawSource(painter)
             return
 
-        radius = self.blurRadius()
-        shadow_offset = self.offset()
-        color = self.color()
-        margin = int(radius * 2)
-
         self._log("draw.begin", painter)
-        shadow_image = self._build_shadow_image(pixmap, radius, shadow_offset, color)
-        offset_point = QPointF(offset)
-
         painter.save()
         try:
-            painter.setWorldTransform(QTransform())
-            painter.drawImage(offset_point.toPoint() - QPoint(margin, margin), shadow_image)
-            painter.drawPixmap(offset_point, pixmap)
+            super().draw(painter)
         finally:
             painter.restore()
             self._log("draw.end", painter)
