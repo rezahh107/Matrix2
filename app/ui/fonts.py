@@ -125,11 +125,15 @@ def load_vazir_font(point_size: int | None = None) -> "QFont" | None:
     return QFont(families[0], size)
 
 
-def create_app_font(point_size: int | None = None) -> "QFont":
+def create_app_font(
+    point_size: int | None = None,
+    *,
+    fallback_family: str | None = None,
+) -> "QFont":
     """ساخت فونت سراسری برنامه با اولویت وزیر سپس تاهوما.
 
     مثال::
-        >>> font = create_app_font(point_size=10)  # doctest: +SKIP
+        >>> font = create_app_font(point_size=10, fallback_family="Arial")  # doctest: +SKIP
         >>> bool(font.family())  # doctest: +SKIP
         True
     """
@@ -141,7 +145,8 @@ def create_app_font(point_size: int | None = None) -> "QFont":
     size = point_size or DEFAULT_POINT_SIZE
     from PySide6.QtGui import QFont
 
-    fallback = QFont(FALLBACK_FAMILY, size)
+    family = (fallback_family or FALLBACK_FAMILY).strip() or FALLBACK_FAMILY
+    fallback = QFont(family, size)
     fallback.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
     return fallback
 
@@ -149,14 +154,20 @@ def create_app_font(point_size: int | None = None) -> "QFont":
 def prepare_default_font(*, point_size: int | None = None) -> "QFont":
     """سازگار برای کدهای قدیمی؛ معادل ``create_app_font``."""
 
-    return create_app_font(point_size)
+    return create_app_font(point_size=point_size)
 
 
 def apply_default_font(
-    app: "QApplication", *, point_size: int | None = None
+    app: "QApplication", *, point_size: int | None = None, family_override: str | None = None
 ) -> "QFont":
-    """اعمال فونت سراسری (وزیر یا تاهوما) روی QApplication."""
+    """اعمال فونت سراسری (وزیر یا تاهوما) روی QApplication با امکان override.
 
-    font = create_app_font(point_size)
+    Args:
+        app: نمونهٔ Qt برای اعمال فونت.
+        point_size: اندازهٔ فونت؛ در صورت None از مقدار پیش‌فرض استفاده می‌شود.
+        family_override: در صورت نیاز، خانوادهٔ فونت fallback سفارشی.
+    """
+
+    font = create_app_font(point_size=point_size, fallback_family=family_override)
     app.setFont(font)
     return font
