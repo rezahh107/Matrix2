@@ -25,7 +25,6 @@ from PySide6.QtGui import (
     QDesktopServices,
     QGuiApplication,
     QKeySequence,
-    QPainter,
     QPalette,
 )
 from PySide6.QtWidgets import (
@@ -197,47 +196,58 @@ class AccentSplitterHandle(QSplitterHandle):
         super().__init__(orientation, parent)
         self._theme = theme
         self._hover = False
+        self._grip = QLabel("⋮" if orientation == Qt.Vertical else "⋯", self)
+        self._grip.setAlignment(Qt.AlignCenter)
+        self._grip.setMargin(0)
+        self._grip.setContentsMargins(0, 0, 0, 0)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._grip)
+
         self.setMouseTracking(True)
+        self.setAutoFillBackground(True)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self._apply_colors()
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        self.update()
+        self._apply_colors()
 
     def enterEvent(self, event) -> None:  # type: ignore[override]
         self._hover = True
         super().enterEvent(event)
-        self.update()
+        self._apply_colors()
 
     def leaveEvent(self, event) -> None:  # type: ignore[override]
         self._hover = False
         super().leaveEvent(event)
-        self.update()
+        self._apply_colors()
 
-    def paintEvent(self, event) -> None:  # type: ignore[override]
-        painter = QPainter()
-        if not painter.begin(self):
-            return
-        try:
-            base_color = (
-                self._theme.border
-                if self._theme
-                else QPalette().color(QPalette.ColorRole.Mid)
-            )
-            hover_color = (
-                self._theme.accent
-                if self._theme
-                else QPalette().color(QPalette.ColorRole.Highlight)
-            )
-            painter.fillRect(self.rect(), hover_color if self._hover else base_color)
-            painter.setPen(
-                self._theme.text_muted
-                if self._theme
-                else QPalette().color(QPalette.ColorRole.Text)
-            )
-            grip = "⋮" if self.orientation() == Qt.Vertical else "⋯"
-            painter.drawText(self.rect(), Qt.AlignCenter, grip)
-        finally:
-            painter.end()
+    def _apply_colors(self) -> None:
+        """به‌روزرسانی رنگ پس‌زمینه و متن متناسب با تم و وضعیت Hover."""
+
+        palette = self.palette()
+        base_color = (
+            self._theme.border
+            if self._theme
+            else QPalette().color(QPalette.ColorRole.Mid)
+        )
+        hover_color = (
+            self._theme.accent
+            if self._theme
+            else QPalette().color(QPalette.ColorRole.Highlight)
+        )
+        text_color = (
+            self._theme.text_muted
+            if self._theme
+            else QPalette().color(QPalette.ColorRole.Text)
+        )
+        palette.setColor(QPalette.ColorRole.Window, hover_color if self._hover else base_color)
+        palette.setColor(QPalette.ColorRole.WindowText, text_color)
+        self.setPalette(palette)
+        self._grip.setPalette(palette)
+        self.update()
 
 
 class AccentSplitter(QSplitter):

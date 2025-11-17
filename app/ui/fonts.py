@@ -110,6 +110,9 @@ def ensure_vazir_local_fonts() -> None:
         LOGGER.debug("فونت تعبیه‌شده استخراج شد")
         return
 
+    if _materialize_embedded_font(FONTS_DIR):
+        return
+
     if os.name != "nt":
         LOGGER.debug("سیستم ویندوز نیست؛ عبور بدون کپی")
         return
@@ -128,7 +131,7 @@ def _iter_windows_sources() -> Iterable[List[Path]]:
         if candidate.is_file():
             yield [candidate]
         else:
-            fonts = sorted(candidate.glob("Vazir*.ttf"))
+            fonts = sorted(candidate.rglob("Vazir*.ttf"))
             if fonts:
                 LOGGER.debug("%d فایل فونت در %s یافت شد", len(fonts), candidate)
                 yield fonts
@@ -175,7 +178,6 @@ def _materialize_embedded_font(target_dir: Path) -> Path | None:
 
     target = target_dir / "Vazirmatn-Regular.ttf"
     if target.exists():
-        LOGGER.debug("فونت تعبیه‌شده از قبل وجود دارد: %s", target)
         return target
 
     try:
@@ -190,7 +192,6 @@ def _materialize_embedded_font(target_dir: Path) -> Path | None:
         LOGGER.debug("نوشتن فونت تعبیه‌شده ناموفق بود: %s", exc)
         return None
 
-    LOGGER.debug("فونت تعبیه‌شده در %s نوشته شد", target)
     return target
 
 
