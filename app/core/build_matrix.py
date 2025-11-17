@@ -221,6 +221,7 @@ class BuildConfig:
     dedup_removed_ratio_threshold: float | None = None
     join_key_duplicate_threshold: int | None = None
     school_lookup_mismatch_threshold: float | None = None
+    fail_on_school_lookup_threshold: bool = False
     policy_version: str = field(init=False, repr=False, default="")
 
     def __post_init__(self) -> None:
@@ -336,6 +337,8 @@ class BuildConfig:
                     "school_lookup_mismatch_threshold must be between 0 and 1 (inclusive)"
                 )
             self.school_lookup_mismatch_threshold = ratio
+
+        self.fail_on_school_lookup_threshold = bool(self.fail_on_school_lookup_threshold)
 
 
 def _as_domain_config(cfg: BuildConfig) -> DomainBuildConfig:
@@ -1848,12 +1851,14 @@ def build_matrix(
             "کد/نام مدرسه ناشناخته ({count}) بیش از آستانهٔ مجاز ({threshold:.1%}) است؛"
             " جزئیات در شیت invalid_mentors ثبت شد."
         ).format(count=school_mismatch_count, threshold=school_lookup_threshold)
-        error = ValueError(message)
-        setattr(error, "is_school_lookup_threshold_error", True)
-        setattr(error, "school_lookup_mismatch_count", int(school_mismatch_count))
-        setattr(error, "school_lookup_mismatch_ratio", float(school_mismatch_ratio))
-        setattr(error, "invalid_mentors_df", invalid_mentors_df)
-        raise error
+        if cfg.fail_on_school_lookup_threshold:
+            error = ValueError(message)
+            setattr(error, "is_school_lookup_threshold_error", True)
+            setattr(error, "school_lookup_mismatch_count", int(school_mismatch_count))
+            setattr(error, "school_lookup_mismatch_ratio", float(school_mismatch_ratio))
+            setattr(error, "invalid_mentors_df", invalid_mentors_df)
+            raise error
+        progress(12, f"⚠️ {message}")
 
     base_df, unseen_groups, unmatched_schools = _prepare_base_rows(
         insp_valid,
