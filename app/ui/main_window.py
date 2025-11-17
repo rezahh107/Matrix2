@@ -241,8 +241,11 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self._prefs = AppPreferences()
-        self._language = self._prefs.language or "en"
-        if not self._prefs.language:
+        stored_language = self._prefs.language
+        if self._prefs.has_language_setting():
+            self._language = stored_language
+        else:
+            self._language = stored_language or "en"
             self._prefs.language = self._language
 
         self._translator = UiTranslator(self._language)
@@ -255,7 +258,7 @@ class MainWindow(QMainWindow):
             frame = self.frameGeometry()
             frame.moveCenter(geom.center())
             self.move(frame.topLeft())
-        self.setLayoutDirection(Qt.LeftToRight)
+        self.setLayoutDirection(Qt.RightToLeft if self._language == "fa" else Qt.LeftToRight)
         self._theme_name: str = self._prefs.theme or "light"
         self._theme: Theme = self._load_theme(self._theme_name)
         self._theme_selector: QComboBox | None = None

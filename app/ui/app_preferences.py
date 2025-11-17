@@ -43,6 +43,9 @@ class AppPreferences:
         self._settings.setValue(key, value)
         self._settings.sync()
 
+    def _has_key(self, key: str) -> bool:
+        return self._settings.contains(key)
+
     def _get_choice(self, key: str, choices: List[str], default: str) -> str:
         """خواندن مقدار انتخابی همراه با اعتبارسنجی."""
 
@@ -291,6 +294,11 @@ class AppPreferences:
 
         value = self._get_string("ui/language", DEFAULT_LANGUAGE)
         return value if value in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+
+    def has_language_setting(self) -> bool:
+        """آیا کاربر زبانی را در تنظیمات ذخیره کرده است؟"""
+
+        return self._has_key("ui/language")
 
     @language.setter
     def language(self, value: str) -> None:
