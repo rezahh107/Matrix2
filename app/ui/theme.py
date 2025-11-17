@@ -13,8 +13,10 @@ from PySide6.QtWidgets import QApplication
 
 __all__ = [
     "Theme",
-    "build_system_light_theme",
-    "build_system_dark_theme",
+    "build_light_theme",
+    "build_dark_theme",
+    "build_theme",
+    "apply_theme_mode",
     "apply_theme",
     "relative_luminance",
 ]
@@ -57,13 +59,6 @@ class Theme:
         return self.card
 
 
-def _from_palette(palette: QPalette, role: QPalette.ColorRole, fallback: str) -> QColor:
-    color = palette.color(role)
-    if not color.isValid():
-        return QColor(fallback)
-    return color
-
-
 def _blend(base: QColor, overlay: QColor, alpha: float) -> QColor:
     """ترکیب دو رنگ با ضریب آلفا برای تولید سطح نرم."""
 
@@ -79,41 +74,40 @@ def relative_luminance(color: QColor) -> float:
     return (0.2126 * color.red() + 0.7152 * color.green() + 0.0722 * color.blue()) / 255
 
 
-def build_system_light_theme() -> Theme:
-    """ساخت تم روشن نزدیک به Windows 11 بر پایه پالت سیستم."""
+def build_light_theme() -> Theme:
+    """ساخت تم روشن ثابت با پس‌زمینهٔ خاکستری بسیار روشن."""
 
-    palette = QApplication.instance().palette() if QApplication.instance() else QPalette()
-    window = _from_palette(palette, QPalette.ColorRole.Window, "#f6f7fb")
-    base = _from_palette(palette, QPalette.ColorRole.Base, "#ffffff")
-    text = _from_palette(palette, QPalette.ColorRole.Text, "#0f172a")
-    highlight = _from_palette(palette, QPalette.ColorRole.Highlight, "#4f46e5")
+    window = QColor("#f5f6f8")
+    base = QColor("#ffffff")
+    surface_alt = QColor("#eef0f4")
+    card = QColor("#ffffff")
+    text = QColor("#0f172a")
+    accent = QColor("#2563eb")
+    complement = QColor("#f59e0b")
 
-    card = _blend(base, window, 0.06)
-    border = _blend(text, window, 0.18)
-    accent = highlight if highlight.isValid() else QColor("#4f46e5")
-    complement = QColor("#f97316")
-    accent_soft = _blend(complement, window, 0.2)
-    muted = _blend(text, window, 0.45)
+    border = _blend(text, window, 0.2)
+    accent_soft = _blend(complement, window, 0.22)
+    muted = _blend(text, window, 0.5)
 
     return Theme(
         window=window,
         surface=base,
-        surface_alt=_blend(window, base, 0.12),
+        surface_alt=surface_alt,
         card=card,
         accent=accent,
         accent_soft=accent_soft,
         border=border,
         text_primary=text,
         text_muted=muted,
-        success=QColor("#16a34a"),
+        success=QColor("#15803d"),
         warning=QColor("#d97706"),
-        error=QColor("#dc2626"),
-        log_bg=_blend(base, window, 0.06),
-        log_border=_blend(text, window, 0.2),
+        error=QColor("#b91c1c"),
+        log_bg=QColor("#f9fafb"),
+        log_border=_blend(text, window, 0.25),
     )
 
 
-def build_system_dark_theme() -> Theme:
+def build_dark_theme() -> Theme:
     """ساخت تم تیره با کنتراست بالا و رنگ مکمل برای هایلایت‌ها."""
 
     window = QColor("#0b1220")
@@ -143,6 +137,15 @@ def build_system_dark_theme() -> Theme:
         log_bg=_blend(base, window, 0.18),
         log_border=_blend(text, window, 0.25),
     )
+
+
+def build_theme(mode: str) -> Theme:
+    """ساخت تم بر اساس نام حالت روشن/تیره."""
+
+    normalized = (mode or "").strip().lower()
+    if normalized == "dark":
+        return build_dark_theme()
+    return build_light_theme()
 
 
 def _stylesheet(theme: Theme) -> str:
@@ -289,4 +292,12 @@ def apply_theme(app: QApplication, theme: Theme) -> None:
     palette.setColor(QPalette.ColorRole.Link, theme.accent)
     app.setPalette(palette)
     app.setStyleSheet(_stylesheet(theme))
+
+
+def apply_theme_mode(app: QApplication, mode: str) -> Theme:
+    """ساخت و اعمال تم بر اساس حالت داده شده."""
+
+    theme = build_theme(mode)
+    apply_theme(app, theme)
+    return theme
 

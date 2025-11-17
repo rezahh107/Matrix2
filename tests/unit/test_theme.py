@@ -3,10 +3,14 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("PySide6.QtWidgets", reason="PySide6 GUI stack نیاز به libGL دارد")
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
-from app.ui.theme import build_system_light_theme, relative_luminance
+from app.ui.theme import (
+    apply_theme_mode,
+    build_dark_theme,
+    build_light_theme,
+    relative_luminance,
+)
 from app.ui.texts import UiTranslator
 
 
@@ -18,10 +22,11 @@ def qapp() -> QApplication:
     return app
 
 
-def test_build_system_light_theme_has_contrast(qapp: QApplication) -> None:
-    theme = build_system_light_theme()
-    diff = abs(relative_luminance(theme.text_primary) - relative_luminance(theme.surface))
-    assert diff > 0.05
+def test_light_theme_background_is_bright(qapp: QApplication) -> None:
+    theme = build_light_theme()
+    assert relative_luminance(theme.window) > 0.8
+    assert relative_luminance(theme.card) > 0.85
+    assert relative_luminance(theme.log_bg) > 0.85
     assert theme.accent.isValid()
 
 
@@ -31,7 +36,7 @@ def test_translator_fallback_returns_default() -> None:
 
 
 def test_theme_roles_initialized(qapp: QApplication) -> None:
-    theme = build_system_light_theme()
+    theme = build_light_theme()
     roles = [
         theme.window,
         theme.surface,
@@ -59,3 +64,20 @@ def test_translation_fallbacks_for_languages() -> None:
     assert en.text("missing.key", "Default") == "Default"
     fallback_lang = UiTranslator("de")
     assert fallback_lang.text("dashboard.title", "عنوان") != ""
+
+
+def test_dark_vs_light_theme_contrast() -> None:
+    light = build_light_theme()
+    dark = build_dark_theme()
+    assert relative_luminance(light.window) - relative_luminance(dark.window) > 0.4
+    assert relative_luminance(light.card) - relative_luminance(dark.card) > 0.3
+
+
+def test_theme_switch_mode_round_trip(qapp: QApplication) -> None:
+    first_light = apply_theme_mode(qapp, "light")
+    dark = apply_theme_mode(qapp, "dark")
+    second_light = apply_theme_mode(qapp, "light")
+
+    assert relative_luminance(dark.window) < relative_luminance(first_light.window)
+    assert second_light.window == first_light.window
+    assert second_light.accent == first_light.accent

@@ -72,12 +72,7 @@ from .preferences import (
 )
 from .preferences.language_dialog import LanguageDialog
 from .log_panel import LogPanel
-from .theme import (
-    Theme,
-    apply_theme,
-    build_system_dark_theme,
-    build_system_light_theme,
-)
+from .theme import Theme, apply_theme, build_theme, apply_theme_mode
 from .texts import UiTranslator
 
 __all__ = ["MainWindow", "run_demo", "FilePicker"]
@@ -93,7 +88,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(self._translator.text("app.title", "سامانه تخصیص دانشجو-منتور"))
         self.setMinimumSize(960, 640)
         self.setLayoutDirection(Qt.RightToLeft if self._prefs.language == "fa" else Qt.LeftToRight)
-        self._theme: Theme = self._load_theme(self._prefs.theme)
+        self._theme_name: str = self._prefs.theme
+        self._theme: Theme = self._load_theme(self._theme_name)
         self._theme_selector: QComboBox | None = None
         app = QApplication.instance()
         if app is not None:
@@ -242,9 +238,7 @@ class MainWindow(QMainWindow):
     def _load_theme(self, name: str) -> Theme:
         """بارگذاری تم بر اساس نام ذخیره‌شده."""
 
-        if name == "dark":
-            return build_system_dark_theme()
-        return build_system_light_theme()
+        return build_theme(name)
 
     # ------------------------------------------------------------------ UI setup
     def _build_ribbon(self) -> None:
@@ -658,10 +652,26 @@ class MainWindow(QMainWindow):
 
         return frame
 
+    def _set_theme_mode(self, mode: str) -> None:
+        """تنظیم حالت تم، ذخیره در ترجیحات و اعمال آن."""
+
+        normalized = "dark" if mode == "dark" else "light"
+        self._theme_name = normalized
+        self._prefs.theme = normalized
+        app = QApplication.instance()
+        if app is not None:
+            self._theme = apply_theme_mode(app, normalized)
+        else:
+            self._theme = self._load_theme(normalized)
+        self._apply_theme_styles()
+
     def _apply_theme(self) -> None:
         app = QApplication.instance()
         if app is not None:
             apply_theme(app, self._theme)
+        self._apply_theme_styles()
+
+    def _apply_theme_styles(self) -> None:
         if self._files_card is not None:
             self._files_card.apply_theme(self._theme)
         if self._checklist_card is not None:
@@ -691,7 +701,7 @@ class MainWindow(QMainWindow):
 
         if self._theme_selector is not None:
             self._theme_selector.setStyleSheet("")
-            active_index = self._theme_selector.findData(self._prefs.theme)
+            active_index = self._theme_selector.findData(self._theme_name)
             if active_index >= 0:
                 self._theme_selector.blockSignals(True)
                 self._theme_selector.setCurrentIndex(active_index)
@@ -721,9 +731,7 @@ class MainWindow(QMainWindow):
         chosen = self._theme_selector.itemData(index)
         if chosen not in {"light", "dark"}:
             return
-        self._prefs.theme = str(chosen)
-        self._theme = self._load_theme(str(chosen))
-        self._apply_theme()
+        self._set_theme_mode(str(chosen))
 
     def _build_build_page(self) -> QWidget:
         """فرم ورودی‌های سناریوی ساخت ماتریس."""
