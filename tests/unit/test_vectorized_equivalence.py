@@ -280,11 +280,32 @@ def test_school_lookup_gate_raises_when_threshold_exceeded() -> None:
             cfg=BuildConfig(
                 min_coverage_ratio=0.0,
                 school_lookup_mismatch_threshold=0.0,
+                fail_on_school_lookup_threshold=True,
             ),
         )
 
     assert getattr(excinfo.value, "is_school_lookup_threshold_error", False)
     invalid_df = getattr(excinfo.value, "invalid_mentors_df", pd.DataFrame())
+    assert not invalid_df.empty
+    assert any("unknown school" in str(reason) for reason in invalid_df["reason"])
+
+
+def test_school_lookup_threshold_can_warn_instead_of_raise() -> None:
+    insp_df, schools_df, crosswalk_df = _create_sample_inputs()
+    insp_df.loc[0, "نام مدرسه 1"] = "مدرسه ناشناخته"
+
+    matrix, _, _, _, _, invalid_df, _, _ = build_matrix(
+        insp_df,
+        schools_df,
+        crosswalk_df,
+        cfg=BuildConfig(
+            min_coverage_ratio=0.0,
+            school_lookup_mismatch_threshold=0.0,
+            fail_on_school_lookup_threshold=False,
+        ),
+    )
+
+    assert not matrix.empty
     assert not invalid_df.empty
     assert any("unknown school" in str(reason) for reason in invalid_df["reason"])
 
