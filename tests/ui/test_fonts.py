@@ -20,10 +20,22 @@ def qapp() -> QApplication:
     return app
 
 
-def test_create_app_font_does_not_raise_without_prefer_full_hinting(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delattr(QFont.StyleStrategy, "PreferFullHinting", raising=False)
+def test_create_app_font_does_not_raise_without_full_hinting_preference(monkeypatch: pytest.MonkeyPatch) -> None:
+    if hasattr(QFont, "HintingPreference"):
+        monkeypatch.delattr(QFont.HintingPreference, "PreferFullHinting", raising=False)
     font = fonts.create_app_font(point_size=9)
     assert isinstance(font, QFont)
+
+
+def test_create_app_font_sets_antialias_and_quality_flags() -> None:
+    font = fonts.create_app_font(point_size=10)
+
+    strategy = font.styleStrategy()
+    assert strategy & QFont.StyleStrategy.PreferAntialias
+    assert strategy & QFont.StyleStrategy.PreferQuality
+
+    if hasattr(QFont, "HintingPreference") and hasattr(QFont.HintingPreference, "PreferFullHinting"):
+        assert font.hintingPreference() == QFont.HintingPreference.PreferFullHinting
 
 
 def test_create_app_font_uses_vazir_when_available(monkeypatch: pytest.MonkeyPatch) -> None:

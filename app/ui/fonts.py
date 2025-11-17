@@ -48,53 +48,6 @@ DEBUG_LOG_ENV = "MATRIX_FONT_LOG"
 _FONT_DEBUG_HANDLER: logging.Handler | None = None
 
 
-def _get_style_strategy_flags(*names: str) -> int:
-    """دریافت OR ایمن از مقادیر StyleStrategy در دسترس.
-
-    پارامترها:
-        names: نام ویژگی‌های ``QFont.StyleStrategy`` که باید ترکیب شوند.
-
-    بازگشت:
-        عدد صحیح حاصل از OR مقادیر موجود. اگر یکی از پرچم‌ها در نسخهٔ
-        فعلی PySide6/Qt موجود نباشد، نادیده گرفته می‌شود تا از وقوع
-        ``AttributeError`` جلوگیری شود.
-
-    مثال::
-        >>> from PySide6.QtGui import QFont  # doctest: +SKIP
-        >>> _get_style_strategy_flags("PreferAntialias", "PreferQuality")  # doctest: +SKIP
-        <int مقدار پرچم‌ها>
-    """
-
-    try:
-        from PySide6.QtGui import QFont
-    except Exception:  # pragma: no cover - در نبود PySide6 فقط صفر بازمی‌گردد
-        return 0
-
-    flags = 0
-    for name in names:
-        try:
-            value = getattr(QFont.StyleStrategy, name)
-        except AttributeError:
-            LOGGER.debug("StyleStrategy.%s در این نسخه یافت نشد", name)
-            continue
-        try:
-            flags |= int(value)
-            continue
-        except TypeError:
-            pass
-
-        raw_value = getattr(value, "value", None)
-        if isinstance(raw_value, int):
-            flags |= raw_value
-            continue
-
-        try:
-            flags |= int(raw_value)
-        except Exception:  # pragma: no cover - صرفاً برای سازگاری نسخه‌ها
-            LOGGER.debug("StyleStrategy.%s قابل تبدیل به int نبود", name)
-    return flags
-
-
 def _init_font_debug_log() -> None:
     """فعال‌سازی لاگ فایل در صورت ست شدن متغیر محیطی.
 
@@ -463,36 +416,19 @@ def apply_default_font(
 
 
 def _with_antialias(font: "QFont") -> "QFont":
-    """اعمال استراتژی ضد‌الیاسینگ با رعایت سازگاری نسخه‌ای.
-
-    در صورتی که برخی پرچم‌های StyleStrategy یا HintingPreference در نسخهٔ
-    فعلی PySide6/Qt موجود نباشند، از آنها صرف نظر می‌شود تا راه‌اندازی
-    برنامه در نسخه‌های قدیمی‌تر نیز بدون خطا ادامه یابد.
-    """
+    """اعمال آنتی‌الیاس و کیفیت بالای رندر به‌صورت صریح و پایدار."""
 
     from PySide6.QtGui import QFont
 
-    strategy = _get_style_strategy_flags(
-        "PreferAntialias",
-        "PreferFullHinting",
-        "PreferQuality",
-    )
-    if strategy:
-        font.setStyleStrategy(strategy)
+    strategy = QFont.StyleStrategy(font.styleStrategy())
+    strategy |= QFont.StyleStrategy.PreferAntialias
+    strategy |= QFont.StyleStrategy.PreferQuality
+    font.setStyleStrategy(strategy)
 
-    hinting_candidates = [
-        "PreferFullHinting",
-        "PreferVerticalHinting",
-        "PreferDefaultHinting",
-    ]
-    for candidate in hinting_candidates:
-        preference = getattr(QFont.HintingPreference, candidate, None)
-        if preference is None:
-            LOGGER.debug("HintingPreference.%s در دسترس نیست", candidate)
-            continue
-        font.setHintingPreference(preference)
-        break
+    if hasattr(QFont, "HintingPreference") and hasattr(QFont.HintingPreference, "PreferFullHinting"):
+        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
 
+    font.setKerning(True)
     return font
 
 

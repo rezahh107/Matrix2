@@ -79,9 +79,6 @@ def test_apply_global_font_sets_qapplication_font(qapp: QApplication, tmp_path, 
     assert app_font.family().casefold().startswith(("vazir", "vazirmatn"))
     assert app_font.pointSize() == theme.BASE_FONT_PT
     assert app_font.styleStrategy() & QFont.StyleStrategy.PreferAntialias
-    prefer_full_hinting = getattr(QFont.StyleStrategy, "PreferFullHinting", None)
-    if prefer_full_hinting is not None:
-        assert app_font.styleStrategy() & prefer_full_hinting
     assert app_font.styleStrategy() & QFont.StyleStrategy.PreferQuality
     hint_pref = getattr(QFont.HintingPreference, "PreferFullHinting", None)
     if hint_pref is not None:
