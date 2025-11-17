@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app.ui.fonts import get_app_font
 from app.ui.texts import UiTranslator
 from app.ui.theme import Theme
 
@@ -47,10 +48,12 @@ class LogPanel(QFrame):
         self._placeholder.setAlignment(Qt.AlignCenter)
         self._placeholder.setObjectName("logPlaceholder")
         self._placeholder.setWordWrap(True)
+        self._placeholder.setFont(get_app_font())
 
         self._text = QTextEdit(self)
         self._text.setReadOnly(True)
         self._text.setObjectName("textLog")
+        self._text.setFont(get_app_font())
 
         stack_layout.addWidget(self._placeholder)
         stack_layout.addWidget(self._text)
@@ -112,11 +115,10 @@ class LogPanel(QFrame):
         self._theme = theme
         self.setStyleSheet(
             f"#logPanel{{background:{theme.colors.log_background};"
-            f"border:1px solid {theme.colors.border};border-radius:{theme.radius_md}px;}}"
+            f"border:1px solid {theme.colors.log_border};border-radius:{theme.radius_md}px;}}"
             f"#logPlaceholder{{color:{theme.colors.text_muted};}}"
             f"QTextEdit#textLog{{border:none;background:transparent;"
-            f"font-family:'Fira Code','Cascadia Code','Segoe UI Mono','Courier New',monospace;"
-            f"line-height:1.35; padding:{theme.spacing_sm}px;}}"
+            f"color:{theme.colors.log_foreground};line-height:1.35; padding:{theme.spacing_sm}px;}}"
             f"QPushButton#btnClearLog, QPushButton#btnSaveLog{{"
             f"background:{theme.colors.card};border:1px solid {theme.colors.border};"
             f"border-radius:{theme.radius_sm}px;padding:{theme.spacing_xs}px {theme.spacing_md}px;}}"

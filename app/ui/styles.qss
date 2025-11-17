@@ -2,7 +2,6 @@
 QWidget {
     background-color: {background};
     color: {text};
-    font-family: {font_en};
     font-size: {body_size}pt;
 }
 
@@ -163,15 +162,14 @@ QLabel#languagePill, QLabel#statusPill {
 
 QFrame#logPanel {
     background: {log_background};
-    border: 1px solid {border};
+    border: 1px solid {log_border};
     border-radius: {radius_md}px;
 }
 
 QTextEdit#textLog {
     background: transparent;
     border: none;
-    color: #e5e7eb;
-    font-family: 'Fira Code','Cascadia Code','Segoe UI Mono','Courier New', monospace;
+    color: {log_foreground};
     font-size: {body_size}pt;
     padding: {spacing_sm}px;
 }

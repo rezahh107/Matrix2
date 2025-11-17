@@ -27,6 +27,8 @@ __all__ = [
     "ensure_vazir_local_fonts",
     "load_vazir_font",
     "create_app_font",
+    "get_app_font",
+    "get_heading_font",
     "prepare_default_font",
     "apply_default_font",
     "collect_font_diagnostics",
@@ -289,18 +291,35 @@ def create_app_font(
         True
     """
 
-    vazir_font = load_vazir_font(point_size)
-    if vazir_font is not None:
-        return vazir_font
+    from PySide6.QtGui import QFont
 
     size = point_size or DEFAULT_POINT_SIZE
-    from PySide6.QtGui import QFont
+    vazir_font = load_vazir_font(size)
+    if vazir_font is not None:
+        vazir_font.setPointSize(size)
+        return _with_antialias(vazir_font)
 
     family = (fallback_family and fallback_family.strip()) or FALLBACK_FAMILY
     LOGGER.debug("استفاده از فونت جایگزین %s", family)
     fallback = QFont(family, size)
-    fallback.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
-    return fallback
+    return _with_antialias(fallback)
+
+
+def get_app_font(point_size: int | None = None) -> "QFont":
+    """دریافت نسخهٔ کپی‌شده از فونت سراسری برنامه با اندازهٔ دلخواه."""
+
+    return create_app_font(point_size=point_size)
+
+
+def get_heading_font() -> "QFont":
+    """فونت عناوین: مبتنی بر وزیر با اندازهٔ بزرگ‌تر و وزن متوسط."""
+
+    from PySide6.QtGui import QFont
+
+    heading = create_app_font()
+    heading.setPointSize(11)
+    heading.setWeight(QFont.Weight.Medium)
+    return heading
 
 
 def collect_font_diagnostics() -> dict[str, object]:
@@ -345,4 +364,9 @@ def apply_default_font(
 
     font = create_app_font(point_size=point_size, fallback_family=family_override)
     app.setFont(font)
+    return font
+
+
+def _with_antialias(font: "QFont") -> "QFont":
+    font.setStyleStrategy(font.StyleStrategy.PreferAntialias)
     return font
