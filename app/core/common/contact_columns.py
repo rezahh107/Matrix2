@@ -18,12 +18,26 @@ from app.core.common.phone_rules import normalize_mobile
 __all__ = [
     "MOBILE_COLUMN_NAMES",
     "MOBILE_COLUMN_KEYWORDS",
+    "TEXT_SENSITIVE_COLUMN_NAMES",
+    "TRACKING_CODE_COLUMN_NAMES",
     "is_mobile_header",
     "normalize_mobile_series_for_export",
 ]
 
 
 _HEADER_CLEANUP_RE: Final[re.Pattern[str]] = re.compile(r"[_\-|\u200c]")
+
+
+TRACKING_CODE_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "student_hekmat_tracking_code",
+        "student_hekmat_tracking",
+        "student_tracking_code",
+        "tracking_code",
+        "tracking_code_hekmat",
+        "کد رهگیری حکمت",
+    }
+)
 
 
 MOBILE_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
@@ -43,15 +57,13 @@ MOBILE_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
         "guardian2_mobile",
         "parent_mobile_1",
         "parent_mobile_2",
+        "تلفن همراه پدر",
+        "تلفن همراه مادر",
+        "تلفن منزل",
         "student_landline",
         "landline",
         "student_phone",
         "student_home_phone",
-        "student_hekmat_tracking_code",
-        "student_hekmat_tracking",
-        "student_tracking_code",
-        "tracking_code",
-        "tracking_code_hekmat",
         "تلفن همراه",
         "تلفن همراه | student_mobile",
         "تلفن همراه داوطلب",
@@ -65,8 +77,11 @@ MOBILE_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
         "تلفن رابط 2 | contact2_mobile",
         "تلفن ثابت",
         "تلفن",
-        "کد رهگیری حکمت",
     }
+)
+
+TEXT_SENSITIVE_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
+    set(MOBILE_COLUMN_NAMES).union(TRACKING_CODE_COLUMN_NAMES)
 )
 
 MOBILE_COLUMN_KEYWORDS: Final[tuple[str, ...]] = (
