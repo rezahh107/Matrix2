@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
@@ -93,6 +94,7 @@ from .preferences import (
 )
 from .preferences.language_dialog import LanguageDialog
 from .log_panel import LogPanel
+from .effects import SafeOpacityEffect
 from .theme import (
     Theme,
     apply_card_shadow,
@@ -102,6 +104,8 @@ from .theme import (
     build_theme,
 )
 from .texts import UiTranslator
+
+logger = logging.getLogger(__name__)
 
 _EN_TEXT_DEFAULTS: Dict[str, str] = {
     "app.title": "Student-Mentor Allocation",
@@ -391,8 +395,16 @@ class MainWindow(QMainWindow):
         self._progress_caption = QLabel(f"0% | {self._t('status.ready', 'آماده')}")
         self._progress_caption.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._progress_caption.setObjectName("progressCaption")
-        caption_effect = QGraphicsOpacityEffect(self._progress_caption)
+        caption_effect = SafeOpacityEffect(
+            "progress_caption_opacity",
+            self._progress_caption,
+        )
         self._progress_caption.setGraphicsEffect(caption_effect)
+        logger.debug(
+            "progress caption effect installed | widget=%s effect=%s",
+            self._progress_caption,
+            hex(id(caption_effect)),
+        )
         self._progress_pulse = QPropertyAnimation(caption_effect, b"opacity", self)
         self._progress_pulse.setDuration(820)
         self._progress_pulse.setStartValue(0.6)
@@ -637,8 +649,14 @@ class MainWindow(QMainWindow):
         widget = self._tabs.widget(index)
         if widget is None:
             return
-        effect = QGraphicsOpacityEffect(widget)
+        effect = SafeOpacityEffect(f"tab_change[{widget.objectName() or index}]", widget)
         widget.setGraphicsEffect(effect)
+        logger.debug(
+            "tab change effect installed | widget=%s effect=%s index=%s",
+            widget,
+            hex(id(effect)),
+            index,
+        )
         anim = QPropertyAnimation(effect, b"opacity", self)
         anim.setDuration(220)
         anim.setStartValue(0.0)
