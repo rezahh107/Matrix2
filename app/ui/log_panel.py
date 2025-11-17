@@ -41,7 +41,8 @@ class LogPanel(QFrame):
         stack_layout.setStackingMode(QStackedLayout.StackingMode.StackAll)
 
         self._placeholder = QLabel(
-            self._t("log.placeholder", "🗒️ هنوز گزارشی ثبت نشده است.")
+            self._t("log.placeholder", "🗒️ هنوز گزارشی ثبت نشده است."),
+            stack_host,
         )
         self._placeholder.setAlignment(Qt.AlignCenter)
         self._placeholder.setObjectName("logPlaceholder")
@@ -63,8 +64,10 @@ class LogPanel(QFrame):
         buttons_col.setSpacing(theme.spacing_md)
         self._btn_clear = QPushButton(self._t("log.clear", "پاک کردن گزارش"), self)
         self._btn_clear.setObjectName("btnClearLog")
+        self._btn_clear.setProperty("variant", "secondary")
         self._btn_save = QPushButton(self._t("log.save", "ذخیره گزارش…"), self)
         self._btn_save.setObjectName("btnSaveLog")
+        self._btn_save.setProperty("variant", "secondary")
         buttons_col.addWidget(self._btn_clear)
         buttons_col.addWidget(self._btn_save)
         buttons_col.addStretch(1)
@@ -99,7 +102,7 @@ class LogPanel(QFrame):
         self._btn_clear.setText(self._t("log.clear", "پاک کردن گزارش"))
         self._btn_save.setText(self._t("log.save", "ذخیره گزارش…"))
         self._placeholder.setText(
-            self._t("log.placeholder", "🗒️ هنوز گزارشی ثبت نشده است.")
+            self._t("log.placeholder", "🗒️ هنوز گزارشی ثبت نشده است."),
         )
         self._sync_placeholder()
 
@@ -108,19 +111,19 @@ class LogPanel(QFrame):
 
         self._theme = theme
         self.setStyleSheet(
-            f"#logPanel{{background:{theme.log_bg.name()};"
-            f"border:1px solid {theme.log_border.name()};border-radius:{theme.radius}px;}}"
-            f"#logPlaceholder{{color:{theme.text_muted.name()};}}"
+            f"#logPanel{{background:{theme.colors.log_background};"
+            f"border:1px solid {theme.colors.border};border-radius:{theme.radius_md}px;}}"
+            f"#logPlaceholder{{color:{theme.colors.text_muted};}}"
             f"QTextEdit#textLog{{border:none;background:transparent;"
             f"font-family:'Fira Code','Cascadia Code','Segoe UI Mono','Courier New',monospace;"
             f"line-height:1.35; padding:{theme.spacing_sm}px;}}"
             f"QPushButton#btnClearLog, QPushButton#btnSaveLog{{"
-            f"background:{theme.surface_alt.name()};border:1px solid {theme.border.name()};"
-            f"border-radius:{theme.radius - 2}px;padding:6px 10px;}}"
+            f"background:{theme.colors.card};border:1px solid {theme.colors.border};"
+            f"border-radius:{theme.radius_sm}px;padding:{theme.spacing_xs}px {theme.spacing_md}px;}}"
             f"QPushButton#btnClearLog:hover, QPushButton#btnSaveLog:hover{{"
-            f"background:{theme.surface.name()};}}"
+            f"background:{theme.colors.surface_alt};}}"
             f"QPushButton#btnClearLog:disabled, QPushButton#btnSaveLog:disabled{{"
-            f"opacity:0.45;}}"
+            f"opacity:0.65;}}"
         )
 
     # ------------------------------------------------------------------ داخلی
@@ -145,4 +148,3 @@ class LogPanel(QFrame):
         """اتصال سیگنال ذخیره به تابع مورد نظر."""
 
         self._btn_save.clicked.connect(slot)
-
