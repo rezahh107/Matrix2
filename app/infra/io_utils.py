@@ -168,18 +168,12 @@ def _stringify_cell(value: object) -> str:
     return str(value)
 
 
-def _is_mobile_column(label: object) -> bool:
-    """تشخیص ستون‌های موبایل بر اساس SSOT تماس."""
-
-    return is_mobile_header(label)
-
-
 def _normalize_mobile_columns(df: pd.DataFrame) -> None:
     """اعمال قالب متنی و صفر پیشتاز روی ستون‌های موبایل شناسایی‌شده."""
 
     if df.empty:
         return
-    target_columns = [column for column in df.columns if _is_mobile_column(column)]
+    target_columns = [column for column in df.columns if is_mobile_header(column)]
     for column in target_columns:
         series = ensure_series(df[column])
         df[column] = normalize_mobile_series_for_export(series)
