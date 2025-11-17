@@ -23,7 +23,46 @@ from __future__ import annotations
 from collections import OrderedDict
 from types import MappingProxyType
 from typing import Any, Iterator, KeysView, Mapping, MutableMapping
-from typing import Dict, List, Literal, Optional, TypedDict
+from typing import Dict, Iterable, List, Literal, Optional, Tuple, TypedDict
+
+import re
+
+
+_NUM = re.compile(r"(\d+)")
+
+
+def natural_key(s: str) -> Tuple[object, ...]:
+    """کلید طبیعی برای sort پایدار شناسه‌ها (EMP-2 قبل از EMP-10).
+
+    مثال::
+
+        >>> natural_key("EMP-2") < natural_key("EMP-10")
+        True
+    """
+
+    text = str(s or "").strip()
+    if not text:
+        return ("",)
+
+    parts: list[object] = []
+    has_text = False
+    for token in _NUM.split(text):
+        if not token:
+            continue
+        if token.isdecimal():
+            number = int(token)
+            if not parts:
+                parts.append("")
+            parts.append(number)
+        else:
+            parts.append(token.lower())
+            has_text = True
+
+    if not parts:
+        return ("",)
+    if not has_text and not isinstance(parts[0], str):
+        parts.insert(0, "")
+    return tuple(parts)
 
 
 class JoinKeyValues(Mapping[str, int]):
@@ -31,7 +70,12 @@ class JoinKeyValues(Mapping[str, int]):
 
     __slots__ = ("_items", "_mapping")
 
-    def __init__(self, data: Mapping[str, int] | MutableMapping[str, int]):
+    def __init__(
+        self,
+        data: Mapping[str, int] | MutableMapping[str, int],
+        *,
+        expected_keys: Iterable[str] | None = None,
+    ):
         ordered = OrderedDict[str, int]()
         for key, value in data.items():
             normalized_key = str(key)
@@ -45,6 +89,14 @@ class JoinKeyValues(Mapping[str, int]):
 
         if len(ordered) != 6:
             raise ValueError("JoinKeyValues must contain exactly six entries")
+
+        if expected_keys is not None:
+            expected = tuple(str(key) for key in expected_keys)
+            if tuple(ordered.keys()) != expected:
+                raise ValueError(
+                    "JoinKeyValues order/key mismatch; expected "
+                    f"{expected} got {tuple(ordered.keys())}"
+                )
 
         object.__setattr__(self, "_items", tuple(ordered.items()))
         object.__setattr__(self, "_mapping", MappingProxyType(dict(ordered)))
@@ -76,12 +128,29 @@ class JoinKeyValues(Mapping[str, int]):
 
         return dict(self._items)
 
+    @classmethod
+    def from_policy(cls, data: Mapping[str, int], join_keys: Iterable[str]) -> "JoinKeyValues":
+        """ساخت نمونه از روی Policy با اجبار ترتیب کلیدها.
+
+        Args:
+            data: نگاشت ورودی شامل مقادیر کلیدها.
+            join_keys: ترتیب دقیق کلیدها که باید ۶ تایی و int باشد.
+        """
+
+        expected_keys = tuple(str(key) for key in join_keys)
+        missing = [key for key in expected_keys if key not in data]
+        if missing:
+            raise ValueError(f"join key values missing for: {', '.join(missing)}")
+        ordered = {key: data[key] for key in expected_keys}
+        return cls(ordered, expected_keys=expected_keys)
+
 
 # سازگاری نامی با نسخه‌های قبلی
 JoinKeys = JoinKeyValues
 JoinKeysDF = JoinKeyValues
 
 __all__ = [
+    "natural_key",
     "JoinKeyValues",
     "JoinKeys",
     "JoinKeysDF",

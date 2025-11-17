@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from hashlib import blake2b
 from pathlib import Path
 from numbers import Number
@@ -12,6 +11,7 @@ import pandas as pd
 
 from app.core.common.columns import canonicalize_headers
 from app.core.policy_loader import PolicyConfig, load_policy
+from .types import natural_key
 from .ids import ensure_ranking_columns
 from .reasons import ReasonCode, build_reason
 
@@ -24,46 +24,6 @@ __all__ = [
 ]
 
 _DEFAULT_POLICY_PATH = Path("config/policy.json")
-_NUMERIC = re.compile(r"(\d+)")
-
-
-def natural_key(value: Any) -> tuple[Any, ...]:
-    """تولید کلید طبیعی برای مرتب‌سازی شناسه‌ها.
-
-    مثال::
-
-        >>> natural_key("EMP-10") > natural_key("EMP-2")
-        True
-    """
-
-    if value is None:
-        return ("",)
-    text = str(value).strip()
-    if not text:
-        return ("",)
-    parts: list[Any] = []
-    has_text = False
-    for token in _NUMERIC.split(text):
-        if not token:
-            continue
-        if token.isdigit():
-            try:
-                number = int(token)
-            except ValueError:
-                parts.append(token.lower())
-                has_text = True
-            else:
-                if not parts:
-                    parts.append("")
-                parts.append(number)
-            continue
-        parts.append(token.lower())
-        has_text = True
-    if not parts:
-        return ("",)
-    if not has_text and not isinstance(parts[0], str):
-        parts.insert(0, "")
-    return tuple(parts)
 
 
 def build_mentor_state(
