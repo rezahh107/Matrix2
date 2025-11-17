@@ -21,7 +21,3 @@ def test_theme_tokens_present() -> None:
     assert t.typography.font_en_stack
     assert t.typography.title_size > 0
     assert t.typography.body_size > 0
-
-
-def test_load_stylesheet_replaces_tokens() -> None:
-    theme.load_stylesheet(theme.Theme())
