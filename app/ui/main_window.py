@@ -214,8 +214,8 @@ class AccentSplitterHandle(QSplitterHandle):
         self.update()
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
-        painter = QPainter()
-        if not painter.begin(self):
+        painter = QPainter(self)
+        if not painter.isActive():
             return
         try:
             base_color = (
