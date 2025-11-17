@@ -45,6 +45,7 @@ from .common.trace import (
     TraceStagePlan,
     build_allocation_trace,
     build_trace_plan,
+    find_allocation_policy_violations,
     build_unallocated_summary,
     summarize_trace_outcome,
 )
@@ -1823,9 +1824,26 @@ def allocate_batch(
             record.update(outcome.metadata)
             outcome_records.append(record)
         trace_summary_df = pd.DataFrame(outcome_records)
+        if "student_id" in trace_summary_df.columns and "student_id" in students.columns:
+            student_indexed = students.set_index("student_id", drop=False)
+            for column in (
+                "student_national_code",
+                "student_registration_status",
+                "student_educational_status",
+                "student_first_name",
+                "student_last_name",
+            ):
+                if column in student_indexed.columns and column not in trace_summary_df.columns:
+                    trace_summary_df[column] = trace_summary_df["student_id"].map(
+                        student_indexed[column]
+                    )
         trace_df.attrs["summary_df"] = trace_summary_df
         trace_df.attrs["unallocated_summary"] = build_unallocated_summary(
             trace_summary_df, policy=policy
+        )
+        trace_df.attrs["final_status_counts"] = trace_summary_df["final_status"].value_counts()
+        trace_df.attrs["policy_violations"] = find_allocation_policy_violations(
+            trace_summary_df, pool_with_ids, policy=policy
         )
 
     pool_output = pool_with_ids.copy()
@@ -1869,9 +1887,44 @@ def build_selection_reason_rows(
 ) -> pd.DataFrame:
     """واسطهٔ سازگار برای ساخت شیت دلایل انتخاب پشتیبان."""
 
+    summary_df = None
+    if trace is not None:
+        summary_attr = getattr(trace, "attrs", {}) or {}
+        maybe_summary = summary_attr.get("summary_df")
+        if isinstance(maybe_summary, pd.DataFrame) and not maybe_summary.empty:
+            summary_df = maybe_summary
+
+    students_enriched = students
+    if summary_df is not None and "student_id" in summary_df.columns:
+        students_enriched = canonicalize_headers(students, header_mode="en").copy()
+        summary_en = canonicalize_headers(summary_df, header_mode="en")
+        summary_en = summary_en.drop_duplicates("student_id", keep="first")
+        if "student_id" in students_enriched.columns:
+            students_enriched = students_enriched.set_index("student_id", drop=False)
+            summary_indexed = summary_en.set_index("student_id", drop=False)
+            for column in (
+                "student_national_code",
+                "student_registration_status",
+                "student_educational_status",
+                "student_first_name",
+                "student_last_name",
+            ):
+                if column in summary_indexed.columns:
+                    aligned = summary_indexed[column].reindex(students_enriched.index)
+                    base = (
+                        students_enriched[column]
+                        if column in students_enriched.columns
+                        else pd.Series(pd.NA, index=students_enriched.index)
+                    )
+                    students_enriched[column] = base.where(base.notna(), aligned)
+            students_enriched = students_enriched.reset_index(drop=True)
+        students_enriched = canonicalize_headers(
+            students_enriched, header_mode=policy.excel.header_mode_internal
+        )
+
     return _build_selection_reason_rows(
         allocations,
-        students,
+        students_enriched,
         mentors,
         policy=policy,
         logs=logs,

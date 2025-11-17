@@ -23,6 +23,9 @@ def _build_basic_frames(policy):
                 policy.stage_column("school"): 1112,
                 "student_national_code": "001",
                 "student_educational_status": 1,
+                "student_registration_status": 3,
+                "first_name": "Ali",
+                "family_name": "Karimi",
             },
             {
                 "student_id": 2,
@@ -34,6 +37,7 @@ def _build_basic_frames(policy):
                 policy.stage_column("school"): 0,
                 "student_national_code": "002",
                 "student_educational_status": 0,
+                "student_registration_status": 1,
             },
         ]
     )
@@ -70,6 +74,10 @@ def test_trace_summary_includes_unallocated_and_allocated() -> None:
     assert {"candidate_count", "has_candidates", "capacity_candidate_count"}.issubset(
         summary_df.columns
     )
+    assert {"student_educational_status", "student_registration_status", "student_national_code"}.issubset(
+        summary_df.columns
+    )
+    assert {"student_first_name", "student_last_name"}.issubset(summary_df.columns)
 
     school_row = summary_df.loc[summary_df[policy.stage_column("school")] == 1112].iloc[0]
     assert school_row["final_status"] != FinalStatus.ALLOCATED.value
@@ -80,6 +88,9 @@ def test_trace_summary_includes_unallocated_and_allocated() -> None:
     assert {"candidate_count", "has_candidates", "capacity_candidate_count"}.issubset(
         unallocated_summary.columns
     )
+    assert policy.join_keys[0] in unallocated_summary.columns
+    assert trace.attrs.get("policy_violations") is not None
+    assert trace.attrs.get("final_status_counts") is not None
 
 
 def test_selection_reason_contains_join_keys() -> None:
