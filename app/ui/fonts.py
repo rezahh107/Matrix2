@@ -380,8 +380,8 @@ def _with_antialias(font: "QFont") -> "QFont":
     from PySide6.QtGui import QFont
 
     strategy = (
-        QFont.StyleStrategy(font.styleStrategy())
-        | QFont.StyleStrategy.PreferAntialias
+        QFont.StyleStrategy.PreferAntialias
+        | QFont.StyleStrategy.PreferFullHinting
         | QFont.StyleStrategy.PreferQuality
     )
     font.setStyleStrategy(strategy)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -113,6 +114,14 @@ class LogPanel(QFrame):
         """اعمال تم روی پس‌زمینه و دکمه‌ها."""
 
         self._theme = theme
+        palette = self.palette()
+        palette.setColor(QPalette.ColorRole.Window, theme.log_bg)
+        palette.setColor(QPalette.ColorRole.Base, theme.log_bg)
+        palette.setColor(QPalette.ColorRole.Text, theme.log_text)
+        palette.setColor(QPalette.ColorRole.WindowText, theme.log_text)
+        self.setPalette(palette)
+        self.setAutoFillBackground(True)
+
         self.setStyleSheet(
             f"#logPanel{{background:{theme.colors.log_background};"
             f"border:1px solid {theme.colors.log_border};border-radius:{theme.radius_md}px;}}"

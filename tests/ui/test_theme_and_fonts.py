@@ -77,8 +77,9 @@ def test_apply_global_font_sets_qapplication_font(qapp: QApplication, tmp_path, 
 
     app_font = qapp.font()
     assert app_font.family().casefold().startswith(("vazir", "vazirmatn"))
-    assert app_font.pointSize() == fonts.DEFAULT_POINT_SIZE
+    assert app_font.pointSize() == theme.BASE_FONT_PT
     assert app_font.styleStrategy() & QFont.StyleStrategy.PreferAntialias
+    assert app_font.styleStrategy() & QFont.StyleStrategy.PreferFullHinting
     assert app_font.styleStrategy() & QFont.StyleStrategy.PreferQuality
     assert app_font.hintingPreference() == QFont.HintingPreference.PreferFullHinting
 
@@ -94,7 +95,7 @@ def test_widgets_inherit_global_font(qapp: QApplication, tmp_path, monkeypatch: 
 
     label = QLabel("sample")
     assert label.font().family() == qapp.font().family()
-    assert label.font().pointSize() == fonts.DEFAULT_POINT_SIZE
+    assert label.font().pointSize() == theme.BASE_FONT_PT
 
 
 def test_layout_direction_for_languages(qapp: QApplication) -> None:
@@ -112,5 +113,15 @@ def test_light_theme_log_background_is_light() -> None:
     light_luminance = QColor(light_theme.colors.log_background).lightness()
     dark_luminance = QColor(dark_theme.colors.log_background).lightness()
 
-    assert light_luminance > 200
+    assert light_luminance > 210
+    assert dark_luminance < 80
     assert dark_luminance < light_luminance
+
+
+def test_heading_font_is_larger_than_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fonts, "load_vazir_font", lambda point_size=None: None)
+    body_font = fonts.create_app_font()
+    heading_font = fonts.get_heading_font()
+
+    assert heading_font.family() == body_font.family()
+    assert heading_font.pointSize() > body_font.pointSize()
