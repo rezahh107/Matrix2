@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from numbers import Number
 from typing import Any, Iterable, List, Mapping, Sequence
 
@@ -34,6 +35,7 @@ from ..policy_loader import PolicyConfig, load_policy
 from .filters import filter_school_by_value, resolve_student_school_code
 from .columns import normalize_bool_like, to_int64
 from .rules import Rule, RuleContext, apply_rule, default_stage_rule_map
+from .eligibility import build_stage_pass_flags
 from .types import (
     CANONICAL_TRACE_ORDER,
     StudentRow,
@@ -43,10 +45,26 @@ from .types import (
 
 __all__ = [
     "TraceStagePlan",
+    "TraceOutcome",
     "build_trace_plan",
     "build_stage_rule_map",
     "build_allocation_trace",
+    "summarize_trace_outcome",
+    "FinalStatus",
+    "classify_final_status",
+    "find_allocation_policy_violations",
+    "build_unallocated_summary",
 ]
+
+
+class FinalStatus(str, Enum):
+    """وضعیت نهایی تخصیص با مجموعهٔ کوچک و مشخص."""
+
+    ALLOCATED = "ALLOCATED"
+    NO_ELIGIBLE_MENTOR = "NO_ELIGIBLE_MENTOR"
+    NO_CAPACITY = "NO_CAPACITY"
+    RULE_EXCLUDED = "RULE_EXCLUDED"
+    DATA_ERROR = "DATA_ERROR"
 
 
 @dataclass(frozen=True)
@@ -55,6 +73,18 @@ class TraceStagePlan:
 
     stage: TraceStageLiteral
     column: str
+
+
+@dataclass(frozen=True)
+class TraceOutcome:
+    """خروجی خلاصهٔ تریس برای یک دانش‌آموز."""
+
+    student_id: object
+    final_status: str
+    failure_stage: TraceStageLiteral | None
+    final_reason: str
+    stage_flags: Mapping[TraceStageLiteral, bool]
+    metadata: Mapping[str, object]
 
 
 def _normalize_student_key(column: str) -> str:
@@ -158,6 +188,32 @@ def _string_or_none(value: object) -> str | None:
     return text or None
 
 
+def classify_final_status(
+    *,
+    allocated: bool,
+    has_candidates: bool,
+    passed_capacity: bool,
+    passed_school: bool,
+    data_ok: bool,
+    rule_reason_code: str | None = None,
+) -> FinalStatus:
+    """طبقه‌بندی وضعیت نهایی دانش‌آموز به Enum کوچک."""
+
+    if allocated:
+        return FinalStatus.ALLOCATED
+    if not data_ok:
+        return FinalStatus.DATA_ERROR
+    if not has_candidates:
+        if rule_reason_code or not passed_school:
+            return FinalStatus.RULE_EXCLUDED
+        return FinalStatus.NO_ELIGIBLE_MENTOR
+    if has_candidates and not passed_capacity:
+        return FinalStatus.NO_CAPACITY
+    if rule_reason_code or not passed_school:
+        return FinalStatus.RULE_EXCLUDED
+    return FinalStatus.DATA_ERROR
+
+
 def _coerce_optional_int(value: object) -> int | None:
     if value is None or value is pd.NA:
         return None
@@ -175,6 +231,22 @@ def _coerce_optional_int(value: object) -> int | None:
     if pd.isna(numeric):
         return None
     return int(numeric)
+
+
+def _initial_stage_flags() -> dict[TraceStageLiteral, bool]:
+    """ساخت فلگ اولیه مراحل تریس بر اساس ترتیب استاندارد."""
+
+    return {stage: False for stage in CANONICAL_TRACE_ORDER}
+
+
+def _stage_flags_from_counts(
+    stage_counts: Mapping[str, int] | None,
+    *,
+    policy: PolicyConfig,
+) -> dict[TraceStageLiteral, bool]:
+    """تولید فلگ عبور مرحله بر پایهٔ شمارندهٔ کاندیدها."""
+
+    return build_stage_pass_flags(stage_counts, policy=policy)
 
 
 def _resolve_school_status(student: Mapping[str, object], norm_value: int | None) -> bool:
@@ -351,3 +423,177 @@ def build_allocation_trace(
     )
     _apply_stage_rule(trace[-1], resolved_rules, student)
     return trace
+
+
+def summarize_trace_outcome(
+    student: Mapping[str, object],
+    trace: Sequence[TraceStageRecord],
+    log: Mapping[str, object],
+    *,
+    policy: PolicyConfig | None = None,
+) -> TraceOutcome:
+    """استخراج وضعیت نهایی تخصیص از روی تریس و لاگ."""
+
+    if policy is None:
+        policy = load_policy()
+
+    stage_counts: Mapping[str, int] = log.get("stage_candidate_counts") or {}
+    flags = _stage_flags_from_counts(stage_counts, policy=policy)
+    failure_stage: TraceStageLiteral | None = None
+
+    for record in trace:
+        stage = record.get("stage")
+        if stage not in flags:
+            continue
+        matched = bool(record.get("matched"))
+        flags[stage] = flags.get(stage, False) or matched
+        if not matched and failure_stage is None:
+            failure_stage = stage  # اولین مرحلهٔ شکست
+
+    for stage_name in policy.trace_stage_names:
+        try:
+            if int(stage_counts.get(stage_name, 0)) == 0:
+                flags[stage_name] = False
+        except Exception:
+            continue
+
+    if failure_stage is None:
+        for stage_name in policy.trace_stage_names:
+            if not flags.get(stage_name, False):
+                failure_stage = stage_name
+                break
+    if failure_stage is None and stage_counts:
+        for stage_name in policy.trace_stage_names:
+            try:
+                if int(stage_counts.get(stage_name, 0)) == 0:
+                    failure_stage = stage_name
+                    break
+            except Exception:
+                continue
+
+    status_raw = str(log.get("allocation_status") or "unallocated").strip().lower()
+    allocated = status_raw == "success"
+    candidate_count = int(log.get("candidate_count") or 0)
+    error_code = str(log.get("error_type") or "").strip().upper()
+    rule_reason_code = log.get("rule_reason_code")
+    data_ok = error_code not in {"DATA_MISSING", "INTERNAL_ERROR", "CAPACITY_UNDERFLOW"}
+    final_status = classify_final_status(
+        allocated=allocated,
+        has_candidates=candidate_count > 0,
+        passed_capacity=bool(flags.get("capacity_gate")),
+        passed_school=bool(flags.get("school")),
+        data_ok=data_ok,
+        rule_reason_code=rule_reason_code if rule_reason_code else None,
+    )
+
+    reason = str(
+        log.get("detailed_reason")
+        or log.get("rule_reason_text")
+        or log.get("rule_reason_code")
+        or ""
+    ).strip()
+
+    metadata: dict[str, object] = {}
+    for key in policy.join_keys:
+        if key in student:
+            metadata[key] = student.get(key)
+        else:
+            normalized = key.replace(" ", "_")
+            metadata[key] = student.get(normalized)
+    for column in (
+        "student_id",
+        policy.columns.school_code,
+        policy.stage_column("center"),
+        policy.stage_column("gender"),
+        policy.stage_column("graduation_status"),
+    ):
+        if column not in metadata:
+            metadata[column] = student.get(column)
+
+    metadata["candidate_count"] = candidate_count
+    metadata["stage_candidate_counts"] = dict(stage_counts)
+    metadata["rule_reason_code"] = rule_reason_code
+    metadata["error_type"] = error_code
+    metadata["has_candidates"] = candidate_count > 0
+    metadata["capacity_candidate_count"] = int(stage_counts.get("capacity_gate", 0))
+
+    return TraceOutcome(
+        student_id=student.get("student_id"),
+        final_status=final_status.value,
+        failure_stage=failure_stage,
+        final_reason=reason,
+        stage_flags=flags,
+        metadata=metadata,
+    )
+
+
+def find_allocation_policy_violations(
+    summary_df: pd.DataFrame,
+    pool_df: pd.DataFrame,
+    *,
+    policy: PolicyConfig | None = None,
+    capacity_column: str | None = None,
+) -> pd.DataFrame:
+    """جستجوی موارد مغایر با سیاست: ظرفیت مثبت ولی تخصیص‌نیافته."""
+
+    if policy is None:
+        policy = load_policy()
+    capacity_col = capacity_column or policy.columns.remaining_capacity
+    required_columns = list(policy.join_keys) + [capacity_col]
+    for column in required_columns:
+        if column not in pool_df.columns:
+            raise KeyError(f"Pool missing required column for violation check: {column}")
+    capacity_by_keys = (
+        pool_df[list(policy.join_keys) + [capacity_col]]
+        .copy()
+        .groupby(list(policy.join_keys))[capacity_col]
+        .max()
+        .reset_index()
+    )
+    merged = summary_df.merge(
+        capacity_by_keys,
+        how="left",
+        on=policy.join_keys,
+        suffixes=("_student", "_pool"),
+    )
+    capacity_numeric = pd.to_numeric(merged[capacity_col], errors="coerce").fillna(0)
+    mask_positive_capacity = capacity_numeric > 0
+    mask_unallocated = merged["final_status"] != FinalStatus.ALLOCATED.value
+    mask_rule_excluded = merged["final_status"] == FinalStatus.RULE_EXCLUDED.value
+    return merged.loc[mask_positive_capacity & mask_unallocated & ~mask_rule_excluded].copy()
+
+
+def build_unallocated_summary(
+    summary_df: pd.DataFrame, *, policy: PolicyConfig | None = None
+) -> pd.DataFrame:
+    """خلاصهٔ فشردهٔ دانش‌آموزان تخصیص‌نیافته برای دیباگ."""
+
+    if policy is None:
+        policy = load_policy()
+    unallocated_mask = summary_df["final_status"] != FinalStatus.ALLOCATED.value
+    stage_columns = [col for col in summary_df.columns if col.startswith("passed_")]
+    base_columns = [
+        "student_id",
+        "final_status",
+        "failure_stage",
+        "final_reason",
+        "candidate_count",
+        "has_candidates",
+        "capacity_candidate_count",
+    ]
+    for join_key in policy.join_keys:
+        if join_key in summary_df.columns and join_key not in base_columns:
+            base_columns.append(join_key)
+    for extra in (
+        policy.columns.school_code,
+        policy.stage_column("center"),
+        policy.stage_column("finance"),
+        policy.stage_column("graduation_status"),
+        policy.stage_column("gender"),
+    ):
+        if extra in summary_df.columns and extra not in base_columns:
+            base_columns.append(extra)
+    for column in summary_df.columns:
+        if column.startswith("student_educational") and column not in base_columns:
+            base_columns.append(column)
+    return summary_df.loc[unallocated_mask, base_columns + stage_columns]

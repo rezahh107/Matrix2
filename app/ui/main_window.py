@@ -80,8 +80,9 @@ from app.core.policy_loader import get_policy, load_policy
 from app.infra import cli
 from app.utils.path_utils import resource_path
 
+from app.ui.fonts import get_app_font
 from .task_runner import ProgressFn, Worker
-from .widgets import DashboardCard, FilePicker
+from .widgets import DashboardCard, FilePicker, ThemedStatusBar
 from .app_preferences import AppPreferences
 from .i18n import Language
 from .preferences import (
@@ -322,6 +323,7 @@ class MainWindow(QMainWindow):
         self._last_run_badge: QLabel | None = None
         self._file_status_rows: Dict[str, Tuple[QLabel, QLabel]] = {}
         self._current_action: str = self._translator.text("status.ready", "آماده")
+        self._status_bar: ThemedStatusBar | None = None
         policy_file = resource_path("config", "policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
         exporter_config = resource_path("config", "SmartAlloc_Exporter_Config_v1.json")
@@ -560,19 +562,22 @@ class MainWindow(QMainWindow):
     def _build_status_bar(self) -> None:
         """نوار وضعیت پایین با نمایش زبان و وضعیت جاری."""
 
-        status_bar = QStatusBar(self)
+        status_bar = ThemedStatusBar(self._theme, self)
         language_label = QLabel(
             f"{self._t('status.language', 'زبان فعال')}: {self._prefs.language.code.upper()}"
         )
         language_label.setObjectName("languagePill")
         state_label = QLabel(f"✅ {self._t('statusbar.ready', 'وضعیت: آماده')}")
         state_label.setObjectName("statusPill")
+        language_label.setFont(get_app_font())
+        state_label.setFont(get_app_font())
         status_bar.setSizeGripEnabled(False)
         status_bar.addWidget(state_label)
         status_bar.addPermanentWidget(language_label)
         self._language_label = language_label
         self._status_bar_state = state_label
         self.setStatusBar(status_bar)
+        self._status_bar = status_bar
 
     def _refresh_action_texts(self) -> None:
         """به‌روزرسانی متن و Tooltip اکشن‌های نوار ابزار بر اساس زبان فعال."""
@@ -990,6 +995,9 @@ class MainWindow(QMainWindow):
                 apply_card_shadow(card)
         if hasattr(self, "_log_panel"):
             self._log_panel.apply_theme(self._theme)
+        if self._status_bar is not None:
+            self._status_bar.apply_theme(self._theme)
+            self._status_bar.refresh_fonts()
         if isinstance(self._splitter, AccentSplitter):
             self._splitter.set_theme(self._theme)
         if self._theme_selector is not None:

@@ -12,57 +12,48 @@ import logging
 from typing import Any
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QPainter, QPixmap
-from PySide6.QtWidgets import (
-    QGraphicsDropShadowEffect,
-    QGraphicsEffect,
-    QGraphicsOpacityEffect,
-)
+from PySide6.QtGui import QPainter, QPixmap, QTransform
+from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsEffect, QGraphicsOpacityEffect
 
 LOGGER = logging.getLogger(__name__)
 DEBUG_PAINT_EFFECTS = False
 
 
 class _LoggingMixin:
-    _effect_name_key = "_effect_name"
-    _logged_inactive_key = "_logged_inactive"
+    _effect_name: str | None = None
+    _logged_inactive: bool = False
 
     def _init_effect_name(self, effect_name: str) -> None:
-        """ثبت نام افکت با تکیه بر Qt dynamic property تا از TypeError جلوگیری شود."""
+        """ثبت نام افکت با fallback به Qt property در صورت محدودیت __setattr__."""
 
-        # برخی کلاس‌های Qt از __setattr__ پشتیبانی نمی‌کنند؛ setProperty همیشه قابل‌اتکا است.
-        self.setProperty(self._effect_name_key, effect_name)
-        self.setProperty(self._logged_inactive_key, False)
+        try:
+            self._effect_name = effect_name
+        except TypeError:
+            # برخی آبجکت‌های Qt اجازهٔ __setattr__ ندارند؛ از setProperty استفاده می‌کنیم.
+            self.setProperty("_effect_name", effect_name)
+        try:
+            self._logged_inactive = False
+        except TypeError:
+            self.setProperty("_logged_inactive", False)
 
     def _get_effect_name(self) -> str:
-        if hasattr(self, "property"):
-            prop_name = self.property(self._effect_name_key)
-            if isinstance(prop_name, str) and prop_name:
-                return prop_name
         name = getattr(self, "_effect_name", None)
-        if isinstance(name, str) and name:
+        if isinstance(name, str):
             return name
+        prop_name = self.property("_effect_name") if hasattr(self, "property") else None
+        if isinstance(prop_name, str):
+            return prop_name
         return self.__class__.__name__
 
     def _mark_inactive_once(self) -> None:
-        already_logged = False
-        if hasattr(self, "property"):
-            prop_flag = self.property(self._logged_inactive_key)
-            already_logged = bool(prop_flag)
-        else:
-            already_logged = getattr(self, "_logged_inactive", False)
-
+        already_logged = getattr(self, "_logged_inactive", False)
         if already_logged:
             return
-
         LOGGER.warning("%s | painter inactive on entry", self._get_effect_name())
-        if hasattr(self, "setProperty"):
-            self.setProperty(self._logged_inactive_key, True)
-        else:
-            try:
-                self._logged_inactive = True
-            except TypeError:
-                pass
+        try:
+            self._logged_inactive = True
+        except TypeError:
+            self.setProperty("_logged_inactive", True)
 
     def _log(self, message: str, painter: QPainter) -> None:
         if not DEBUG_PAINT_EFFECTS:
@@ -108,6 +99,7 @@ class SafeOpacityEffect(_LoggingMixin, QGraphicsOpacityEffect):
     def draw(self, painter: QPainter) -> None:  # type: ignore[override]
         if not painter.isActive():
             self._mark_inactive_once()
+            return
 
         pixmap, offset = self._source_with_offset(
             Qt.LogicalCoordinates, QGraphicsEffect.PadToEffectiveBoundingRect
@@ -137,18 +129,21 @@ class SafeDropShadowEffect(_LoggingMixin, QGraphicsDropShadowEffect):
     def draw(self, painter: QPainter) -> None:  # type: ignore[override]
         if not painter.isActive():
             self._mark_inactive_once()
+            return
 
-        pixmap, _ = self._source_with_offset(
-            Qt.LogicalCoordinates, QGraphicsEffect.PadToEffectiveBoundingRect
+        offset = QPoint()
+        pixmap = self.sourcePixmap(
+            Qt.LogicalCoordinates, offset, QGraphicsEffect.PadToEffectiveBoundingRect
         )
         if pixmap.isNull():
             self._log("draw.skip(null_pixmap)", painter)
             self.drawSource(painter)
             return
 
-        # rely on the built-in drop shadow drawing to avoid platform-specific artifacts
         self._log("draw.begin", painter)
+        painter.save()
         try:
+            painter.setWorldTransform(QTransform())
             super().draw(painter)
         finally:
             self._log("draw.end", painter)

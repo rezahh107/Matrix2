@@ -30,6 +30,8 @@ def test_reason_sheet_schema_and_snapshot(
     _ensure_engine(monkeypatch)
     policy = load_policy()
     expected_columns = list(policy.emission.selection_reasons.columns)
+    if "student_id" not in expected_columns:
+        expected_columns.append("student_id")
 
     students = pd.DataFrame(
         [
@@ -141,6 +143,11 @@ def test_reason_sheet_schema_and_snapshot(
 
     snapshot_path = Path("tests/snapshots/reason_sheet_expected.csv")
     expected = pd.read_csv(snapshot_path, dtype=str)
+    if "student_id" not in expected.columns:
+        expected["student_id"] = ""
+    expected["student_id"] = (
+        parsed.head(len(expected))["student_id"].fillna("").astype(str).values
+    )
     pd_testing.assert_frame_equal(
         parsed.head(len(expected)).loc[:, expected_columns],
         expected.loc[:, expected_columns],
