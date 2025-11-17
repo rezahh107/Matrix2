@@ -6,8 +6,27 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
 import pandas as pd
-from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, Slot, QTimer, QUrl
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
+from PySide6.QtCore import (
+    QByteArray,
+    QDateTime,
+    QEasingCurve,
+    QPropertyAnimation,
+    QSettings,
+    QSize,
+    Qt,
+    Slot,
+    QTimer,
+    QUrl,
+)
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QDesktopServices,
+    QGuiApplication,
+    QKeySequence,
+    QPainter,
+    QPalette,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -29,6 +48,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStackedLayout,
     QSplitter,
+    QSplitterHandle,
     QStatusBar,
     QStyle,
     QTabWidget,
@@ -37,6 +57,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QToolBar,
     QToolButton,
+    QGraphicsOpacityEffect,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
@@ -78,6 +99,57 @@ from .texts import UiTranslator
 __all__ = ["MainWindow", "run_demo", "FilePicker"]
 
 
+class AccentSplitterHandle(QSplitterHandle):
+    """دستهٔ اسپلایتر با شاخص مرکزی و واکنش به Hover."""
+
+    def __init__(self, orientation: Qt.Orientation, parent: QSplitter, theme: Theme) -> None:
+        super().__init__(orientation, parent)
+        self._theme = theme
+        self._hover = False
+        self.setMouseTracking(True)
+
+    def set_theme(self, theme: Theme) -> None:
+        self._theme = theme
+        self.update()
+
+    def enterEvent(self, event) -> None:  # type: ignore[override]
+        self._hover = True
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event) -> None:  # type: ignore[override]
+        self._hover = False
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        painter = QPainter(self)
+        base_color = self._theme.border if self._theme else QPalette().color(QPalette.ColorRole.Mid)
+        hover_color = self._theme.accent if self._theme else QPalette().color(QPalette.ColorRole.Highlight)
+        painter.fillRect(self.rect(), hover_color if self._hover else base_color)
+        painter.setPen(self._theme.text_muted if self._theme else QPalette().color(QPalette.ColorRole.Text))
+        grip = "⋮" if self.orientation() == Qt.Vertical else "⋯"
+        painter.drawText(self.rect(), Qt.AlignCenter, grip)
+        painter.end()
+
+
+class AccentSplitter(QSplitter):
+    """اسپلایتر با هندل قابل تم برای هایلایت و آیکون مرکزی."""
+
+    def __init__(self, orientation: Qt.Orientation, parent: QWidget | None, theme: Theme) -> None:
+        super().__init__(orientation, parent)
+        self._theme = theme
+        self.setHandleWidth(5)
+
+    def createHandle(self) -> QSplitterHandle:  # type: ignore[override]
+        return AccentSplitterHandle(self.orientation(), self, self._theme)
+
+    def set_theme(self, theme: Theme) -> None:
+        self._theme = theme
+        for index in range(self.count() + 1):
+            handle = self.handle(index)
+            if isinstance(handle, AccentSplitterHandle):
+                handle.set_theme(theme)
 class MainWindow(QMainWindow):
     """پنجرهٔ اصلی PySide6 برای اجرای سناریوهای Build و Allocate."""
 
@@ -87,8 +159,15 @@ class MainWindow(QMainWindow):
         self._translator = UiTranslator(self._prefs.language)
         self.setWindowTitle(self._translator.text("app.title", "سامانه تخصیص دانشجو-منتور"))
         self.setMinimumSize(960, 640)
+        self.resize(1200, 800)
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            geom = screen.availableGeometry()
+            frame = self.frameGeometry()
+            frame.moveCenter(geom.center())
+            self.move(frame.topLeft())
         self.setLayoutDirection(Qt.RightToLeft if self._prefs.language == "fa" else Qt.LeftToRight)
-        self._theme_name: str = self._prefs.theme
+        self._theme_name: str = self._prefs.theme or "light"
         self._theme: Theme = self._load_theme(self._theme_name)
         self._theme_selector: QComboBox | None = None
         app = QApplication.instance()
@@ -122,8 +201,9 @@ class MainWindow(QMainWindow):
             str(exporter_config) if exporter_config.exists() else ""
         )
 
-        self._splitter = QSplitter(Qt.Vertical, self)
+        self._splitter = AccentSplitter(Qt.Vertical, self, self._theme)
         self._splitter.setChildrenCollapsible(False)
+        self._splitter.splitterMoved.connect(lambda *_: self._update_overlay_geometry())
 
         top_pane = QWidget(self._splitter)
         top_layout = QVBoxLayout(top_pane)
@@ -151,6 +231,7 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(
             self._wrap_page(self._build_explain_page()), self._t("tabs.explain", "توضیحات")
         )
+        self._tabs.currentChanged.connect(self._animate_tab_change)
         top_layout.addWidget(self._tabs, 1)
 
         bottom_pane = QWidget(self._splitter)
@@ -182,9 +263,18 @@ class MainWindow(QMainWindow):
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setObjectName("progressBar")
+        self._progress.setProperty("busy", False)
         self._progress_caption = QLabel(f"0% | {self._t('status.ready', 'آماده')}")
         self._progress_caption.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._progress_caption.setObjectName("progressCaption")
+        caption_effect = QGraphicsOpacityEffect(self._progress_caption)
+        self._progress_caption.setGraphicsEffect(caption_effect)
+        self._progress_pulse = QPropertyAnimation(caption_effect, b"opacity", self)
+        self._progress_pulse.setDuration(820)
+        self._progress_pulse.setStartValue(0.6)
+        self._progress_pulse.setEndValue(1.0)
+        self._progress_pulse.setLoopCount(-1)
+        self._progress_pulse.setEasingCurve(QEasingCurve.InOutQuad)
         progress_column = QVBoxLayout()
         progress_column.setSpacing(4)
         progress_column.addWidget(self._progress)
@@ -216,6 +306,17 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(self._splitter)
 
+        self._busy_overlay = QFrame(self._splitter)
+        self._busy_overlay.setObjectName("busyOverlay")
+        overlay_layout = QVBoxLayout(self._busy_overlay)
+        overlay_layout.setContentsMargins(0, 0, 0, 0)
+        overlay_layout.setAlignment(Qt.AlignCenter)
+        self._busy_label = QLabel(self._t("status.running", "در حال پردازش"), self._busy_overlay)
+        self._busy_label.setObjectName("busyOverlayLabel")
+        overlay_layout.addWidget(self._busy_label)
+        self._busy_overlay.hide()
+        self._update_overlay_geometry()
+
         self._build_ribbon()
         self._build_status_bar()
 
@@ -225,10 +326,13 @@ class MainWindow(QMainWindow):
             self._splitter.restoreState(state)
 
         self._interactive: List[QWidget] = []
+        self._log_line = 0
+        self._is_busy_cursor = False
         self._register_interactive_controls()
         self._update_output_folder_button_state()
         self._apply_theme()
         self._refresh_dashboard_state()
+        self._animate_tab_change(self._tabs.currentIndex())
 
     def _t(self, key: str, fallback: str) -> str:
         """دسترسی سریع به ترجمهٔ UI برای زبان فعال."""
@@ -245,34 +349,65 @@ class MainWindow(QMainWindow):
         """ایجاد نوار ابزار بالایی با الهام از Ribbon Office."""
 
         toolbar = QToolBar(self._t("ribbon.actions", "اکشن‌ها"), self)
-        toolbar.setIconSize(QSize(20, 20))
+        toolbar.setIconSize(QSize(28, 28))
         toolbar.setMovable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        toolbar.setContentsMargins(6, 6, 6, 6)
+        toolbar.setObjectName("mainToolbar")
+        style = self.style()
 
-        build_action = QAction(self._t("action.build", "ساخت ماتریس"), self)
+        build_action = QAction(
+            style.standardIcon(QStyle.SP_FileDialogNewFolder),
+            self._t("action.build", "ساخت ماتریس"),
+            self,
+        )
+        build_action.setShortcut(QKeySequence("Ctrl+B"))
+        build_action.setShortcutVisibleInContextMenu(True)
         build_action.triggered.connect(self._start_build)
         toolbar.addAction(build_action)
         self._toolbar_actions["build"] = build_action
 
-        allocate_action = QAction(self._t("action.allocate", "تخصیص"), self)
+        allocate_action = QAction(
+            style.standardIcon(QStyle.SP_ComputerIcon),
+            self._t("action.allocate", "تخصیص"),
+            self,
+        )
+        allocate_action.setShortcut(QKeySequence("Ctrl+L"))
+        allocate_action.setShortcutVisibleInContextMenu(True)
         allocate_action.triggered.connect(self._start_allocate)
         toolbar.addAction(allocate_action)
         self._toolbar_actions["allocate"] = allocate_action
 
-        rule_action = QAction(self._t("action.rule_engine", "اجرای Rule Engine"), self)
+        rule_action = QAction(
+            style.standardIcon(QStyle.SP_FileDialogDetailedView),
+            self._t("action.rule_engine", "اجرای Rule Engine"),
+            self,
+        )
+        rule_action.setShortcut(QKeySequence("Ctrl+R"))
+        rule_action.setShortcutVisibleInContextMenu(True)
         rule_action.triggered.connect(self._start_rule_engine)
         toolbar.addAction(rule_action)
         self._toolbar_actions["rule_engine"] = rule_action
 
         toolbar.addSeparator()
 
-        output_action = QAction(self._t("dashboard.button.output", "پوشه خروجی"), self)
+        output_action = QAction(
+            style.standardIcon(QStyle.SP_DirOpenIcon),
+            self._t("dashboard.button.output", "پوشه خروجی"),
+            self,
+        )
+        output_action.setShortcut(QKeySequence("Ctrl+O"))
+        output_action.setShortcutVisibleInContextMenu(True)
         output_action.triggered.connect(self._open_last_output_folder)
         toolbar.addAction(output_action)
         self._toolbar_actions["output"] = output_action
 
         toolbar.addSeparator()
-        prefs_action = QAction(self._t("action.preferences", "تنظیمات"), self)
+        prefs_action = QAction(
+            style.standardIcon(QStyle.SP_FileDialogInfoView),
+            self._t("action.preferences", "تنظیمات"),
+            self,
+        )
         prefs_action.triggered.connect(self._open_language_dialog)
         toolbar.addAction(prefs_action)
         self._toolbar_actions["prefs"] = prefs_action
@@ -307,8 +442,13 @@ class MainWindow(QMainWindow):
         """نوار وضعیت پایین با نمایش زبان و وضعیت جاری."""
 
         status_bar = QStatusBar(self)
-        language_label = QLabel(f"{self._t('status.language', 'زبان فعال')}: {self._prefs.language.upper()}")
-        state_label = QLabel(self._t("statusbar.ready", "وضعیت: آماده"))
+        language_label = QLabel(
+            f"{self._t('status.language', 'زبان فعال')}: {self._prefs.language.upper()}"
+        )
+        language_label.setObjectName("languagePill")
+        state_label = QLabel(f"✅ {self._t('statusbar.ready', 'وضعیت: آماده')}")
+        state_label.setObjectName("statusPill")
+        status_bar.setSizeGripEnabled(False)
         status_bar.addWidget(state_label)
         status_bar.addPermanentWidget(language_label)
         self._language_label = language_label
@@ -319,11 +459,31 @@ class MainWindow(QMainWindow):
         """به‌روزرسانی متن و Tooltip اکشن‌های نوار ابزار بر اساس زبان فعال."""
 
         mapping = {
-            "build": (self._t("action.build", "ساخت ماتریس"), self._t("tooltip.build", "اجرای کامل سناریوی ساخت ماتریس")),
-            "allocate": (self._t("action.allocate", "تخصیص"), self._t("tooltip.allocate", "اجرای تخصیص دانش‌آموز به منتور")),
-            "rule_engine": (self._t("action.rule_engine", "اجرای Rule Engine"), self._t("tooltip.rule_engine", "اجرای Rule Engine برای تست سیاست")),
-            "output": (self._t("dashboard.button.output", "پوشه خروجی"), self._t("tooltip.output_folder", "آخرین پوشه خروجی تولید شده را باز می‌کند")),
-            "prefs": (self._t("action.preferences", "تنظیمات"), ""),
+            "build": (
+                self._t("action.build", "ساخت ماتریس"),
+                f"<b>{self._t('action.build', 'ساخت ماتریس')}</b><br/>"
+                f"{self._t('tooltip.build', 'اجرای کامل سناریوی ساخت ماتریس')}",
+            ),
+            "allocate": (
+                self._t("action.allocate", "تخصیص"),
+                f"<b>{self._t('action.allocate', 'تخصیص')}</b><br/>"
+                f"{self._t('tooltip.allocate', 'اجرای تخصیص دانش‌آموز به منتور')}",
+            ),
+            "rule_engine": (
+                self._t("action.rule_engine", "اجرای Rule Engine"),
+                f"<b>{self._t('action.rule_engine', 'اجرای Rule Engine')}</b><br/>"
+                f"{self._t('tooltip.rule_engine', 'اجرای Rule Engine برای تست سیاست')}",
+            ),
+            "output": (
+                self._t("dashboard.button.output", "پوشه خروجی"),
+                f"<b>{self._t('dashboard.button.output', 'پوشه خروجی')}</b><br/>"
+                f"{self._t('tooltip.output_folder', 'آخرین پوشه خروجی تولید شده را باز می‌کند')}",
+            ),
+            "prefs": (
+                self._t("action.preferences", "تنظیمات"),
+                f"<b>{self._t('action.preferences', 'تنظیمات')}</b><br/>"
+                f"{self._t('tooltip.preferences', 'تنظیمات نمایش و زبان را تغییر دهید')}",
+            ),
         }
         for key, (text, tooltip) in mapping.items():
             action = self._toolbar_actions.get(key)
@@ -358,11 +518,26 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_status_bar_state"):
             return
         mapping = {
-            "ready": self._t("statusbar.ready", "وضعیت: آماده"),
-            "running": self._t("statusbar.running", "وضعیت: در حال اجرا"),
-            "error": self._t("statusbar.error", "وضعیت: خطا"),
+            "ready": f"✅ {self._t('statusbar.ready', 'وضعیت: آماده')}",
+            "running": f"⏳ {self._t('statusbar.running', 'وضعیت: در حال اجرا')}",
+            "error": f"❌ {self._t('statusbar.error', 'وضعیت: خطا')}",
         }
         self._status_bar_state.setText(mapping.get(key, mapping["ready"]))
+
+    def _animate_tab_change(self, index: int) -> None:
+        """انیمیشن محو/نمایش نرم هنگام تغییر تب."""
+
+        widget = self._tabs.widget(index)
+        if widget is None:
+            return
+        effect = QGraphicsOpacityEffect(widget)
+        widget.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity", self)
+        anim.setDuration(220)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.InOutQuad)
+        anim.start(QPropertyAnimation.DeleteWhenStopped)
 
     def _wrap_page(self, page: QWidget) -> QScrollArea:
         """پیچیدن صفحات فرم در اسکرول برای نمایش بهتر در اندازه‌های کوچک."""
@@ -373,6 +548,10 @@ class MainWindow(QMainWindow):
         scroll.setObjectName(f"scroll_{page.objectName() or id(page)}")
         scroll.setWidget(page)
         return scroll
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._update_overlay_geometry()
 
     def _apply_language(self, language: str) -> None:
         """اعمال زبان جدید و بازسازی متن‌های UI."""
@@ -392,6 +571,8 @@ class MainWindow(QMainWindow):
         self._refresh_last_run_badge()
         if hasattr(self, "_log_panel"):
             self._log_panel.update_translator(self._translator)
+        if hasattr(self, "_busy_label"):
+            self._busy_label.setText(self._t("status.running", "در حال پردازش"))
         if self._worker is None or not self._worker.isRunning():
             if hasattr(self, "_status"):
                 self._status.setText(self._t("status.ready", "آماده"))
@@ -623,7 +804,11 @@ class MainWindow(QMainWindow):
         if self._last_run_badge is None:
             return
         info = read_last_run_info(self._prefs)
-        self._last_run_badge.setText(format_last_run_label(info, self._translator))
+        text = format_last_run_label(info, self._translator)
+        self._last_run_badge.setText(text)
+        self._last_run_badge.setProperty("empty", "هنوز" in text)
+        self._last_run_badge.style().unpolish(self._last_run_badge)
+        self._last_run_badge.style().polish(self._last_run_badge)
 
     def _create_page_hero(self, title: str, subtitle: str, badge: str) -> QFrame:
         """ساخت هدر Hero برای صفحات تب‌ها."""
@@ -680,22 +865,42 @@ class MainWindow(QMainWindow):
             self._actions_card.apply_theme(self._theme)
         if hasattr(self, "_log_panel"):
             self._log_panel.apply_theme(self._theme)
+        if isinstance(self._splitter, AccentSplitter):
+            self._splitter.set_theme(self._theme)
         extra = (
             f"#heroCard{{background:{self._theme.card.name()};border:1px solid {self._theme.border.name()};"
-            f"border-radius:{self._theme.radius}px;}}"
-            f"#heroTitle{{color:{self._theme.text_primary.name()};font-weight:700;font-size:12pt;}}"
-            f"#heroSubtitle{{color:{self._theme.text_muted.name()};}}"
+            f"border-radius:{self._theme.radius_lg}px;"
+            f"padding:{self._theme.spacing_md}px;"
+            "box-shadow: 0 2px 8px rgba(0,0,0,0.08);}}"
+            f"#heroTitle{{color:{self._theme.text_primary.name()};font-weight:700;font-size:{self._theme.typography.headline}pt;}}"
+            f"#heroSubtitle{{color:{self._theme.text_muted.name()};font-size:{self._theme.typography.body_strong}pt;}}"
             f"#heroBadge{{background:{self._theme.accent_soft.name()};"
             f"border:1px solid {self._theme.border.name()};color:{self._theme.text_primary.name()};"
-            f"padding:6px 10px;border-radius:{self._theme.radius - 2}px;}}"
-            f"#progressCaption{{color:{self._theme.text_muted.name()};}}"
-            f"#dashboardPolicyInfo{{color:{self._theme.text_muted.name()};}}"
-            f"#labelStageBadge{{background:{self._theme.accent_soft.name()};padding:4px 8px;"
-            f"border-radius:{self._theme.radius - 2}px;}}"
-            f"#labelStageDetail, #labelStatus, #lastRunBadge{{color:{self._theme.text_muted.name()};}}"
-            f"QToolBar{{padding:6px;}}"
-            f"QStatusBar{{padding:4px 8px;}}"
-            f"#themeSelectorLabel{{color:{self._theme.text_muted.name()};padding-left:4px;}}"
+            f"padding:{self._theme.spacing_xs + 2}px {self._theme.spacing_md}px;border-radius:{self._theme.radius_sm}px;"
+            f"font-weight:700;}}"
+            f"#progressCaption{{color:{self._theme.text_muted.name()};font-size:{self._theme.typography.caption}pt;}}"
+            f"#progressCaption[busy='true']{{color:{self._theme.accent.name()};}}"
+            f"#dashboardPolicyInfo{{color:{self._theme.text_muted.name()};font-size:{self._theme.typography.body}pt;}}"
+            f"#labelStageBadge{{background:{self._theme.accent_soft.name()};padding:{self._theme.spacing_xs}px {self._theme.spacing_md}px;"
+            f"border-radius:{self._theme.radius_sm}px;font-weight:700;}}"
+            f"#labelStageDetail, #labelStatus, #lastRunBadge{{color:{self._theme.text_muted.name()};font-size:{self._theme.typography.body}pt;}}"
+            f"#lastRunBadge[empty='true']{{background:{self._theme.accent_soft.name()};"
+            f"border:1px dashed {self._theme.border.name()};padding:{self._theme.spacing_xs}px {self._theme.spacing_md}px;"
+            f"border-radius:{self._theme.radius_sm}px;font-weight:700;color:{self._theme.text_primary.name()};}}"
+            f"#themeSelectorLabel{{color:{self._theme.text_muted.name()};padding-left:{self._theme.spacing_xs}px;}}"
+            f"QPushButton.secondary, QToolButton.secondary{{background:{self._theme.surface_alt.name()};"
+            f"color:{self._theme.text_primary.name()};border:1px solid {self._theme.border.name()};}}"
+            f"QPushButton.secondary:hover, QToolButton.secondary:hover{{background:{self._theme.surface.name()};}}"
+            f"QPushButton#primaryButton{{background:{self._theme.accent.name()};color:white;border:none;"
+            f"border-radius:{self._theme.radius_sm}px;font-size:{self._theme.typography.body_strong + 1}pt;font-weight:600;}}"
+            f"QPushButton#primaryButton:hover{{background:{self._theme.accent.darker(110).name()};}}"
+            "#heroCard:hover{box-shadow:0 4px 16px rgba(0,0,0,0.12);transform:translateY(-2px);}" 
+            f"#statusPill, #languagePill{{background:{self._theme.surface_alt.name()};border:1px solid {self._theme.border.name()};"
+            f"border-radius:{self._theme.radius_sm}px;padding:{self._theme.spacing_xs}px {self._theme.spacing_md}px;"
+            "font-weight:600;}"
+            f"#busyOverlay{{background:rgba(0,0,0,0.08);border-radius:{self._theme.radius_sm}px;}}"
+            f"#busyOverlayLabel{{color:{self._theme.text_primary.name()};font-weight:700;background:{self._theme.surface.name()};"
+            f"padding:{self._theme.spacing_sm}px {self._theme.spacing_md}px;border-radius:{self._theme.radius_sm}px;}}"
         )
         self.setStyleSheet(extra)
 
@@ -1365,6 +1570,8 @@ class MainWindow(QMainWindow):
         """باز کردن دیالوگ انتخاب زبان و ذخیره در تنظیمات."""
 
         dialog = LanguageDialog(self._prefs.language, self._translator, self)
+        dialog.setModal(True)
+        dialog.setWindowOpacity(0.98)
         if dialog.exec() == QDialog.Accepted:
             chosen = dialog.selected_language()
             if chosen != self._prefs.language:
@@ -2031,6 +2238,9 @@ class MainWindow(QMainWindow):
         self._update_progress_caption(0, running_text)
         self._append_log(f"<b>▶️ شروع {action}</b>")
         self._disable_controls(True)
+        self._set_busy_cursor(True)
+        self._progress.setRange(0, 0)
+        self._progress.setProperty("busy", True)
         self._success_hook = on_success
 
         worker = Worker(func)
@@ -2045,6 +2255,44 @@ class MainWindow(QMainWindow):
 
         for widget in self._interactive:
             widget.setEnabled(not disabled)
+        if hasattr(self, "_busy_overlay"):
+            self._update_overlay_geometry()
+            self._busy_overlay.setVisible(disabled)
+            if disabled:
+                self._busy_overlay.raise_()
+        if hasattr(self, "_progress_pulse"):
+            if disabled:
+                self._progress_caption.setProperty("busy", True)
+                self._progress_pulse.start()
+            else:
+                self._progress_caption.setProperty("busy", False)
+                self._progress_pulse.stop()
+                effect = self._progress_caption.graphicsEffect()
+                if isinstance(effect, QGraphicsOpacityEffect):
+                    effect.setOpacity(1.0)
+        if hasattr(self, "_tabs"):
+            self._tabs.setProperty("busy", disabled)
+            self._tabs.style().unpolish(self._tabs)
+            self._tabs.style().polish(self._tabs)
+
+    def _update_overlay_geometry(self) -> None:
+        """همگام‌سازی اندازه پوشش مشغول برای جلوگیری از کلیک."""
+
+        if hasattr(self, "_busy_overlay") and self._busy_overlay is not None:
+            self._busy_overlay.setGeometry(self._splitter.rect())
+
+    def _set_busy_cursor(self, busy: bool) -> None:
+        """نمایش نشانگر مشغول هنگام اجرای عملیات طولانی."""
+
+        app = QApplication.instance()
+        if app is None:
+            return
+        if busy and not self._is_busy_cursor:
+            app.setOverrideCursor(Qt.BusyCursor)
+            self._is_busy_cursor = True
+        elif not busy and self._is_busy_cursor:
+            app.restoreOverrideCursor()
+            self._is_busy_cursor = False
 
     def _get_year_value(self, combo: QComboBox) -> int | None:
         """دریافت سال تحصیلی از یک ComboBox مشخص."""
@@ -2126,17 +2374,37 @@ class MainWindow(QMainWindow):
         """پاک کردن لاگ و بازگرداندن حالت خالی."""
 
         self._log.clear()
+        self._log_line = 0
         self._sync_log_placeholder()
 
     def _append_log(self, text: str) -> None:
         """افزودن پیام به لاگ با برجسته کردن خطاها."""
 
         message = str(text or "")
+        self._log_line += 1
+        timestamp = QDateTime.currentDateTime().toString("HH:mm:ss")
+        prefix = f"[{self._log_line:03d} | {timestamp}]"
         lowered = message.lower()
-        if ("error" in lowered or "خطا" in message) and "<span" not in message:
-            html = f'<span style="color:{self._theme.error.name()}">{message}</span>'
-        else:
-            html = message
+        background = None
+        if message.strip().startswith("✅"):
+            background = self._theme.success.lighter(150).name()
+        elif message.strip().startswith("❌"):
+            background = self._theme.error.lighter(150).name()
+        elif message.strip().startswith("ℹ️") or message.strip().startswith("⚠️"):
+            background = self._theme.accent_soft.name()
+        elif ("error" in lowered or "خطا" in message) and "<span" not in message:
+            background = self._theme.error.lighter(150).name()
+        content = message
+        if background:
+            content = (
+                f'<span style="background:{background}; padding:2px 6px;"
+                f" border-radius:{self._theme.radius_sm}px; color:{self._theme.text_primary.name()};">{message}</span>"
+            )
+        html = (
+            "<span style=\"font-family: 'Fira Code', 'Cascadia Code', 'Segoe UI Mono',"
+            " 'Courier New', monospace; color:" + self._theme.text_muted.name() + "\">"
+            f"{prefix}</span> {content}"
+        )
         self._log.append(html)
         self._sync_log_placeholder()
 
@@ -2220,6 +2488,9 @@ class MainWindow(QMainWindow):
     def _on_progress(self, pct: int, message: str) -> None:
         """به‌روزرسانی نوار پیشرفت و ثبت لاگ."""
 
+        if self._progress.maximum() == 0:
+            self._progress.setRange(0, 100)
+            self._progress.setProperty("busy", False)
         self._progress.setValue(max(0, min(100, int(pct))))
         self._status.setText(message or "در حال پردازش")
         safe_msg = message or "(بدون پیام)"
@@ -2233,6 +2504,9 @@ class MainWindow(QMainWindow):
         """پایان عملیات را مدیریت کرده و پیام مناسب را نمایش می‌دهد."""
 
         self._disable_controls(False)
+        self._set_busy_cursor(False)
+        self._progress.setRange(0, 100)
+        self._progress.setProperty("busy", False)
         self._worker = None
         hook, self._success_hook = self._success_hook, None
 

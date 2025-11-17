@@ -32,7 +32,7 @@ class LogPanel(QFrame):
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(theme.spacing)
+        root.setSpacing(theme.spacing_md)
 
         stack_host = QFrame(self)
         stack_host.setObjectName("logStackHost")
@@ -40,7 +40,9 @@ class LogPanel(QFrame):
         stack_layout.setContentsMargins(0, 0, 0, 0)
         stack_layout.setStackingMode(QStackedLayout.StackingMode.StackAll)
 
-        self._placeholder = QLabel(self._t("log.placeholder", "هنوز گزارشی ثبت نشده است."))
+        self._placeholder = QLabel(
+            self._t("log.placeholder", "🗒️ هنوز گزارشی ثبت نشده است.")
+        )
         self._placeholder.setAlignment(Qt.AlignCenter)
         self._placeholder.setObjectName("logPlaceholder")
         self._placeholder.setWordWrap(True)
@@ -58,7 +60,7 @@ class LogPanel(QFrame):
         root.addWidget(stack_host, 1)
 
         buttons_col = QVBoxLayout()
-        buttons_col.setSpacing(theme.spacing)
+        buttons_col.setSpacing(theme.spacing_md)
         self._btn_clear = QPushButton(self._t("log.clear", "پاک کردن گزارش"), self)
         self._btn_clear.setObjectName("btnClearLog")
         self._btn_save = QPushButton(self._t("log.save", "ذخیره گزارش…"), self)
@@ -96,7 +98,9 @@ class LogPanel(QFrame):
         self._translator = translator
         self._btn_clear.setText(self._t("log.clear", "پاک کردن گزارش"))
         self._btn_save.setText(self._t("log.save", "ذخیره گزارش…"))
-        self._placeholder.setText(self._t("log.placeholder", "هنوز گزارشی ثبت نشده است."))
+        self._placeholder.setText(
+            self._t("log.placeholder", "🗒️ هنوز گزارشی ثبت نشده است.")
+        )
         self._sync_placeholder()
 
     def apply_theme(self, theme: Theme) -> None:
@@ -107,12 +111,16 @@ class LogPanel(QFrame):
             f"#logPanel{{background:{theme.log_bg.name()};"
             f"border:1px solid {theme.log_border.name()};border-radius:{theme.radius}px;}}"
             f"#logPlaceholder{{color:{theme.text_muted.name()};}}"
-            f"QTextEdit#textLog{{border:none;background:transparent;}}"
+            f"QTextEdit#textLog{{border:none;background:transparent;"
+            f"font-family:'Fira Code','Cascadia Code','Segoe UI Mono','Courier New',monospace;"
+            f"line-height:1.35; padding:{theme.spacing_sm}px;}}"
             f"QPushButton#btnClearLog, QPushButton#btnSaveLog{{"
             f"background:{theme.surface_alt.name()};border:1px solid {theme.border.name()};"
             f"border-radius:{theme.radius - 2}px;padding:6px 10px;}}"
             f"QPushButton#btnClearLog:hover, QPushButton#btnSaveLog:hover{{"
             f"background:{theme.surface.name()};}}"
+            f"QPushButton#btnClearLog:disabled, QPushButton#btnSaveLog:disabled{{"
+            f"opacity:0.45;}}"
         )
 
     # ------------------------------------------------------------------ داخلی

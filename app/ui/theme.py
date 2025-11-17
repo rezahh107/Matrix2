@@ -1,8 +1,4 @@
-"""مدیر تم سبک برای پیاده‌سازی سبک Fluent/Windows 11.
-
-این ماژول یک تم مرکزی را تعریف می‌کند و روی QApplication اعمال می‌کند تا
-یکدستی رنگ و استایل در تمام ویجت‌های UI حفظ شود.
-"""
+"""مدیر تم سبک برای پیاده‌سازی سبک Fluent/Windows 11."""
 
 from __future__ import annotations
 
@@ -11,7 +7,11 @@ from dataclasses import dataclass
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
+OFFICE_FONT_FALLBACK = "'Segoe UI', 'Tahoma', 'Arial', 'Vazirmatn', 'Sans-Serif'"
+
 __all__ = [
+    "Typography",
+    "ShadowSpec",
     "Theme",
     "build_light_theme",
     "build_dark_theme",
@@ -23,11 +23,30 @@ __all__ = [
 
 
 @dataclass(frozen=True)
-class Theme:
-    """تعریف نقش‌های رنگی و ابعادی تم UI.
+class Typography:
+    """مقیاس تایپوگرافی هماهنگ با هر دو زبان فارسی و انگلیسی."""
 
-    تمام رنگ‌ها باید معتبر و روشن برای تم روشن باشند تا خوانایی تضمین شود.
-    """
+    caption: int = 10
+    body: int = 11
+    body_strong: int = 12
+    subtitle: int = 13
+    title: int = 14
+    headline: int = 16
+
+
+@dataclass(frozen=True)
+class ShadowSpec:
+    """تعریف سایه برای کارت‌ها و کنترل‌های شناور."""
+
+    color: QColor
+    blur_radius: int = 24
+    x_offset: int = 0
+    y_offset: int = 8
+
+
+@dataclass(frozen=True)
+class Theme:
+    """تعریف نقش‌های رنگی و ابعادی تم UI."""
 
     window: QColor
     surface: QColor
@@ -43,8 +62,18 @@ class Theme:
     error: QColor
     log_bg: QColor
     log_border: QColor
+    shadow_ambient: ShadowSpec
+    shadow_hover: ShadowSpec
+    radius_sm: int = 4
     radius: int = 8
-    spacing: int = 8
+    radius_lg: int = 12
+    spacing_xs: int = 4
+    spacing_sm: int = 8
+    spacing_md: int = 12
+    spacing_lg: int = 16
+    spacing_xl: int = 24
+    typography: Typography = Typography()
+    font_family: str = OFFICE_FONT_FALLBACK
 
     @property
     def window_bg(self) -> QColor:
@@ -77,17 +106,18 @@ def relative_luminance(color: QColor) -> float:
 def build_light_theme() -> Theme:
     """ساخت تم روشن ثابت با پس‌زمینهٔ خاکستری بسیار روشن."""
 
-    window = QColor("#f5f6f8")
+    window = QColor("#f6f8fb")
     base = QColor("#ffffff")
-    surface_alt = QColor("#eef0f4")
+    surface_alt = QColor("#eef2f8")
     card = QColor("#ffffff")
     text = QColor("#0f172a")
-    accent = QColor("#2563eb")
-    complement = QColor("#f59e0b")
+    accent = QColor("#0078d4")
+    complement = QColor("#00b7c3")
 
-    border = _blend(text, window, 0.2)
-    accent_soft = _blend(complement, window, 0.22)
-    muted = _blend(text, window, 0.5)
+    border = _blend(text, window, 0.18)
+    accent_soft = _blend(complement, window, 0.24)
+    muted = _blend(text, window, 0.52)
+    shadow_color = QColor(0, 0, 0, 35)
 
     return Theme(
         window=window,
@@ -104,22 +134,25 @@ def build_light_theme() -> Theme:
         error=QColor("#b91c1c"),
         log_bg=QColor("#f9fafb"),
         log_border=_blend(text, window, 0.25),
+        shadow_ambient=ShadowSpec(color=shadow_color, blur_radius=32, y_offset=10),
+        shadow_hover=ShadowSpec(color=shadow_color, blur_radius=36, y_offset=12),
     )
 
 
 def build_dark_theme() -> Theme:
     """ساخت تم تیره با کنتراست بالا و رنگ مکمل برای هایلایت‌ها."""
 
-    window = QColor("#0b1220")
-    base = QColor("#111827")
-    text = QColor("#e2e8f0")
-    accent = QColor("#22d3ee")
-    complement = QColor("#f59e0b")
+    window = QColor("#0c1628")
+    base = QColor("#111b2f")
+    text = QColor("#e6edf5")
+    accent = QColor("#4fb3ff")
+    complement = QColor("#22d3ee")
 
-    card = _blend(base, window, 0.3)
-    border = _blend(text, window, 0.35)
-    accent_soft = _blend(complement, window, 0.3)
-    muted = _blend(text, window, 0.4)
+    card = _blend(base, window, 0.28)
+    border = _blend(text, window, 0.32)
+    accent_soft = _blend(complement, window, 0.28)
+    muted = _blend(text, window, 0.42)
+    shadow_color = QColor(0, 0, 0, 120)
 
     return Theme(
         window=window,
@@ -136,6 +169,8 @@ def build_dark_theme() -> Theme:
         error=QColor("#f87171"),
         log_bg=_blend(base, window, 0.18),
         log_border=_blend(text, window, 0.25),
+        shadow_ambient=ShadowSpec(color=shadow_color, blur_radius=32, y_offset=12),
+        shadow_hover=ShadowSpec(color=shadow_color, blur_radius=40, y_offset=14),
     )
 
 
@@ -151,127 +186,267 @@ def build_theme(mode: str) -> Theme:
 def _stylesheet(theme: Theme) -> str:
     """تولید StyleSheet یکپارچه برای کنترل‌های کلیدی."""
 
+    colors = {
+        "text": theme.text_primary.name(),
+        "muted": theme.text_muted.name(),
+        "window": theme.window.name(),
+        "surface": theme.surface.name(),
+        "surface_alt": theme.surface_alt.name(),
+        "card": theme.card.name(),
+        "accent": theme.accent.name(),
+        "accent_soft": theme.accent_soft.name(),
+        "border": theme.border.name(),
+        "success": theme.success.name(),
+        "warning": theme.warning.name(),
+        "error": theme.error.name(),
+        "log_bg": theme.log_bg.name(),
+        "log_border": theme.log_border.name(),
+    }
+
     return f"""
         QWidget {{
-            color: {theme.text_primary.name()};
-            background-color: {theme.window.name()};
-            font-size: 11pt;
+            color: {colors['text']};
+            background-color: {colors['window']};
+            font-size: {theme.typography.body}pt;
+            font-family: {theme.font_family};
+            letter-spacing: 0.1px;
         }}
         QMainWindow, QDialog {{
-            background-color: {theme.window.name()};
+            background-color: {colors['window']};
+        }}
+        QPushButton, QToolButton, QComboBox {{
+            transition: all 0.2s ease-in-out;
         }}
         QGroupBox {{
-            border: 1px solid {theme.border.name()};
+            border: 1px solid {colors['border']};
+            border-top: 2px solid {colors['accent_soft']};
             border-radius: {theme.radius}px;
-            margin-top: 6px;
-            background: {theme.surface.name()};
-            padding: 6px;
+            margin-top: 8px;
+            background: {colors['surface']};
+            padding: {theme.spacing_sm}px {theme.spacing_md}px;
         }}
         QGroupBox::title {{
             subcontrol-origin: margin;
-            left: 8px;
-            padding: 0 4px 2px 4px;
-            color: {theme.text_primary.name()};
+            left: {theme.spacing_sm}px;
+            padding: 0 {theme.spacing_sm}px {theme.spacing_xs}px {theme.spacing_sm}px;
+            color: {colors['text']};
+            font-weight: 600;
+            font-size: {theme.typography.body_strong}pt;
         }}
         QTabWidget::pane {{
-            border: 1px solid {theme.border.name()};
-            border-radius: {theme.radius}px;
-            background: {theme.surface.name()};
+            border: 1px solid {colors['border']};
+            border-radius: {theme.radius_lg}px;
+            background: {colors['surface']};
+            padding: {theme.spacing_sm}px;
         }}
         QTabBar::tab {{
-            background: {theme.surface_alt.name()};
-            color: {theme.text_muted.name()};
-            padding: 6px 10px;
-            border: 1px solid {theme.border.name()};
-            border-bottom: none;
-            border-top-left-radius: {theme.radius}px;
-            border-top-right-radius: {theme.radius}px;
-            margin-right: 2px;
+            background: {colors['surface_alt']};
+            color: {colors['muted']};
+            padding: 10px 20px;
+            margin-right: 4px;
+            border: 1px solid transparent;
+            border-top-left-radius: {theme.radius_lg}px;
+            border-top-right-radius: {theme.radius_lg}px;
+            font-weight: 600;
         }}
         QTabBar::tab:selected {{
-            background: {theme.surface.name()};
-            color: {theme.text_primary.name()};
+            background: {colors['surface']};
+            color: {colors['text']};
+            border: 1px solid {colors['border']};
+            border-bottom: 1px solid {colors['surface']};
+        }}
+        QTabBar::tab:hover {{
+            background: {colors['surface']};
+            color: {colors['text']};
+        }}
+        QTabWidget[busy="true"]::pane {{
+            border-color: {colors['accent']};
         }}
         QToolButton, QPushButton {{
-            border: 1px solid {theme.border.name()};
-            border-radius: {theme.radius}px;
-            padding: 6px 14px;
-            background: {theme.surface_alt.name()};
-        }}
-        QToolButton:hover, QPushButton:hover {{
-            background: {theme.surface.name()};
-        }}
-        QToolButton:checked {{
-            background: {theme.accent_soft.name()};
-            border-color: {theme.accent.name()};
-        }}
-        QPushButton#primaryButton {{
-            background: {theme.accent.name()};
+            border: none;
+            border-radius: {theme.radius_sm}px;
+            padding: {theme.spacing_sm + 2}px {theme.spacing_lg + 2}px;
+            min-height: 34px;
+            background: {colors['accent']};
             color: #ffffff;
-            border: 1px solid {theme.accent.darker(110).name()};
+            font-weight: 600;
+            font-size: {theme.typography.body_strong}pt;
         }}
-        QPushButton#primaryButton:hover {{
+        QPushButton:hover, QToolButton:hover {{
             background: {theme.accent.darker(110).name()};
         }}
+        QPushButton:pressed, QToolButton:pressed {{
+            background: {theme.accent.darker(120).name()};
+            transform: scale(0.98);
+        }}
+        QPushButton:focus-visible, QToolButton:focus-visible, QComboBox:focus-visible, QLineEdit:focus-visible {{
+            outline: 2px solid #0078D4;
+            outline-offset: 2px;
+            border-radius: 4px;
+        }}
+        *:focus {{
+            outline: 2px solid #0078D4;
+            outline-offset: 2px;
+            border-radius: 4px;
+        }}
+        QPushButton#secondaryButton, QPushButton[objectName="secondaryButton"], QToolButton#secondaryButton {{
+            background: transparent;
+            border: 1px solid {colors['border']};
+            color: {colors['text']};
+        }}
+        QPushButton#secondaryButton:hover, QPushButton[objectName="secondaryButton"]:hover, QToolButton#secondaryButton:hover {{
+            background: {colors['surface_alt']};
+        }}
+        QPushButton:disabled, QToolButton:disabled, QComboBox:disabled {{
+            opacity: 0.4;
+            background: {colors['surface_alt']};
+            color: {colors['muted']};
+            border-color: {colors['border']};
+        }}
         QComboBox {{
-            border: 1px solid {theme.border.name()};
-            border-radius: {theme.radius}px;
-            padding: 6px 10px;
-            background: {theme.surface_alt.name()};
-            color: {theme.text_primary.name()};
+            border: 1px solid {colors['border']};
+            border-radius: {theme.radius_sm}px;
+            padding: {theme.spacing_sm}px {theme.spacing_md}px;
+            background: {colors['surface_alt']};
+            color: {colors['text']};
         }}
         QComboBox::drop-down {{
             border: none;
         }}
         QComboBox QAbstractItemView {{
-            background: {theme.surface.name()};
-            color: {theme.text_primary.name()};
-            selection-background-color: {theme.accent_soft.name()};
-            selection-color: {theme.text_primary.name()};
+            background: {colors['surface']};
+            color: {colors['text']};
+            selection-background-color: {colors['accent_soft']};
+            selection-color: {colors['text']};
         }}
-        QProgressBar {{
-            border: 1px solid {theme.border.name()};
-            border-radius: {theme.radius - 2}px;
-            background: {theme.surface_alt.name()};
+        QLineEdit, QTextEdit {{
+            border: 1px solid {colors['border']};
+            border-radius: {theme.radius_sm}px;
+            padding: 8px 12px;
+            background: {colors['surface']};
+            transition: all 0.2s ease-in-out;
+        }}
+        QLineEdit:focus, QTextEdit:focus {{
+            border: 2px solid {colors['accent']};
+            background: {colors['surface_alt']};
+        }}
+        QTextEdit[placeholderText]:empty::before {{
+            content: attr(placeholderText);
+            color: {colors['muted']};
             text-align: center;
         }}
-        QProgressBar::chunk {{
-            background: {theme.accent.name()};
-            border-radius: {theme.radius - 3}px;
+        QProgressBar {{
+            border: 1px solid {colors['border']};
+            border-radius: 6px;
+            background: {colors['surface_alt']};
+            text-align: center;
+            height: 8px;
         }}
-        QTextEdit {{
-            background: {theme.surface.name()};
-            border: 1px solid {theme.border.name()};
-            border-radius: {theme.radius}px;
+        QProgressBar::chunk {{
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0078D4, stop:1 #00BCF2);
+            border-radius: 5px;
+        }}
+        QProgressBar[busy="true"]::chunk {{
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 rgba(0,120,212,0.35), stop:1 rgba(0,188,242,0.75));
+        }}
+        FilePicker QLineEdit {{
+            border: 1px solid {colors['border']};
+            border-radius: 4px;
+            padding: 8px 12px;
+        }}
+        FilePicker QLineEdit:focus {{
+            border: 2px solid #0078D4;
+            outline: none;
+            background: {colors['surface_alt']};
+        }}
+        #fileIconLabel {{
+            color: {colors['muted']};
         }}
         #dashboardCard {{
-            background: {theme.card.name()};
-            border: 1px solid {theme.border.name()};
+            background: {colors['card']};
+            border: 1px solid {colors['border']};
             border-radius: {theme.radius}px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }}
+        DashboardCard:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
         }}
         #dashboardCardTitle {{
-            color: {theme.text_primary.name()};
-            font-weight: 600;
+            color: {colors['text']};
+            font-weight: 700;
+            font-size: {theme.typography.subtitle}pt;
         }}
         #dashboardCardDescription, #dashboardChecklistItem {{
-            color: {theme.text_muted.name()};
+            color: {colors['muted']};
+            font-size: {theme.typography.body}pt;
         }}
         #fileStatusRow {{
-            border-bottom: 1px solid {theme.border.name()};
+            border-bottom: 1px solid {colors['border']};
         }}
         #dashboardShortcut {{
-            background: {theme.surface_alt.name()};
-            border: 1px solid {theme.border.name()};
+            background: {colors['surface_alt']};
+            border: 1px solid {colors['border']};
             border-radius: {theme.radius - 2}px;
             padding: 6px 10px;
         }}
         #dashboardShortcut:hover {{
-            background: {theme.surface.name()};
+            background: {colors['surface']};
         }}
         #logPanel {{
-            background: {theme.log_bg.name()};
-            border: 1px solid {theme.log_border.name()};
+            background: {colors['log_bg']};
+            border: 1px solid {colors['log_border']};
             border-radius: {theme.radius}px;
+        }}
+        QToolBar {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 {colors['surface']}, stop:1 {colors['surface_alt']});
+            border: 1px solid {colors['border']};
+            border-radius: {theme.radius}px;
+            padding: {theme.spacing_sm}px {theme.spacing_md}px;
+            spacing: {theme.spacing_md}px;
+            min-height: 42px;
+        }}
+        QToolBar::separator {{
+            background: {colors['border']};
+            width: 1px;
+            margin: 0 6px;
+        }}
+        QStatusBar {{
+            background: {colors['surface']};
+            border-top: 1px solid {colors['border']};
+            padding: {theme.spacing_xs}px {theme.spacing_md}px;
+        }}
+        QStatusBar::item {{
+            border-right: 1px solid {colors['border']};
+            padding: 0 8px;
+        }}
+        QMessageBox {{
+            background: {colors['surface']};
+            border: 1px solid {colors['border']};
+            border-radius: {theme.radius}px;
+        }}
+        QMessageBox QLabel {{
+            color: {colors['text']};
+        }}
+        QMessageBox QPushButton {{
+            min-width: 88px;
+        }}
+        QSplitter::handle {{
+            background: {colors['border']};
+            width: 5px;
+            margin: 2px 0;
+        }}
+        QSplitter::handle:hover {{
+            background: {colors['accent']};
+        }}
+        QScrollArea {{
+            background: transparent;
+            border: none;
+        }}
+        QLabel#labelStageBadge {{
+            font-weight: 700;
         }}
     """
 
@@ -300,4 +475,3 @@ def apply_theme_mode(app: QApplication, mode: str) -> Theme:
     theme = build_theme(mode)
     apply_theme(app, theme)
     return theme
-
