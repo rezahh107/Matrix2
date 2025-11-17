@@ -35,6 +35,23 @@ def test_create_app_font_prefers_vazir(monkeypatch: pytest.MonkeyPatch) -> None:
     assert font.family().lower().startswith("vazir")
 
 
+def test_create_app_font_sets_bold_weight_for_vazir(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = QFont("Vazir", 11)
+    monkeypatch.setattr(fonts, "load_vazir_font", lambda point_size=None: fake)
+
+    font = create_app_font()
+
+    assert font.weight() == QFont.Weight.Bold
+
+
+def test_create_app_font_sets_bold_weight_for_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fonts, "load_vazir_font", lambda point_size=None: None)
+
+    font = create_app_font()
+
+    assert font.weight() == QFont.Weight.Bold
+
+
 def test_resolve_vazir_family_prefers_vazirmatn(monkeypatch: pytest.MonkeyPatch) -> None:
     class _FakeDB:
         def __init__(self, families: list[str]):

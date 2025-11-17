@@ -40,6 +40,9 @@ LOGGER = logging.getLogger(__name__)
 FONTS_DIR: Path = Path(__file__).resolve().parent / "fonts"
 FALLBACK_FAMILY = "Tahoma"
 DEFAULT_POINT_SIZE = 9
+
+# وزن پیش‌فرض برای فونت سراسری برنامه: بولد برای خوانایی بیشتر.
+DEFAULT_WEIGHT = "bold"
 DEBUG_LOG_ENV = "MATRIX_FONT_LOG"
 
 _FONT_DEBUG_HANDLER: logging.Handler | None = None
@@ -289,6 +292,10 @@ def create_app_font(
         >>> font = create_app_font(point_size=10, fallback_family="Arial")  # doctest: +SKIP
         >>> bool(font.family())  # doctest: +SKIP
         True
+
+    نکته:
+        وزن پیش‌فرض روی Bold تنظیم می‌شود تا هماهنگی سراسری با درخواست
+        کاربر حفظ شود.
     """
 
     from PySide6.QtGui import QFont
@@ -297,11 +304,13 @@ def create_app_font(
     vazir_font = load_vazir_font(size)
     if vazir_font is not None:
         vazir_font.setPointSize(size)
+        vazir_font.setWeight(_resolve_weight())
         return _with_antialias(vazir_font)
 
     family = (fallback_family and fallback_family.strip()) or FALLBACK_FAMILY
     LOGGER.debug("استفاده از فونت جایگزین %s", family)
     fallback = QFont(family, size)
+    fallback.setWeight(_resolve_weight())
     return _with_antialias(fallback)
 
 
@@ -312,13 +321,13 @@ def get_app_font(point_size: int | None = None) -> "QFont":
 
 
 def get_heading_font() -> "QFont":
-    """فونت عناوین: مبتنی بر وزیر با اندازهٔ بزرگ‌تر و وزن متوسط."""
+    """فونت عناوین: مبتنی بر وزیر با اندازهٔ بزرگ‌تر و وزن بولد."""
 
     from PySide6.QtGui import QFont
 
     heading = create_app_font()
     heading.setPointSize(11)
-    heading.setWeight(QFont.Weight.Medium)
+    heading.setWeight(_resolve_weight())
     return heading
 
 
@@ -370,3 +379,15 @@ def apply_default_font(
 def _with_antialias(font: "QFont") -> "QFont":
     font.setStyleStrategy(font.StyleStrategy.PreferAntialias)
     return font
+
+
+def _resolve_weight() -> "QFont.Weight":
+    """تبدیل وزن پیش‌فرض متنی به مقدار مناسب QFont."""
+
+    from PySide6.QtGui import QFont
+
+    mapping = {
+        "bold": QFont.Weight.Bold,
+        "demibold": QFont.Weight.DemiBold,
+    }
+    return mapping.get(DEFAULT_WEIGHT.lower(), QFont.Weight.Normal)
