@@ -12,6 +12,7 @@ import os
 import re
 import tempfile
 import warnings
+import math
 from os import PathLike
 from pathlib import Path
 from typing import Dict, Iterator, List, Literal, Mapping, Sequence
@@ -27,6 +28,7 @@ from app.core.common.columns import (
 from app.core.common.contact_columns import (
     MOBILE_COLUMN_KEYWORDS,
     MOBILE_COLUMN_NAMES,
+    TEXT_SENSITIVE_COLUMN_NAMES,
     is_mobile_header,
     normalize_mobile_series_for_export,
 )
@@ -179,6 +181,42 @@ def _normalize_mobile_columns(df: pd.DataFrame) -> None:
         df[column] = normalize_mobile_series_for_export(series)
 
 
+def _stringify_text_sensitive_columns(df: pd.DataFrame) -> None:
+    """تنظیم dtype ستون‌های حساس به متن برای جلوگیری از نمایش علمی."""
+
+    if df.empty:
+        return
+
+    def _stringify_value(value: object) -> str:
+        if value is None:
+            return ""
+        try:
+            if pd.isna(value):  # type: ignore[arg-type]
+                return ""
+        except Exception:
+            pass
+
+        if isinstance(value, (int, pd.Int64Dtype().type)):
+            return str(value)
+
+        if isinstance(value, float):
+            if math.isnan(value) or math.isinf(value):
+                return ""
+            if value.is_integer():
+                return str(int(value))
+            normalized = format(value, "f").rstrip("0").rstrip(".")
+            return normalized or "0"
+
+        return _stringify_cell(value)
+
+    target_columns = [
+        column for column in df.columns if str(column) in TEXT_SENSITIVE_COLUMN_NAMES
+    ]
+    for column in target_columns:
+        series = ensure_series(df[column])
+        df[column] = pd.Series(series.map(_stringify_value), index=series.index, dtype="string")
+
+
 def _prepare_dataframe_for_excel(df: pd.DataFrame) -> pd.DataFrame:
     """پاک‌سازی کامل DataFrame پیش از نوشتن در Excel."""
 
@@ -188,6 +226,7 @@ def _prepare_dataframe_for_excel(df: pd.DataFrame) -> pd.DataFrame:
 
     converted = frame.copy()
     _normalize_mobile_columns(converted)
+    _stringify_text_sensitive_columns(converted)
     for column, dtype in converted.dtypes.items():
         if pd.api.types.is_object_dtype(dtype):
             converted[column] = converted[column].map(_stringify_cell)
