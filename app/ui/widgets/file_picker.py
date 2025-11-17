@@ -5,12 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QFileInfo, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
     QFileIconProvider,
-    QFileInfo,
     QHBoxLayout,
     QLabel,
     QLineEdit,
