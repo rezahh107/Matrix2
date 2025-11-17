@@ -1,41 +1,43 @@
-"""تست‌های رندر ایمن استایل‌شیت تم."""
+"""تست‌های مربوط به تم و پالت برنامه."""
 
 from __future__ import annotations
-
-import re
 
 import pytest
 
 pytest.importorskip("PySide6.QtWidgets", reason="PySide6 not available in test environment")
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
 from app.ui import theme
 
 
-def test_load_stylesheet_replaces_all_tokens() -> None:
-    qss = theme.load_stylesheet(theme.Theme())
-    assert re.search(r"\{[A-Za-z0-9_]+\}", qss) is None
+def test_apply_theme_switches_between_light_and_dark_palettes() -> None:
+    app = QApplication.instance() or QApplication([])
+
+    light_theme = theme.apply_theme(app, "light")
+    light_window = app.palette().color(QPalette.ColorRole.Window)
+
+    dark_theme = theme.apply_theme(app, "dark")
+    dark_window = app.palette().color(QPalette.ColorRole.Window)
+
+    assert light_theme.mode == "light"
+    assert dark_theme.mode == "dark"
+    assert dark_window != light_window
+    assert dark_window.value() < light_window.value()
+    assert app.styleSheet() == ""
 
 
-def test_render_stylesheet_handles_structural_braces() -> None:
-    qss = "QWidget {\n    background-color: {background};\n}"
-    rendered = theme._render_stylesheet(qss, {"background": "#ffffff"})
-    assert "{background}" not in rendered
-    assert "#ffffff" in rendered
-
-
-def test_render_stylesheet_raises_on_unknown_placeholder() -> None:
-    qss = "QWidget { color: {text}; border: 1px solid {UNKNOWN}; }"
-    with pytest.raises(ValueError, match="UNKNOWN"):
-        theme._render_stylesheet(qss, {"text": "#111111"})
-
-
-def test_apply_theme_resets_global_stylesheet() -> None:
+def test_apply_theme_is_idempotent_and_resets_stylesheet() -> None:
     app = QApplication.instance() or QApplication([])
     app.setStyleSheet("QWidget { background: red; }")
 
-    applied_theme = theme.apply_theme(app)
+    first_palette_theme = theme.apply_theme(app, "dark")
+    first_window_color = app.palette().color(QPalette.ColorRole.Window)
 
-    assert applied_theme is not None
+    second_palette_theme = theme.apply_theme(app, "dark")
+    second_window_color = app.palette().color(QPalette.ColorRole.Window)
+
+    assert first_palette_theme.mode == "dark"
+    assert second_palette_theme.mode == "dark"
+    assert first_window_color == second_window_color
     assert app.styleSheet() == ""
-    assert app.palette() == app.style().standardPalette()

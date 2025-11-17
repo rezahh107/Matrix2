@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 from typing import Dict
 
-from PySide6.QtCore import QEasingCurve, QObject, QPropertyAnimation
+from PySide6.QtCore import QEasingCurve, QObject, QPropertyAnimation, Qt
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import (
     QApplication,
@@ -92,6 +92,7 @@ class Theme:
     radius_sm: int = 6
     radius_md: int = 10
     radius_lg: int = 14
+    mode: str = "light"
 
     @property
     def spacing_xs(self) -> int:
@@ -277,26 +278,63 @@ def _render_stylesheet(qss: str, mapping: Dict[str, str]) -> str:
     return _TOKEN_PATTERN.sub(_replace, qss)
 
 
-def apply_theme(app: QApplication, theme: Theme | None = None) -> Theme:
-    """اعمال تم دیفالت Qt با پاک‌سازی QSS سفارشی.
+def _create_dark_palette() -> QPalette:
+    """ساخت پالت تیره بر پایهٔ سبک Fusion."""
 
-    این پیاده‌سازی موقتاً هرگونه استایل‌شیت سفارشی را غیرفعال می‌کند تا
-    برنامه با پالت و استایل استاندارد Qt اجرا شود. امضای تابع ثابت می‌ماند
-    تا در آینده بتوان تم جدید را از همین نقطه فعال کرد.
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(37, 37, 37))
+    palette.setColor(QPalette.ColorRole.Base, QColor(25, 25, 25))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(45, 45, 45))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ToolTipText, Qt.white)
+    palette.setColor(QPalette.ColorRole.Text, Qt.white)
+    palette.setColor(QPalette.ColorRole.Button, QColor(45, 45, 45))
+    palette.setColor(QPalette.ColorRole.ButtonText, Qt.white)
+    palette.setColor(QPalette.ColorRole.WindowText, Qt.white)
+    accent = QColor(0, 120, 215)
+    palette.setColor(QPalette.ColorRole.Highlight, accent)
+    palette.setColor(QPalette.ColorRole.HighlightedText, Qt.white)
+    palette.setColor(QPalette.ColorRole.Link, accent)
+    palette.setColor(QPalette.ColorRole.BrightText, Qt.red)
+    return palette
 
-    مثال:
-        >>> app = QApplication.instance() or QApplication([])
-        >>> apply_theme(app)
+
+def _is_dark_theme_candidate(theme: Theme | str | None) -> bool:
+    """تشخیص تیره بودن تم از روی نام یا مشخصه‌های آن."""
+
+    if isinstance(theme, Theme):
+        return theme.mode.lower() == "dark" or "dark" in theme.colors.background.lower()
+    if isinstance(theme, str):
+        return "dark" in theme.lower()
+    return False
+
+
+def apply_theme(app: QApplication, theme: Theme | str | None = None) -> Theme:
+    """اعمال تم روشن/تیره صرفاً با QPalette و سبک Fusion.
+
+    این تابع استایل شیت سراسری را پاک کرده و بر اساس حالت درخواستی
+    پالت مناسب را روی برنامه اعمال می‌کند. ورودی می‌تواند نمونهٔ ``Theme``
+    یا نام تم (``"light"``/``"dark"``) باشد و امضای عمومی تابع حفظ شده است.
     """
 
-    resolved_theme = theme or Theme()
-    # پاک کردن هر استایل سفارشی پیشین
+    app.setStyle("Fusion")
     app.setStyleSheet("")
 
-    # بازگرداندن پالت استاندارد Qt
-    style = app.style()
-    app.setPalette(style.standardPalette())
+    if isinstance(theme, Theme):
+        resolved_theme = theme
+    elif isinstance(theme, str):
+        resolved_theme = build_theme(theme)
+    else:
+        resolved_theme = build_theme("light")
 
+    is_dark = _is_dark_theme_candidate(resolved_theme)
+
+    if is_dark:
+        palette = _create_dark_palette()
+    else:
+        palette = app.style().standardPalette()
+
+    app.setPalette(palette)
     return resolved_theme
 
 
@@ -354,9 +392,27 @@ def setup_button_hover_animation(button: QPushButton) -> None:
 
 
 def build_theme(mode: str | None = None) -> Theme:
-    """ساخت تم بر اساس حالت مورد نظر (فعلاً فقط روشن)."""
+    """ساخت تم بر پایهٔ حالت روشن یا تیره با توکن‌های هماهنگ."""
 
-    return Theme()
+    normalized = "dark" if (mode or "").lower() == "dark" else "light"
+    if normalized == "dark":
+        colors = ThemeColors(
+            background="#1f1f1f",
+            card="#2b2b2b",
+            text="#f2f2f2",
+            text_muted="#c4c4c4",
+            primary="#0078d7",
+            success="#16a34a",
+            warning="#f59e0b",
+            error="#dc2626",
+            log_background="#0f172a",
+            border="#3a3a3a",
+            surface_alt="#333333",
+        )
+    else:
+        colors = ThemeColors()
+
+    return Theme(colors=colors, typography=ThemeTypography(), mode=normalized)
 
 
 def apply_theme_mode(app: QApplication, mode: str | None = None) -> Theme:
