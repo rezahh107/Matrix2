@@ -34,4 +34,6 @@ def test_create_app_font_defaults_to_antialias_and_size(monkeypatch):
     font = fonts.create_app_font()
 
     assert font.pointSize() == fonts.DEFAULT_POINT_SIZE
-    assert font.styleStrategy() == QFont.StyleStrategy.PreferAntialias
+    assert font.styleStrategy() & QFont.StyleStrategy.PreferAntialias
+    assert font.styleStrategy() & QFont.StyleStrategy.PreferFullHinting
+    assert font.styleStrategy() & QFont.StyleStrategy.PreferQuality
