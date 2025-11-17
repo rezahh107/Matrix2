@@ -197,16 +197,7 @@ def apply_global_font(app: QApplication, typography: ThemeTypography = ThemeTypo
 def apply_palette(app: QApplication, theme: Theme) -> None:
     """تنظیم پالت روشن هماهنگ با توکن‌های تم."""
 
-    palette = app.palette()
-    palette.setColor(QPalette.ColorRole.Window, QColor(theme.colors.background))
-    palette.setColor(QPalette.ColorRole.Base, QColor(theme.colors.card))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(theme.colors.surface_alt))
-    palette.setColor(QPalette.ColorRole.Text, QColor(theme.colors.text))
-    palette.setColor(QPalette.ColorRole.Button, QColor(theme.colors.card))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor(theme.colors.text))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor(theme.colors.text))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor(theme.colors.primary))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+    palette = _create_palette_from_theme(theme)
     app.setPalette(palette)
 
 
@@ -278,24 +269,23 @@ def _render_stylesheet(qss: str, mapping: Dict[str, str]) -> str:
     return _TOKEN_PATTERN.sub(_replace, qss)
 
 
-def _create_dark_palette() -> QPalette:
-    """ساخت پالت تیره بر پایهٔ سبک Fusion."""
+def _create_palette_from_theme(theme: Theme) -> QPalette:
+    """ساخت پالت هماهنگ با توکن‌های تم (روشن یا تیره)."""
 
     palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor(37, 37, 37))
-    palette.setColor(QPalette.ColorRole.Base, QColor(25, 25, 25))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(45, 45, 45))
-    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(53, 53, 53))
-    palette.setColor(QPalette.ColorRole.ToolTipText, Qt.white)
-    palette.setColor(QPalette.ColorRole.Text, Qt.white)
-    palette.setColor(QPalette.ColorRole.Button, QColor(45, 45, 45))
-    palette.setColor(QPalette.ColorRole.ButtonText, Qt.white)
-    palette.setColor(QPalette.ColorRole.WindowText, Qt.white)
-    accent = QColor(0, 120, 215)
-    palette.setColor(QPalette.ColorRole.Highlight, accent)
-    palette.setColor(QPalette.ColorRole.HighlightedText, Qt.white)
-    palette.setColor(QPalette.ColorRole.Link, accent)
-    palette.setColor(QPalette.ColorRole.BrightText, Qt.red)
+    palette.setColor(QPalette.ColorRole.Window, theme.window)
+    palette.setColor(QPalette.ColorRole.Base, theme.card)
+    palette.setColor(QPalette.ColorRole.AlternateBase, theme.surface_alt)
+    palette.setColor(QPalette.ColorRole.ToolTipBase, theme.card)
+    palette.setColor(QPalette.ColorRole.ToolTipText, theme.text_primary)
+    palette.setColor(QPalette.ColorRole.Text, theme.text_primary)
+    palette.setColor(QPalette.ColorRole.Button, theme.card)
+    palette.setColor(QPalette.ColorRole.ButtonText, theme.text_primary)
+    palette.setColor(QPalette.ColorRole.WindowText, theme.text_primary)
+    palette.setColor(QPalette.ColorRole.Highlight, theme.accent)
+    palette.setColor(QPalette.ColorRole.HighlightedText, theme.text_primary)
+    palette.setColor(QPalette.ColorRole.Link, theme.accent)
+    palette.setColor(QPalette.ColorRole.BrightText, theme.error)
     return palette
 
 
@@ -303,7 +293,7 @@ def _is_dark_theme_candidate(theme: Theme | str | None) -> bool:
     """تشخیص تیره بودن تم از روی نام یا مشخصه‌های آن."""
 
     if isinstance(theme, Theme):
-        return theme.mode.lower() == "dark" or "dark" in theme.colors.background.lower()
+        return theme.mode.lower() == "dark"
     if isinstance(theme, str):
         return "dark" in theme.lower()
     return False
@@ -327,12 +317,7 @@ def apply_theme(app: QApplication, theme: Theme | str | None = None) -> Theme:
     else:
         resolved_theme = build_theme("light")
 
-    is_dark = _is_dark_theme_candidate(resolved_theme)
-
-    if is_dark:
-        palette = _create_dark_palette()
-    else:
-        palette = app.style().standardPalette()
+    palette = _create_palette_from_theme(resolved_theme)
 
     app.setPalette(palette)
     return resolved_theme
