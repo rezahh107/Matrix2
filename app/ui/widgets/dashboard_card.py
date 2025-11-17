@@ -7,20 +7,9 @@ from typing import Iterable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPaintEvent
-from PySide6.QtWidgets import (
-    QLabel,
-    QScrollArea,
-    QSizePolicy,
-    QStyle,
-    QStyleOption,
-    QStylePainter,
-    QVBoxLayout,
-    QWidget,
-    QFrame,
-)
+from PySide6.QtWidgets import QLabel, QFrame, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from app.ui.theme import Theme, apply_card_shadow
-from app.ui.utils import assert_painter_active
 
 __all__ = ["DashboardCard"]
 
