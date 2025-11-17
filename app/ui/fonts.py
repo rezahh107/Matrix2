@@ -29,6 +29,7 @@ __all__ = [
     "create_app_font",
     "prepare_default_font",
     "apply_default_font",
+    "collect_font_diagnostics",
 ]
 
 LOGGER = logging.getLogger(__name__)
@@ -36,6 +37,57 @@ LOGGER = logging.getLogger(__name__)
 FONTS_DIR: Path = Path(__file__).resolve().parent / "fonts"
 FALLBACK_FAMILY = "Tahoma"
 DEFAULT_POINT_SIZE = 9
+DEBUG_LOG_ENV = "MATRIX_FONT_LOG"
+
+_FONT_DEBUG_HANDLER: logging.Handler | None = None
+
+
+def _init_font_debug_log() -> None:
+    """فعال‌سازی لاگ فایل در صورت ست شدن متغیر محیطی.
+
+    مسیر از متغیر ``MATRIX_FONT_LOG`` خوانده می‌شود و در صورت موفقیت،
+    سطح لاگ روی DEBUG برای این ماژول تنظیم می‌شود.
+    """
+
+    global _FONT_DEBUG_HANDLER
+    if _FONT_DEBUG_HANDLER is not None:
+        return
+
+    log_path = os.environ.get(DEBUG_LOG_ENV)
+    if not log_path:
+        return
+
+    path = Path(log_path).expanduser()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(path, encoding="utf-8")
+    except OSError as exc:  # pragma: no cover - وابسته به سیستم فایل
+        LOGGER.error("راه‌اندازی لاگ فونت ناموفق بود: %s", exc)
+        return
+
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    handler.setFormatter(formatter)
+    handler.setLevel(logging.DEBUG)
+    LOGGER.addHandler(handler)
+    LOGGER.setLevel(logging.DEBUG)
+    _FONT_DEBUG_HANDLER = handler
+    LOGGER.debug("لاگ فونت در مسیر %s فعال شد", path)
+
+
+_init_font_debug_log()
+
+
+def _teardown_font_debug_log() -> None:
+    """حذف هندلر لاگ فایل (برای تست‌ها)."""
+
+    global _FONT_DEBUG_HANDLER
+    if _FONT_DEBUG_HANDLER is None:
+        return
+    LOGGER.removeHandler(_FONT_DEBUG_HANDLER)
+    try:
+        _FONT_DEBUG_HANDLER.close()
+    finally:
+        _FONT_DEBUG_HANDLER = None
 
 
 def ensure_vazir_local_fonts() -> None:
@@ -48,30 +100,40 @@ def ensure_vazir_local_fonts() -> None:
     """
 
     FONTS_DIR.mkdir(parents=True, exist_ok=True)
+    LOGGER.debug("بررسی فونت در مسیر %s", FONTS_DIR)
 
     if _has_vazir_files(FONTS_DIR.glob("*.ttf")):
+        LOGGER.debug("فایل وزیر موجود است؛ بدون اقدام اضافی")
+        return
+
+    if _materialize_embedded_font(FONTS_DIR):
+        LOGGER.debug("فونت تعبیه‌شده استخراج شد")
         return
 
     if _materialize_embedded_font(FONTS_DIR):
         return
 
     if os.name != "nt":
+        LOGGER.debug("سیستم ویندوز نیست؛ عبور بدون کپی")
         return
 
     for source in _iter_windows_sources():
         for path in source:
+            LOGGER.debug("تلاش برای کپی فونت از %s", path)
             _safe_copy_font(path, FONTS_DIR / path.name)
 
 
 def _iter_windows_sources() -> Iterable[List[Path]]:
     for candidate in _windows_candidates():
         if not candidate.exists():
+            LOGGER.debug("مسیر فونت یافت نشد: %s", candidate)
             continue
         if candidate.is_file():
             yield [candidate]
         else:
             fonts = sorted(candidate.rglob("Vazir*.ttf"))
             if fonts:
+                LOGGER.debug("%d فایل فونت در %s یافت شد", len(fonts), candidate)
                 yield fonts
 
 
@@ -97,6 +159,7 @@ def _safe_copy_font(src: Path, dst: Path) -> None:
     try:
         if not dst.exists():
             shutil.copy2(src, dst)
+            LOGGER.debug("کپی فونت به %s انجام شد", dst)
     except OSError as exc:  # pragma: no cover - خطای سیستم فایل
         LOGGER.debug("کپی فونت وزیر ناموفق بود: %s", exc)
 
@@ -105,6 +168,7 @@ def _has_vazir_files(paths: Iterable[Path]) -> bool:
     for path in paths:
         name = path.name.lower()
         if name.startswith("vazir") and path.suffix.lower() == ".ttf":
+            LOGGER.debug("فایل وزیر یافت شد: %s", path)
             return True
     return False
 
@@ -138,8 +202,10 @@ def _install_fonts_from_directory(directory: Path) -> list[str]:
     for ttf in sorted(directory.glob("*.ttf")):
         font_id = QFontDatabase.addApplicationFont(str(ttf))
         if font_id == -1:
+            LOGGER.debug("ثبت فونت %s ناموفق بود", ttf)
             continue
         families.extend(QFontDatabase.applicationFontFamilies(font_id))
+        LOGGER.debug("فونت %s ثبت شد با خانواده‌ها: %s", ttf, families)
     return families
 
 
@@ -148,6 +214,7 @@ def _load_vazir_font_family_names() -> list[str]:
 
     ensure_vazir_local_fonts()
     families = _install_fonts_from_directory(FONTS_DIR)
+    LOGGER.debug("خانواده‌های ثبت‌شده: %s", families)
     return [
         fam
         for fam in families
@@ -162,8 +229,10 @@ def load_vazir_font(point_size: int | None = None) -> "QFont" | None:
 
     families = _load_vazir_font_family_names()
     if not families:
+        LOGGER.debug("هیچ خانوادهٔ وزیر ثبت نشد")
         return None
     size = point_size or DEFAULT_POINT_SIZE
+    LOGGER.debug("فونت وزیر با خانوادهٔ %s و اندازهٔ %s ساخته شد", families[0], size)
     return QFont(families[0], size)
 
 
@@ -192,9 +261,33 @@ def create_app_font(
     from PySide6.QtGui import QFont
 
     family = (fallback_family and fallback_family.strip()) or FALLBACK_FAMILY
+    LOGGER.debug("استفاده از فونت جایگزین %s", family)
     fallback = QFont(family, size)
     fallback.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
     return fallback
+
+
+def collect_font_diagnostics() -> dict[str, object]:
+    """بازگرداندن وضعیت فعلی فونت و ثبت آن در لاگ (در صورت فعال بودن)."""
+
+    info: dict[str, object] = {
+        "fonts_dir": str(FONTS_DIR),
+        "fonts_present": sorted(path.name for path in FONTS_DIR.glob("*.ttf")),
+        "platform": os.name,
+        "env_paths": os.environ.get("VAZIR_FONT_PATHS", ""),
+        "windows_candidates": [str(path) for path in _windows_candidates()],
+        "debug_log_env": os.environ.get(DEBUG_LOG_ENV) or "",
+    }
+
+    try:
+        import importlib
+
+        info["pyside_available"] = importlib.util.find_spec("PySide6") is not None
+    except Exception:  # pragma: no cover - فقط برای گزارش
+        info["pyside_available"] = False
+
+    LOGGER.debug("گزارش عیب‌یابی فونت: %s", info)
+    return info
 
 
 def prepare_default_font(*, point_size: int | None = None) -> "QFont":
