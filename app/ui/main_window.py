@@ -11,7 +11,6 @@ import pandas as pd
 from PySide6.QtCore import (
     QByteArray,
     QDateTime,
-    QEasingCurve,
     QPropertyAnimation,
     QSettings,
     Qt,
@@ -63,23 +62,16 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from app.core.common.columns import (
-    CANON_EN_TO_FA,
-    HeaderMode,
-    canonicalize_headers,
-    ensure_series,
-)
-from app.core.counter import (
-    detect_academic_year_from_counters,
-    find_max_sequence_by_prefix,
-    infer_year_strict,
-    pick_counter_sheet_name,
-    year_to_yy,
-)
-from app.core.policy_loader import get_policy, load_policy
+from app.core.common.columns import CANON_EN_TO_FA, canonicalize_headers, ensure_series
+from app.core.counter import find_max_sequence_by_prefix, year_to_yy
+from app.core.policy_loader import get_policy
 from app.infra import cli
 from app.utils.path_utils import resource_path
 
+from app.ui.helpers.counter_helpers import detect_year_candidates
+from app.ui.helpers.manager_helpers import extract_manager_names
+from app.ui.loaders import ExcelLoader
+from app.ui.policy_cache import get_cached_policy
 from app.ui.fonts import get_app_font
 from .task_runner import ProgressFn, Worker
 from .widgets import DashboardCard, FilePicker, ThemedStatusBar
@@ -309,6 +301,7 @@ class MainWindow(QMainWindow):
         self._dashboard_frame: QFrame | None = None
         self._btn_open_output_folder: QPushButton | None = None
         self._center_manager_combos: Dict[int, QComboBox] = {}
+        self._manager_names_cache: list[str] = []
         self._btn_reset_managers: QPushButton | None = None
         self._shortcut_buttons: List[QToolButton] = []
         self._btn_open_output_shortcut: QToolButton | None = None
@@ -324,6 +317,10 @@ class MainWindow(QMainWindow):
         self._file_status_rows: Dict[str, Tuple[QLabel, QLabel]] = {}
         self._current_action: str = self._translator.text("status.ready", "آماده")
         self._status_bar: ThemedStatusBar | None = None
+        self._excel_loaders: set[ExcelLoader] = set()
+        self._log_line = 0
+        self._log_buffer: list[str] = []
+        self._log: QTextEdit | None = None
         policy_file = resource_path("config", "policy.json")
         self._default_policy_path = str(policy_file) if policy_file.exists() else ""
         exporter_config = resource_path("config", "SmartAlloc_Exporter_Config_v1.json")
@@ -424,6 +421,11 @@ class MainWindow(QMainWindow):
         self._log_panel.connect_clear(self._clear_log)
         self._log_panel.connect_save(self._save_log_to_file)
         self._log = self._log_panel.text_edit
+        if self._log_buffer:
+            buffered_messages = self._log_buffer[:]
+            self._log_buffer.clear()
+            for message in buffered_messages:
+                self._append_log(message)
         bottom_layout.addWidget(self._log_panel, 1)
 
         controls_layout = QHBoxLayout()
@@ -464,7 +466,6 @@ class MainWindow(QMainWindow):
             self._splitter.restoreState(state)
 
         self._interactive: List[QWidget] = []
-        self._log_line = 0
         self._is_busy_cursor = False
         self._register_interactive_controls()
         self._update_output_folder_button_state()
@@ -654,20 +655,10 @@ class MainWindow(QMainWindow):
         widget = self._tabs.widget(index)
         if widget is None:
             return
-        effect = SafeOpacityEffect(f"tab_change[{widget.objectName() or index}]", widget)
-        widget.setGraphicsEffect(effect)
-        logger.debug(
-            "tab change effect installed | widget=%s effect=%s index=%s",
-            widget,
-            hex(id(effect)),
-            index,
-        )
-        anim = QPropertyAnimation(effect, b"opacity", self)
-        anim.setDuration(220)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.setEasingCurve(QEasingCurve.InOutQuad)
-        anim.start(QPropertyAnimation.DeleteWhenStopped)
+        # انیمیشن قبلی حذف شد تا از ایجاد افکت‌های مکرر جلوگیری شود.
+        effect = widget.graphicsEffect()
+        if isinstance(effect, SafeOpacityEffect):
+            effect.setOpacity(1.0)
 
     def _wrap_page(self, page: QWidget) -> QScrollArea:
         """پیچیدن صفحات فرم در اسکرول برای نمایش بهتر در اندازه‌های کوچک."""
@@ -1960,7 +1951,7 @@ class MainWindow(QMainWindow):
         self._center_manager_combos.clear()
 
         try:
-            policy = load_policy()
+            policy = get_cached_policy()
             if not policy.center_management.enabled:
                 label = QLabel("مدیریت مراکز غیرفعال است")
                 main_layout.addWidget(label)
@@ -2004,6 +1995,7 @@ class MainWindow(QMainWindow):
         self._btn_reset_managers = reset_btn
         main_layout.addLayout(button_layout)
         group_box.setLayout(main_layout)
+        self._load_manager_names_async()
         return group_box
 
     def _create_manager_combo(self, parent: QWidget) -> QComboBox:
@@ -2026,6 +2018,43 @@ class MainWindow(QMainWindow):
         else:
             self._prefs.clear_center_manager(center_id)
 
+    def _run_excel_loader(
+        self, path: Path, *, description: str, on_loaded: Callable[[pd.DataFrame], None]
+    ) -> None:
+        """اجرای بارگذار Excel/CSV در نخ جداگانه و مدیریت UI."""
+
+        if not path.exists():
+            QMessageBox.warning(self, "فایل یافت نشد", f"مسیر مشخص‌شده وجود ندارد: {path}")
+            return
+        if path.is_dir():
+            QMessageBox.warning(self, "مسیر نامعتبر", "مسیر انتخاب‌شده یک پوشه است.")
+            return
+        loader = ExcelLoader(path)
+        self._excel_loaders.add(loader)
+        self._disable_controls(True)
+        self._set_busy_cursor(True)
+
+        def _finish() -> None:
+            self._excel_loaders.discard(loader)
+            if not self._excel_loaders and self._worker is None:
+                self._disable_controls(False)
+                self._set_busy_cursor(False)
+
+        def _handle_loaded(df: pd.DataFrame) -> None:
+            try:
+                on_loaded(df)
+            finally:
+                _finish()
+
+        def _handle_failed(message: str) -> None:
+            QMessageBox.warning(self, "خواندن فایل", f"{description}: {message}")
+            self._append_log(f"❌ {description} ناموفق: {message}")
+            _finish()
+
+        loader.loaded.connect(_handle_loaded)
+        loader.failed.connect(_handle_failed)
+        loader.start()
+
     def _refresh_manager_combo(
         self, center_id: int, combo: QComboBox, names: list[str] | None = None
     ) -> None:
@@ -2033,14 +2062,7 @@ class MainWindow(QMainWindow):
 
         combo.blockSignals(True)
         combo.clear()
-        source_names = names
-        if source_names is None:
-            try:
-                source_names = self._load_manager_names_from_pool()
-            except Exception:
-                source_names = []
-        if not source_names:
-            source_names = self._get_default_managers()
+        source_names = names or self._manager_names_cache or self._get_default_managers()
         combo.addItems(source_names)
         preferred = self._prefs.get_center_manager(center_id, "")
         if preferred:
@@ -2052,9 +2074,49 @@ class MainWindow(QMainWindow):
 
         if not self._center_manager_combos:
             return
-        names = self._load_manager_names_from_pool()
-        if not names:
+        self._load_manager_names_async()
+
+    def _load_manager_names_async(self) -> None:
+        """بارگذاری نام مدیران از استخر بدون مسدود کردن UI."""
+
+        path_text = self._picker_pool.text().strip()
+        if not path_text:
+            self._apply_manager_names(self._get_default_managers())
+            return
+        pool_path = Path(path_text)
+        if pool_path.is_dir():
+            QMessageBox.warning(
+                self,
+                "مسیر نامعتبر",
+                "مسیر انتخاب‌شده یک پوشه است. لطفاً فایل معتبر انتخاب کنید.",
+            )
+            self._apply_manager_names(self._get_default_managers())
+            return
+        self._run_excel_loader(
+            pool_path,
+            description="بارگذاری مدیران",
+            on_loaded=self._process_manager_dataframe,
+        )
+
+    def _process_manager_dataframe(self, dataframe: pd.DataFrame) -> None:
+        """پردازش دیتافریم مدیران خوانده‌شده و به‌روزرسانی ComboBoxها."""
+
+        try:
+            names = extract_manager_names(dataframe)
+        except Exception as exc:
+            self._append_log(f"❌ خطا در خواندن مدیران: {exc}")
+            QMessageBox.warning(
+                self,
+                "بارگذاری مدیران",
+                "امکان استخراج مدیران از فایل استخر نبود؛ از پیش‌فرض استفاده می‌شود.",
+            )
             names = self._get_default_managers()
+        self._apply_manager_names(names)
+
+    def _apply_manager_names(self, names: list[str]) -> None:
+        """به‌روزرسانی تمام ComboBoxهای مدیران با لیست داده‌شده."""
+
+        self._manager_names_cache = list(names)
         for center_id, combo in self._center_manager_combos.items():
             self._refresh_manager_combo(center_id, combo, list(names))
         self._append_log("✅ لیست مدیران به‌روزرسانی شد")
@@ -2063,7 +2125,7 @@ class MainWindow(QMainWindow):
         """بازنشانی تمام مدیران به مقادیر پیش‌فرض Policy."""
 
         try:
-            policy = load_policy()
+            policy = get_cached_policy()
         except Exception as exc:
             QMessageBox.warning(self, "Policy", f"خطا در بارگذاری Policy: {exc}")
             return
@@ -2094,7 +2156,7 @@ class MainWindow(QMainWindow):
         """دریافت لیست پیش‌فرض مدیران از Policy."""
 
         try:
-            policy = load_policy()
+            policy = get_cached_policy()
             managers: List[str] = []
             seen: set[str] = set()
             for center in policy.center_management.centers:
@@ -2106,88 +2168,6 @@ class MainWindow(QMainWindow):
             return managers if managers else ["شهدخت کشاورز", "آیناز هوشمند"]
         except Exception:
             return ["شهدخت کشاورز", "آیناز هوشمند"]
-
-    def _load_manager_names_from_pool(self) -> List[str]:
-        """بارگذاری نام مدیران از فایل استخر با error handling پیشرفته.
-
-        Returns:
-            List[str]: لیست نام‌های منحصربه‌فرد مدیران
-
-        Note:
-            در صورت بروز هرگونه خطا، لیست پیش‌فرض برگردانده می‌شود و خطا ثبت می‌گردد.
-        """
-
-        try:
-            path_text = self._picker_pool.text().strip()
-            if not path_text:
-                self._append_log("⚠️ مسیر فایل استخر مشخص نشده است")
-                return self._get_default_managers()
-
-            pool_path = Path(path_text)
-            if not pool_path.exists():
-                self._append_log("❌ فایل استخر یافت نشد")
-                QMessageBox.warning(
-                    self,
-                    "فایل یافت نشد",
-                    f"فایل استخر در مسیر زیر وجود ندارد:\n{pool_path}\n\n"
-                    "لطفاً از تب 'فایل‌ها' فایل استخر را انتخاب کنید.",
-                )
-                return self._get_default_managers()
-
-            if pool_path.is_dir():
-                self._append_log("❌ مسیر انتخاب‌شده یک پوشه است")
-                QMessageBox.warning(
-                    self,
-                    "مسیر نامعتبر",
-                    "مسیر انتخاب‌شده یک پوشه است. لطفاً فایل معتبر انتخاب کنید.",
-                )
-                return self._get_default_managers()
-
-            pool_df = pd.read_excel(pool_path)
-            canonical_pool = canonicalize_headers(pool_df, header_mode="en")
-            if "manager_name" not in canonical_pool.columns:
-                self._append_log("❌ ستون manager_name در فایل استخر وجود ندارد")
-                QMessageBox.warning(
-                    self,
-                    "ستون ضروری یافت نشد",
-                    "ستون 'manager_name' در فایل استخر وجود ندارد.\n\n"
-                    "لطفاً از صحت فایل اطمینان حاصل کنید.",
-                )
-                return self._get_default_managers()
-
-            managers = canonical_pool["manager_name"].dropna().unique().tolist()
-            if not managers:
-                self._append_log("⚠️ هیچ مدیری در فایل استخر یافت نشد")
-                QMessageBox.information(
-                    self,
-                    "فهرست مدیران خالی است",
-                    "هیچ مدیری در ستون 'manager_name' فایل استخر یافت نشد.\n\n"
-                    "از مقادیر پیش‌فرض استفاده خواهد شد.",
-                )
-                return self._get_default_managers()
-
-            cleaned_managers = [str(m).strip() for m in managers if str(m).strip()]
-            self._append_log(f"✅ {len(cleaned_managers)} مدیر از استخر بارگذاری شد")
-            return cleaned_managers or self._get_default_managers()
-
-        except PermissionError:
-            self._append_log("❌ دسترسی به فایل استخر امکان‌پذیر نیست")
-            QMessageBox.critical(
-                self,
-                "خطای دسترسی",
-                "دسترسی به فایل استخر امکان‌پذیر نیست.\n\n"
-                "لطفاً از باز نبودن فایل در برنامه‌ای دیگر اطمینان حاصل کنید.",
-            )
-            return self._get_default_managers()
-        except Exception as exc:  # pragma: no cover - خطای پیش‌بینی‌نشده
-            self._append_log(f"❌ خطای غیرمنتظره در بارگذاری مدیران: {exc}")
-            QMessageBox.critical(
-                self,
-                "خطای بارگذاری",
-                f"خطای غیرمنتظره در بارگذاری مدیران:\n{exc}\n\n"
-                "از مقادیر پیش‌فرض استفاده خواهد شد.",
-            )
-            return self._get_default_managers()
 
     def _start_demo_task(self) -> None:
         """اجرای پیش‌نمایش پیشرفت برای تست UI."""
@@ -2230,21 +2210,22 @@ class MainWindow(QMainWindow):
             )
             return
 
+        self._run_excel_loader(
+            Path(path_text),
+            description="پیشنهاد شمارنده",
+            on_loaded=lambda df: self._process_counter_dataframe(df, combo),
+        )
+
+    def _process_counter_dataframe(self, dataframe: pd.DataFrame, combo: QComboBox) -> None:
+        """بررسی دیتافریم شمارنده و پیشنهاد سال/شمارنده."""
+
         try:
-            dataframe = self._load_counter_dataframe(Path(path_text))
-        except FileNotFoundError:
-            QMessageBox.warning(self, "فایل یافت نشد", f"مسیر مشخص‌شده وجود ندارد: {path_text}")
-            return
-        except ValueError as exc:
+            canonical = canonicalize_headers(dataframe, header_mode="en")
+        except Exception as exc:
             QMessageBox.warning(self, "خواندن فایل", str(exc))
             return
-        except Exception as exc:  # pragma: no cover - خطای غیرمنتظره I/O
-            QMessageBox.warning(self, "خواندن فایل", f"امکان خواندن فایل نبود: {exc}")
-            return
 
-        canonical = canonicalize_headers(dataframe, header_mode=HeaderMode.en)
-        strict_year = infer_year_strict(canonical)
-        fallback_year = detect_academic_year_from_counters(canonical)
+        strict_year, fallback_year = detect_year_candidates(canonical)
         messages: list[str] = []
         if strict_year is not None:
             self._set_year_for_combo(combo, strict_year)
@@ -2475,6 +2456,9 @@ class MainWindow(QMainWindow):
     def _append_log(self, text: str) -> None:
         """افزودن پیام به لاگ با برجسته کردن خطاها."""
 
+        if self._log is None:
+            self._log_buffer.append(text)
+            return
         message = str(text or "")
         self._log_line += 1
         timestamp = QDateTime.currentDateTime().toString("HH:mm:ss")
@@ -2543,31 +2527,6 @@ class MainWindow(QMainWindow):
             self._btn_open_output_folder.setEnabled(available)
         if self._btn_open_output_shortcut is not None:
             self._btn_open_output_shortcut.setEnabled(available)
-
-    def _load_counter_dataframe(self, path: Path) -> pd.DataFrame:
-        """بارگذاری دیتافریم شمارنده با تشخیص شیت مناسب."""
-
-        if not path:
-            raise ValueError("مسیر فایل مشخص نشده است")
-        if not path.exists():
-            raise FileNotFoundError(path)
-
-        suffix = path.suffix.lower()
-        if suffix in {".xlsx", ".xls", ".xlsm"}:
-            with pd.ExcelFile(path) as workbook:
-                sheet_name = pick_counter_sheet_name(workbook.sheet_names)
-                if sheet_name is None:
-                    raise ValueError("هیچ شیت سازگار با شمارنده یافت نشد")
-                return workbook.parse(sheet_name)
-        if suffix == ".csv":
-            return pd.read_csv(path)
-
-        # تلاش مجدد به عنوان Excel پیش‌فرض
-        with pd.ExcelFile(path) as workbook:
-            sheet_name = pick_counter_sheet_name(workbook.sheet_names)
-            if sheet_name is None:
-                sheet_name = workbook.sheet_names[0]
-            return workbook.parse(sheet_name)
 
     def _ensure_filled(self, fields: Iterable[Tuple[FilePicker | QLineEdit, str]]) -> bool:
         """بررسی پر بودن فیلدهای ضروری و نمایش هشدار در صورت نقص."""
