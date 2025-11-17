@@ -46,7 +46,8 @@ def _format_xlsxwriter(
     worksheet_map = writer.sheets  # type: ignore[attr-defined]
     font = build_font_config(font_name, font_size=font_size)
     body_fmt = ensure_xlsxwriter_format(workbook, font)
-    header_fmt = ensure_xlsxwriter_format(workbook, font, header=True)
+    right_body_fmt = ensure_xlsxwriter_format(workbook, font, align_right=True)
+    header_fmt = ensure_xlsxwriter_format(workbook, font, header=True, align_right=rtl)
     table_names = TableNameRegistry()
 
     for sheet_name, df in sheet_frames.items():
@@ -62,10 +63,14 @@ def _format_xlsxwriter(
                 for column, dtype in df.dtypes.items()
                 if pd.api.types.is_datetime64_any_dtype(dtype)
             }
+            string_columns = {
+                idx for idx, dtype in enumerate(df.dtypes, start=0) if not pd.api.types.is_numeric_dtype(dtype)
+            }
             for idx, column in enumerate(df.columns):
                 if column in datetime_columns:
                     continue
-                worksheet.set_column(idx, idx, None, body_fmt)
+                fmt = right_body_fmt if idx in string_columns else body_fmt
+                worksheet.set_column(idx, idx, None, fmt)
         if df.empty or column_count == 0:
             continue
         table_name = table_names.reserve(sheet_name)
@@ -82,6 +87,7 @@ def _format_openpyxl(
     font_name: str | None,
     font_size: int | None,
 ) -> None:
+    from openpyxl.styles import Alignment
     from openpyxl.utils import get_column_letter
 
     workbook = writer.book  # type: ignore[attr-defined]
@@ -96,10 +102,17 @@ def _format_openpyxl(
         worksheet.freeze_panes = "A2"
         max_col = max(len(df.columns), worksheet.max_column)
         max_row = max(len(df) + 1, worksheet.max_row)
+        right_aligned = {
+            idx
+            for idx, dtype in enumerate(df.dtypes, start=1)
+            if not pd.api.types.is_numeric_dtype(dtype)
+        }
         if max_col and max_row:
             for row in worksheet.iter_rows(min_row=1, max_row=max_row, min_col=1, max_col=max_col):
                 for cell in row:
                     cell.style = style_name
+                    if cell.col_idx in right_aligned:
+                        cell.alignment = Alignment(horizontal="right")
         if df.empty or df.shape[1] == 0:
             continue
         headers = dedupe_headers(df.columns)

@@ -1,6 +1,6 @@
 """مدیریت تم سبک با توکن‌های مرکزی برای UI PySide6.
 
-این ماژول یک تم سبک و مینیمال را برای رابط فارسی‌محور تعریف می‌کند،
+این ماژول یک تم روشن و مینیمال را برای رابط انگلیسی‌محور تعریف می‌کند،
 رنگ‌ها، تایپوگرافی و فواصل را در یک نقطه متمرکز می‌سازد و توابع کمکی
 برای اعمال فونت، سایهٔ کارت و انیمیشن سبک Hover دکمه‌ها فراهم می‌کند.
 """
@@ -60,7 +60,7 @@ class ThemeColors:
 
 @dataclass(frozen=True)
 class ThemeTypography:
-    """تعریف مقیاس تایپوگرافی فارسی و انگلیسی.
+    """تعریف مقیاس تایپوگرافی انگلیسی با fallback فارسی.
 
     مثال:
         >>> typo = ThemeTypography()
@@ -186,7 +186,8 @@ def apply_global_font(app: QApplication, typography: ThemeTypography = ThemeTypo
     """
 
     font = QFont()
-    font.setFamily(typography.font_fa_stack)
+    # UI بر اساس دستور کار انگلیسی است؛ از پشتهٔ فونت انگلیسی استفاده می‌کنیم.
+    font.setFamily(typography.font_en_stack)
     font.setPointSize(typography.body_size)
     app.setFont(font)
 

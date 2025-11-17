@@ -15,7 +15,7 @@ from app.utils.path_utils import resource_path
 __all__ = ["UiTranslator", "SUPPORTED_LANGUAGES", "DEFAULT_LANGUAGE"]
 
 SUPPORTED_LANGUAGES = {"fa", "en"}
-DEFAULT_LANGUAGE = "fa"
+DEFAULT_LANGUAGE = "en"
 
 
 @dataclass(frozen=True)

@@ -635,6 +635,48 @@ def extract_ascii_digits(value: Any) -> str:
         return ""
 
 
+def normalize_persian_text(text: Any) -> str:
+    """نرمال‌سازی ملایم متن فارسی برای مصرف در هسته و خروجی.
+
+    - حذف کاراکترهای کنترل جهت و نیم‌فاصله‌های تکراری
+    - یکسان‌سازی حروف عربی/فارسی (ی/ى، ک/ك)
+    - تبدیل ارقام عربی/فارسی به لاتین جهت محاسبه/اکسل
+
+    مثال::
+        >>> normalize_persian_text("كريم ياسر ۱۲۳\u200c")
+        'کریم یاسر 123'
+    """
+
+    sanitized = sanitize_bidi(text)
+    return normalize_fa(sanitized)
+
+
+def normalize_persian_label(text: Any) -> str:
+    """نرمال‌سازی برچسب برای کلیدهای join و مقایسهٔ پایدار.
+
+    مثال::
+        >>> normalize_persian_label("  مدرسه‌ي نمونه")
+        'مدرسه ی نمونه'
+    """
+
+    normalized = normalize_persian_text(text)
+    return normalized.strip()
+
+
+def normalize_ascii_digits(text: Any) -> str:
+    """تبدیل ارقام فارسی/عربی به لاتین با حذف نویز جهت پردازش عددی.
+
+    مثال::
+        >>> normalize_ascii_digits("۱۲۳۴۵۶۷۸۹")
+        '123456789'
+    """
+
+    cleaned = sanitize_bidi(text)
+    translated = cleaned.translate(_PERSIAN_DIGITS)
+    translated = _RE_WHITESPACE.sub(" ", translated)
+    return translated.strip()
+
+
 __all__ = [
     "normalize_fa",
     "normalize_header",
@@ -648,4 +690,7 @@ __all__ = [
     "safe_truncate",
     "strip_school_code_separators",
     "extract_ascii_digits",
+    "normalize_persian_text",
+    "normalize_persian_label",
+    "normalize_ascii_digits",
 ]

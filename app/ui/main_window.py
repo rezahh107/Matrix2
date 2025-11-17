@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
@@ -97,6 +98,89 @@ from .log_panel import LogPanel
 from .theme import Theme, apply_card_shadow, apply_theme, build_theme, apply_theme_mode
 from .texts import UiTranslator
 
+_EN_TEXT_DEFAULTS: Dict[str, str] = {
+    "app.title": "Student-Mentor Allocation",
+    "status.ready": "Ready",
+    "status.waiting": "Pending",
+    "status.error": "Error",
+    "status.cancelled": "Cancelled",
+    "status.cancelled.detail": "Operation stopped",
+    "status.complete": "Complete",
+    "status.complete.detail": "Operation finished successfully",
+    "status.last_run_prefix": "Last run",
+    "status.no_runs": "No runs recorded",
+    "status.language": "Language",
+    "status.restart_required": "Restart required to apply language.",
+    "status.running": "Processing",
+    "tabs.build": "Build",
+    "tabs.allocate": "Allocate",
+    "tabs.rule_engine": "Rule Engine",
+    "tabs.validate": "Validate",
+    "tabs.explain": "Explain",
+    "hero.build.title": "Build Matrix",
+    "hero.build.subtitle": "Select inputs and build the eligibility matrix.",
+    "hero.build.badge": "Step 1 of 4",
+    "hero.allocate.title": "Allocate",
+    "hero.allocate.subtitle": "Pick student and mentor pools for allocation and Sabt exports.",
+    "hero.allocate.badge": "Step 2 of 4",
+    "hero.rule.title": "Rule Engine",
+    "hero.rule.subtitle": "Execute the rule engine to review policy and counters.",
+    "hero.rule.badge": "Step 3 of 4",
+    "hero.validate.title": "Quality Control",
+    "hero.validate.subtitle": "Review Sabt outputs and error reports before delivery.",
+    "hero.validate.badge": "Step 4 of 4",
+    "hero.explain.title": "Explain Report",
+    "hero.explain.subtitle": "Quick access to decision explainability for audits and training.",
+    "hero.explain.badge": "Appendix",
+    "ribbon.actions": "Actions",
+    "action.build": "Build",
+    "action.allocate": "Allocate",
+    "action.rule_engine": "Run Rule Engine",
+    "action.preferences": "Preferences",
+    "action.demo": "Run Demo",
+    "action.browse": "Browse…",
+    "dashboard.button.output": "Output Folder",
+    "dashboard.files.title": "Key Files",
+    "dashboard.files.description": "Last saved paths",
+    "dashboard.checklist.title": "Checklist",
+    "dashboard.checklist.description": "Delivery reminders",
+    "dashboard.no_checklist": "No checklist defined",
+    "dashboard.policy.info": "Active Policy",
+    "theme.label": "Theme",
+    "theme.light": "Light",
+    "theme.dark": "Dark",
+    "statusbar.ready": "Status: Ready",
+    "statusbar.running": "Status: Running",
+    "statusbar.error": "Status: Error",
+    "status.cancelled.detail": "Operation stopped",
+    "dashboard.button.build": "Build",
+    "dashboard.button.allocate": "Allocate",
+    "dashboard.button.rule_engine": "Rule Engine",
+    "tooltip.build": "Run the full matrix build pipeline",
+    "tooltip.allocate": "Allocate students to mentors",
+    "tooltip.rule_engine": "Execute the rule engine for policy testing",
+    "tooltip.output_folder": "Open the last generated output folder",
+    "tooltip.preferences": "Change appearance and language",
+    "group.inputs": "Inputs",
+    "group.policy": "Policy",
+    "group.output": "Output",
+    "group.actions": "Actions",
+    "group.counter": "Counter",
+    "group.preview": "Preview",
+    "files.inspactor": "Inspactor report",
+    "files.schools": "Schools report",
+    "files.crosswalk": "Crosswalk file",
+    "files.policy": "Policy",
+    "files.students": "Students",
+    "files.mentors": "Mentors",
+    "files.output.matrix": "Matrix output",
+    "stage.pick_scenario": "Select a scenario to start",
+    "status.cancelled": "Cancelled",
+    "status.complete": "Complete",
+    "status.complete.detail": "Finished successfully",
+}
+_PERSIAN_PATTERN = re.compile(r"[\u0600-\u06FF]")
+
 __all__ = ["MainWindow", "run_demo", "FilePicker"]
 
 
@@ -157,8 +241,10 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self._prefs = AppPreferences()
-        self._translator = UiTranslator(self._prefs.language)
-        self.setWindowTitle(self._translator.text("app.title", "سامانه تخصیص دانشجو-منتور"))
+        if self._prefs.language != "en":
+            self._prefs.language = "en"
+        self._translator = UiTranslator("en")
+        self.setWindowTitle(self._translator.text("app.title", _EN_TEXT_DEFAULTS["app.title"]))
         self.setMinimumSize(960, 640)
         self.resize(1200, 800)
         screen = QGuiApplication.primaryScreen()
@@ -167,7 +253,7 @@ class MainWindow(QMainWindow):
             frame = self.frameGeometry()
             frame.moveCenter(geom.center())
             self.move(frame.topLeft())
-        self.setLayoutDirection(Qt.RightToLeft if self._prefs.language == "fa" else Qt.LeftToRight)
+        self.setLayoutDirection(Qt.LeftToRight)
         self._theme_name: str = self._prefs.theme or "light"
         self._theme: Theme = self._load_theme(self._theme_name)
         self._theme_selector: QComboBox | None = None
@@ -337,8 +423,10 @@ class MainWindow(QMainWindow):
 
     def _t(self, key: str, fallback: str) -> str:
         """دسترسی سریع به ترجمهٔ UI برای زبان فعال."""
-
-        return self._translator.text(key, fallback)
+        effective_fallback = _EN_TEXT_DEFAULTS.get(key, fallback)
+        if self._translator.language == "en" and _PERSIAN_PATTERN.search(effective_fallback):
+            effective_fallback = key.replace("_", " ").replace(".", " ").title()
+        return self._translator.text(key, effective_fallback)
 
     def _load_theme(self, name: str) -> Theme:
         """بارگذاری تم بر اساس نام ذخیره‌شده."""
