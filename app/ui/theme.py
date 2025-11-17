@@ -13,13 +13,16 @@ import re
 from typing import Dict
 
 from PySide6.QtCore import QEasingCurve, QObject, QPropertyAnimation, Qt
-from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsDropShadowEffect,
     QPushButton,
     QWidget,
 )
+
+from app.ui.fonts import create_app_font
+from app.ui.i18n import Language
 
 __all__ = [
     "ThemeColors",
@@ -160,6 +163,14 @@ class Theme:
         return QColor(self.colors.success)
 
     @property
+    def success_soft(self) -> QColor:
+        """نسخهٔ ملایم رنگ موفقیت برای هایلایت لاگ."""
+
+        base = QColor(self.colors.success).darker(110)
+        base.setAlpha(90)
+        return base
+
+    @property
     def warning(self) -> QColor:
         return QColor(self.colors.warning)
 
@@ -176,29 +187,10 @@ class Theme:
         return QColor("#0f172a")
 
 
-def apply_global_font(app: QApplication, typography: ThemeTypography = ThemeTypography()) -> None:
-    """اعمال فونت پیش‌فرض برنامه بر اساس پشتهٔ فارسی.
+def apply_global_font(app: QApplication) -> None:
+    """اعمال فونت پیش‌فرض برنامه بر اساس وزیر یا تاهوما."""
 
-    پارامترها:
-        app: نمونهٔ QApplication فعال.
-        typography: تنظیمات تایپوگرافی شامل پشتهٔ فونت و اندازه.
-
-    مثال:
-        >>> app = QApplication.instance() or QApplication([])
-        >>> apply_global_font(app)
-    """
-    app.setFont(_create_app_font())
-
-
-def _create_app_font() -> QFont:
-    """ایجاد فونت سراسری برنامه بر پایهٔ Tahoma 8pt.
-
-    این فونت کوچک و خوانا بوده و در زبان‌های فارسی و انگلیسی رفتار باثباتی دارد.
-    """
-
-    font = QFont("Tahoma", 8)
-    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
-    return font
+    app.setFont(create_app_font())
 
 
 def apply_palette(app: QApplication, theme: Theme) -> None:
@@ -305,7 +297,7 @@ def apply_theme(app: QApplication, theme: Theme | str | None = None) -> Theme:
     """
 
     app.setStyle("Fusion")
-    app.setFont(_create_app_font())
+    app.setFont(create_app_font())
     app.setStyleSheet("")
 
     if isinstance(theme, Theme):
@@ -321,11 +313,11 @@ def apply_theme(app: QApplication, theme: Theme | str | None = None) -> Theme:
     return resolved_theme
 
 
-def apply_layout_direction(app: QApplication, language_code: str) -> None:
+def apply_layout_direction(app: QApplication, language: Language | str) -> None:
     """تنظیم جهت چیدمان اپلیکیشن بر اساس زبان."""
 
-    normalized = (language_code or "").lower()
-    if normalized.startswith("fa"):
+    lang_enum = language if isinstance(language, Language) else Language.from_code(language)
+    if lang_enum is Language.FA:
         app.setLayoutDirection(Qt.RightToLeft)
     else:
         app.setLayoutDirection(Qt.LeftToRight)

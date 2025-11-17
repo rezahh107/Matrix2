@@ -9,6 +9,7 @@ from typing import Any, List, Set
 from PySide6.QtCore import QByteArray, QSettings
 
 from app.core.policy_loader import load_policy
+from app.ui.i18n import Language
 from app.ui.texts import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES
 
 __all__ = ["AppPreferences"]
@@ -289,11 +290,11 @@ class AppPreferences:
 
     # ------------------------------------------------------------------ UI state
     @property
-    def language(self) -> str:
+    def language(self) -> Language:
         """زبان رابط کاربری ذخیره‌شده در تنظیمات."""
 
         value = self._get_string("ui/language", DEFAULT_LANGUAGE)
-        return value if value in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+        return Language.from_code(value)
 
     def has_language_setting(self) -> bool:
         """آیا کاربر زبانی را در تنظیمات ذخیره کرده است؟"""
@@ -301,10 +302,13 @@ class AppPreferences:
         return self._has_key("ui/language")
 
     @language.setter
-    def language(self, value: str) -> None:
-        if value not in SUPPORTED_LANGUAGES:
-            raise ValueError("Language must be one of: " + ", ".join(sorted(SUPPORTED_LANGUAGES)))
-        self._set_string("ui/language", value)
+    def language(self, value: Language | str) -> None:
+        normalized = value if isinstance(value, Language) else Language.from_code(value)
+        if normalized.code not in SUPPORTED_LANGUAGES:
+            raise ValueError(
+                "Language must be one of: " + ", ".join(sorted(SUPPORTED_LANGUAGES))
+            )
+        self._set_string("ui/language", normalized.code)
 
     @property
     def theme(self) -> str:

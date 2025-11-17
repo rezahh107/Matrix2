@@ -1,181 +1,162 @@
-"""مدیریت فونت‌های رابط کاربری با پشتیبانی از فونت تاهوما و بستهٔ وزیر."""
+"""ابزارک‌های فونت برای بارگذاری و اعمال وزیر به صورت متمرکز.
+
+این ماژول تلاش می‌کند فونت «وزیر» را از مسیر محلی ``app/ui/fonts/``
+بارگذاری کند و در صورت نبود، روی ویندوز از مسیرهای رایج توسعه‌دهنده
+کپی می‌کند. خروجی نهایی یک ``QFont`` سراسری است که در صورت نبود وزیر
+روی تاهوما بازمی‌گردد.
+"""
 
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
-from typing import Iterable, List, Tuple, TYPE_CHECKING
-
-from app.core.policy_loader import get_policy
-from app.ui.assets.font_data_vazirmatn import VAZIRMATN_REGULAR_TTF_BASE64
+import os
+import shutil
+from pathlib import Path
+from typing import TYPE_CHECKING, Iterable, List
 
 if TYPE_CHECKING:  # pragma: no cover
     from PySide6.QtGui import QFont
     from PySide6.QtWidgets import QApplication
 
 __all__ = [
+    "FONTS_DIR",
+    "ensure_vazir_local_fonts",
+    "load_vazir_font",
+    "create_app_font",
     "prepare_default_font",
     "apply_default_font",
 ]
 
-DEFAULT_UI_POINT_SIZE = 8
-
 LOGGER = logging.getLogger(__name__)
 
-_BUNDLED_FONT_PAYLOADS: dict[str, str] = {
-    "vazir": VAZIRMATN_REGULAR_TTF_BASE64,
-    "vazirmatn": VAZIRMATN_REGULAR_TTF_BASE64,
-}
-_SYSTEM_FALLBACKS: Tuple[str, ...] = (
-    "Tahoma",
-    "Segoe UI",
-    "Vazirmatn",
-    "Vazir",
-    "Arial",
-    "Verdana",
-    "Microsoft Sans Serif",
-)
+FONTS_DIR: Path = Path(__file__).resolve().parent / "fonts"
+FALLBACK_FAMILY = "Tahoma"
+DEFAULT_POINT_SIZE = 9
+
+_WINDOWS_CANDIDATES: list[Path] = [
+    Path(r"C:\\Users\\Nestech\\AppData\\Local\\Microsoft\\Windows\\Fonts\\Vazir.ttf"),
+    Path(r"C:\\Users\\Nestech\\Downloads\\Compressed\\vazir-font-v16.1.0\\vazir-font-v16.1.0"),
+]
 
 
-def _dedupe_preserve_order(items: Iterable[str]) -> List[str]:
-    """حذف مقادیر تکراری با حفظ ترتیب اولیه.
+def ensure_vazir_local_fonts() -> None:
+    """اطمینان از وجود فایل‌های وزیر در مسیر محلی برنامه.
 
-    مثال::
-
-        >>> _dedupe_preserve_order(["a", "B", "a", ""])  # doctest: +SKIP
-        ['a', 'B']
+    - اگر پوشهٔ ``app/ui/fonts`` خالی باشد و سیستم‌عامل ویندوز باشد،
+      تلاش می‌شود فایل‌های ``Vazir*.ttf`` از مسیرهای توسعه‌دهنده
+      کپی شوند.
+    - در سایر سیستم‌ها یا در صورت نبود مسیرها، بدون خطا رد می‌شود.
     """
 
-    seen: set[str] = set()
-    result: List[str] = []
-    for item in items:
-        text = (item or "").strip()
-        if not text:
+    FONTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    if _has_vazir_files(FONTS_DIR.glob("*.ttf")):
+        return
+
+    if os.name != "nt":
+        return
+
+    for source in _iter_windows_sources():
+        for path in source:
+            _safe_copy_font(path, FONTS_DIR / path.name)
+
+
+def _iter_windows_sources() -> Iterable[List[Path]]:
+    for candidate in _WINDOWS_CANDIDATES:
+        if not candidate.exists():
             continue
-        key = text.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(text)
-    return result
+        if candidate.is_file():
+            yield [candidate]
+        else:
+            fonts = sorted(candidate.glob("Vazir*.ttf"))
+            if fonts:
+                yield fonts
 
 
-def _iter_bundled_font_payloads(preferred_name: str | None) -> List[str]:
-    """بازگرداندن لیست داده‌های base64 فونت‌های باندل‌شده."""
-
-    ordered: List[str] = []
-    if preferred_name:
-        payload = _BUNDLED_FONT_PAYLOADS.get(preferred_name.casefold())
-        if payload:
-            ordered.append(payload)
-    for payload in _BUNDLED_FONT_PAYLOADS.values():
-        if payload not in ordered:
-            ordered.append(payload)
-    return ordered
+def _safe_copy_font(src: Path, dst: Path) -> None:
+    try:
+        if not dst.exists():
+            shutil.copy2(src, dst)
+    except OSError as exc:  # pragma: no cover - خطای سیستم فایل
+        LOGGER.debug("کپی فونت وزیر ناموفق بود: %s", exc)
 
 
-def _install_bundled_fonts(preferred_name: str | None) -> List[str]:
-    """نصب فونت‌های موجود در بسته و بازگرداندن خانواده‌های ثبت‌شده."""
+def _has_vazir_files(paths: Iterable[Path]) -> bool:
+    for path in paths:
+        name = path.name.lower()
+        if name.startswith("vazir") and path.suffix.lower() == ".ttf":
+            return True
+    return False
 
+
+def _install_fonts_from_directory(directory: Path) -> list[str]:
     from PySide6.QtGui import QFontDatabase
 
-    families: List[str] = []
-    from PySide6.QtCore import QByteArray
-
-    for payload in _iter_bundled_font_payloads(preferred_name):
-        byte_array = QByteArray.fromBase64(payload.encode("ascii"))
-        if byte_array.isEmpty():
-            LOGGER.warning("دادهٔ base64 فونت خالی است و نادیده گرفته شد.")
-            continue
-        font_id = QFontDatabase.addApplicationFontFromData(byte_array)
+    families: list[str] = []
+    for ttf in sorted(directory.glob("*.ttf")):
+        font_id = QFontDatabase.addApplicationFont(str(ttf))
         if font_id == -1:
-            LOGGER.warning("بارگذاری فونت داخلی با شکست روبه‌رو شد (base64).")
             continue
         families.extend(QFontDatabase.applicationFontFamilies(font_id))
-    return _dedupe_preserve_order(families)
+    return families
 
 
-@lru_cache(maxsize=1)
-def _policy_font_name() -> str:
-    """خواندن نام فونت از Policy با تضمین خطای کنترل‌شده."""
+def _load_vazir_font_family_names() -> list[str]:
+    """بارگذاری فونت وزیر و برگرداندن نام خانواده‌های ثبت‌شده."""
 
-    try:
-        name = (get_policy().excel.font_name or "Vazirmatn").strip()
-    except Exception as exc:  # pragma: no cover - خطاهای محیطی Policy
-        LOGGER.warning(
-            "خواندن فونت از Policy شکست خورد؛ استفاده از وزیرمتن.", exc_info=exc
-        )
-        return "Vazirmatn"
-    return name or "Vazirmatn"
+    ensure_vazir_local_fonts()
+    families = _install_fonts_from_directory(FONTS_DIR)
+    return [
+        fam
+        for fam in families
+        if "vazir" in fam.casefold() or "وزیر" in fam
+    ]
 
 
-@lru_cache(maxsize=1)
-def _policy_font_size() -> int:
-    """برگرداندن اندازهٔ پیشنهادی Policy با محدودیت منطقی برای رابط کاربری."""
+def load_vazir_font(point_size: int | None = None) -> "QFont" | None:
+    """در صورت دسترسی به وزیر، نمونهٔ فونت آن را می‌سازد."""
 
-    try:
-        size = int(get_policy().excel.font_size)
-    except Exception as exc:  # pragma: no cover - خطای محیطی
-        LOGGER.warning(
-            "خواندن اندازهٔ فونت از Policy شکست خورد؛ استفاده از مقدار پیش‌فرض.",
-            exc_info=exc,
-        )
-        return DEFAULT_UI_POINT_SIZE
-    return max(8, min(12, size))
+    from PySide6.QtGui import QFont
+
+    families = _load_vazir_font_family_names()
+    if not families:
+        return None
+    size = point_size or DEFAULT_POINT_SIZE
+    return QFont(families[0], size)
 
 
-def prepare_default_font(
-    *, point_size: int | None = None, family_override: str | None = None
-) -> "QFont":
-    """ساخت شیء فونت پیش‌فرض با نصب فونت‌های لازم (وزیرمتن/تاهوما).
+def create_app_font(point_size: int | None = None) -> "QFont":
+    """ساخت فونت سراسری برنامه با اولویت وزیر سپس تاهوما.
 
     مثال::
-
-        >>> font = prepare_default_font(point_size=10)  # doctest: +SKIP
-        >>> font.family()  # doctest: +SKIP
-        'Vazirmatn'
+        >>> font = create_app_font(point_size=10)  # doctest: +SKIP
+        >>> bool(font.family())  # doctest: +SKIP
+        True
     """
 
-    from PySide6.QtGui import QFont, QFontDatabase
+    vazir_font = load_vazir_font(point_size)
+    if vazir_font is not None:
+        return vazir_font
 
-    policy_font = (family_override or "").strip() or _policy_font_name()
-    policy_point_size = _policy_font_size()
-    resolved_point_size = policy_point_size if point_size is None else point_size
-    installed_families = _install_bundled_fonts(policy_font)
-    candidates = _dedupe_preserve_order(
-        [policy_font, *installed_families, *_SYSTEM_FALLBACKS]
-    )
+    size = point_size or DEFAULT_POINT_SIZE
+    from PySide6.QtGui import QFont
 
-    database = QFontDatabase()
-    for family in candidates:
-        if database.hasFamily(family):
-            font = QFont(family)
-            font.setPointSize(resolved_point_size)
-            font.setStyleHint(QFont.StyleHint.AnyStyle)
-            font.setStyleStrategy(QFont.StyleStrategy.PreferDefault)
-            LOGGER.info("فونت رابط کاربری انتخاب شد: %s", family)
-            return font
-
-    fallback = QFont()
-    fallback.setPointSize(resolved_point_size)
-    LOGGER.warning("هیچ فونت مناسبی یافت نشد؛ استفاده از پیش‌فرض سیستم.")
+    fallback = QFont(FALLBACK_FAMILY, size)
+    fallback.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
     return fallback
 
 
+def prepare_default_font(*, point_size: int | None = None) -> "QFont":
+    """سازگار برای کدهای قدیمی؛ معادل ``create_app_font``."""
+
+    return create_app_font(point_size)
+
+
 def apply_default_font(
-    app: "QApplication",
-    *,
-    point_size: int = DEFAULT_UI_POINT_SIZE,
-    family_override: str | None = None,
+    app: "QApplication", *, point_size: int | None = None
 ) -> "QFont":
-    """نصب و اعمال فونت پیش‌فرض (تاهوما یا وزیر) بر روی QApplication.
+    """اعمال فونت سراسری (وزیر یا تاهوما) روی QApplication."""
 
-    مثال::
-
-        >>> app = QApplication([])  # doctest: +SKIP
-        >>> font = apply_default_font(app, point_size=11)  # doctest: +SKIP
-    """
-
-    font = prepare_default_font(point_size=point_size, family_override=family_override)
+    font = create_app_font(point_size)
     app.setFont(font)
     return font

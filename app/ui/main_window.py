@@ -83,6 +83,7 @@ from app.utils.path_utils import resource_path
 from .task_runner import ProgressFn, Worker
 from .widgets import DashboardCard, FilePicker
 from .app_preferences import AppPreferences
+from .i18n import Language
 from .preferences import (
     FileStatusLevel,
     FileStatusViewModel,
@@ -266,7 +267,7 @@ class MainWindow(QMainWindow):
         if self._prefs.has_language_setting():
             self._language = stored_language
         else:
-            self._language = stored_language or "en"
+            self._language = stored_language or Language.EN
             self._prefs.language = self._language
 
         self._translator = UiTranslator(self._language)
@@ -539,7 +540,7 @@ class MainWindow(QMainWindow):
 
         status_bar = QStatusBar(self)
         language_label = QLabel(
-            f"{self._t('status.language', 'زبان فعال')}: {self._prefs.language.upper()}"
+            f"{self._t('status.language', 'زبان فعال')}: {self._prefs.language.code.upper()}"
         )
         language_label.setObjectName("languagePill")
         state_label = QLabel(f"✅ {self._t('statusbar.ready', 'وضعیت: آماده')}")
@@ -649,18 +650,19 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self._update_overlay_geometry()
 
-    def _apply_language(self, language: str) -> None:
+    def _apply_language(self, language: Language) -> None:
         """اعمال زبان جدید و بازسازی متن‌های UI."""
 
         self._prefs.language = language
         self._translator = UiTranslator(language)
+        self._language = language
         app = QApplication.instance()
         if app is not None:
             apply_layout_direction(app, language)
         self.setWindowTitle(self._t("app.title", "سامانه تخصیص دانشجو-منتور"))
         if hasattr(self, "_language_label"):
             self._language_label.setText(
-                f"{self._t('status.language', 'زبان فعال')}: {language.upper()}"
+                f"{self._t('status.language', 'زبان فعال')}: {language.code.upper()}"
             )
         self._dashboard_texts = load_dashboard_texts(self._translator)
         self._populate_dashboard_cards()
@@ -2444,7 +2446,7 @@ class MainWindow(QMainWindow):
         lowered = message.lower()
         background = None
         if message.strip().startswith("✅"):
-            background = QColor(self._theme.colors.success).lighter(150).name()
+            background = self._theme.success_soft.name(QColor.HexArgb)
         elif message.strip().startswith("❌"):
             background = QColor(self._theme.colors.error).lighter(150).name()
         elif message.strip().startswith("ℹ️") or message.strip().startswith("⚠️"):
