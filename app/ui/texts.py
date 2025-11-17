@@ -10,12 +10,14 @@ import json
 from dataclasses import dataclass
 from typing import Dict
 
+from app.ui.i18n import Language
+
 from app.utils.path_utils import resource_path
 
 __all__ = ["UiTranslator", "SUPPORTED_LANGUAGES", "DEFAULT_LANGUAGE"]
 
-SUPPORTED_LANGUAGES = {"fa", "en"}
-DEFAULT_LANGUAGE = "en"
+SUPPORTED_LANGUAGES = {lang.value for lang in Language}
+DEFAULT_LANGUAGE = Language.EN.value
 
 
 @dataclass(frozen=True)
@@ -28,11 +30,13 @@ class UiTranslator:
         'Ready'
     """
 
-    language: str
+    language: str | Language
 
     def __post_init__(self) -> None:
-        normalized = self.language if self.language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
-        object.__setattr__(self, "_lang", normalized)
+        lang_enum = self.language if isinstance(self.language, Language) else Language.from_code(self.language)
+        object.__setattr__(self, "language", lang_enum.code)
+        object.__setattr__(self, "_language_enum", lang_enum)
+        object.__setattr__(self, "_lang", lang_enum.code)
         object.__setattr__(self, "_messages", self._load_messages())
 
     def _load_messages(self) -> Dict[str, str]:
@@ -61,3 +65,9 @@ class UiTranslator:
         """
 
         return self._messages.get(key, fallback)
+
+    @property
+    def language_enum(self) -> Language:
+        """زبان فعال به‌صورت ``Language`` برای مصرف‌کننده‌های Enum."""
+
+        return self._language_enum

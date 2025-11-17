@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QFormLayout
 
+from app.ui.i18n import Language
 from app.ui.texts import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, UiTranslator
 
 __all__ = ["LanguageDialog"]
@@ -12,14 +13,15 @@ __all__ = ["LanguageDialog"]
 class LanguageDialog(QDialog):
     """دیالوگ انتخاب زبان که مقدار انتخابی را در اختیار فراخوان می‌گذارد."""
 
-    def __init__(self, language: str, translator: UiTranslator, parent: QDialog | None = None) -> None:
+    def __init__(
+        self, language: Language, translator: UiTranslator, parent: QDialog | None = None
+    ) -> None:
         super().__init__(parent)
         self._translator = translator
         self._combo = QComboBox(self)
-        self._combo.addItem(translator.text("language.fa", "فارسی (fa-IR)"), "fa")
-        self._combo.addItem(translator.text("language.en", "English (en-US)"), "en")
-        current = language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
-        self._combo.setCurrentIndex(self._combo.findData(current))
+        self._combo.addItem(translator.text("language.fa", "فارسی (fa-IR)"), Language.FA.value)
+        self._combo.addItem(translator.text("language.en", "English (en-US)"), Language.EN.value)
+        self._combo.setCurrentIndex(self._combo.findData(language.code))
 
         layout = QFormLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -35,8 +37,12 @@ class LanguageDialog(QDialog):
         self.setLayout(layout)
         self.setWindowTitle(translator.text("dialog.language.title", "تنظیمات زبان"))
 
-    def selected_language(self) -> str:
+    def selected_language(self) -> Language:
         """بازگرداندن زبان انتخاب‌شده توسط کاربر."""
 
         data = self._combo.currentData()
-        return str(data) if data in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+        if isinstance(data, Language):
+            return data
+        if isinstance(data, str) and data in SUPPORTED_LANGUAGES:
+            return Language.from_code(data)
+        return Language.from_code(DEFAULT_LANGUAGE)
