@@ -161,8 +161,8 @@ def test_infer_school_count_deterministic_on_shuffled_columns() -> None:
     frame = pd.DataFrame(
         {
             COL_SCHOOL_CODE: [101, None],
-            COL_SCHOOL1: [pd.NA, 202],
-            COL_SCHOOL2: [303, 0],
+            COL_SCHOOL1: [pd.NA, "0"],
+            COL_SCHOOL2: [303, 202],
         }
     )
     shuffled = frame[[COL_SCHOOL2, COL_SCHOOL_CODE, COL_SCHOOL1]]
