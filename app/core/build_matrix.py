@@ -193,16 +193,25 @@ def assert_inspactor_schema(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFr
         coerced,
         default_cfg,
     )
+
+    def _raise_missing_columns_error(
+        frame: pd.DataFrame,
+        missing: list[str],
+        policy_cfg: PolicyConfig,
+        exc: Exception | None = None,
+    ) -> None:
+        diagnostics = missing_inspactor_diagnostics(frame, missing)
+        message = schema_error_message(missing, policy_cfg) + diagnostics
+        raise KeyError(message) from exc
+
     try:
         ensured = ensure_required_columns(prepared, REQUIRED_INSPACTOR_COLUMNS, context)
     except ValueError as exc:
         missing = missing_inspactor_columns(prepared, REQUIRED_INSPACTOR_COLUMNS)
-        diagnostics = missing_inspactor_diagnostics(prepared, missing)
-        raise KeyError(schema_error_message(missing, policy) + diagnostics) from exc
+        _raise_missing_columns_error(prepared, missing, policy, exc=exc)
     missing_after = missing_inspactor_columns(ensured, REQUIRED_INSPACTOR_COLUMNS)
     if missing_after:
-        diagnostics = missing_inspactor_diagnostics(ensured, missing_after)
-        raise KeyError(schema_error_message(missing_after, policy) + diagnostics)
+        _raise_missing_columns_error(ensured, missing_after, policy)
     return ensured
 
 
