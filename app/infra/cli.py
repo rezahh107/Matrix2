@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Literal, Mapping, Sequence
 
+from dataclasses import asdict
+
 import pandas as pd
 from pandas import testing as pd_testing
 from pandas.api import types as pd_types
@@ -1013,6 +1015,12 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
             "schools": int(len(schools_df)),
         },
     }
+    group_coverage_summary = progress_log.attrs.get("group_coverage_summary")
+    if group_coverage_summary:
+        meta["group_coverage_summary"] = group_coverage_summary
+    coverage_metrics = progress_log.attrs.get("coverage_metrics")
+    if coverage_metrics:
+        meta["coverage_metrics"] = asdict(coverage_metrics)
     normalization_reports = progress_log.attrs.get("column_normalization_reports")
     if normalization_reports:
         meta["column_normalization_reports"] = normalization_reports
@@ -1027,6 +1035,18 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         "progress_log": progress_log,
         "meta": pd.json_normalize([meta]),
     }
+    group_coverage_df = progress_log.attrs.get("group_coverage")
+    if isinstance(group_coverage_df, pd.DataFrame):
+        sheets["group_coverage_debug"] = group_coverage_df
+        if "is_unseen_viable" in group_coverage_df.columns:
+            unseen_slice = group_coverage_df[
+                group_coverage_df["is_unseen_viable"] == True
+            ]
+        else:
+            unseen_slice = group_coverage_df[
+                group_coverage_df["status"].isin(["candidate_only", "blocked_candidate"])
+            ]
+        sheets["group_coverage_unseen"] = unseen_slice
     header_internal = policy.excel.header_mode_internal
     prepared_sheets = {
         name: canonicalize_headers(df, header_mode=header_internal)

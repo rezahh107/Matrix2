@@ -239,6 +239,15 @@ class EmissionOptions:
 
 
 @dataclass(frozen=True)
+class MatrixCoverageOptions:
+    """گزینه‌های سیاست پوشش ماتریس برای کنترل مخرج پوشش."""
+
+    denominator_mode: str
+    require_student_presence: bool
+    include_blocked_candidates_in_denominator: bool
+
+
+@dataclass(frozen=True)
 class PolicyConfig:
     """ساختار دادهٔ فقط‌خواندنی برای نگهداری سیاست بارگذاری‌شده."""
 
@@ -268,6 +277,7 @@ class PolicyConfig:
     emission: EmissionOptions
     fairness_strategy: str
     center_management: CenterManagementConfig
+    coverage_options: MatrixCoverageOptions
 
     @property
     def ranking(self) -> List[str]:
@@ -401,6 +411,9 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     fairness_strategy = _normalize_fairness_strategy(
         data.get("fairness_strategy") or data.get("fairness")
     )
+    coverage_options = _normalize_coverage_options(
+        (data.get("matrix") or {}).get("coverage", {})
+    )
 
     return {
         "version": version,
@@ -429,6 +442,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "virtual_name_patterns": virtual_name_patterns,
         "emission": data.get("emission", {}),
         "fairness_strategy": fairness_strategy,
+        "coverage_options": coverage_options,
     }
 
 
@@ -997,6 +1011,15 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         emission=_to_emission_options(data.get("emission", {})),
         fairness_strategy=str(data.get("fairness_strategy", "none")),
         center_management=_to_center_management_config(data["center_management"]),
+        coverage_options=MatrixCoverageOptions(
+            denominator_mode=str(data["coverage_options"]["denominator_mode"]),
+            require_student_presence=bool(
+                data["coverage_options"]["require_student_presence"]
+            ),
+            include_blocked_candidates_in_denominator=bool(
+                data["coverage_options"]["include_blocked_candidates_in_denominator"]
+            ),
+        ),
     )
 
 
@@ -1119,6 +1142,22 @@ def _apply_schema_defaults(data: Dict[str, object]) -> Dict[str, object]:
         )
     data["emission"] = {"selection_reasons": selection_payload}
 
+    matrix_section = data.get("matrix") if isinstance(data.get("matrix"), Mapping) else {}
+    coverage_section = {}
+    if isinstance(matrix_section, Mapping):
+        coverage_section = matrix_section.get("coverage") or {}
+        if not isinstance(coverage_section, Mapping):
+            coverage_section = {}
+    coverage_defaults = {
+        "denominator_mode": "mentors",
+        "require_student_presence": False,
+        "include_blocked_candidates_in_denominator": False,
+    }
+    merged_coverage = {**coverage_defaults, **{str(k): v for k, v in coverage_section.items()}}
+    matrix_payload = dict(matrix_section) if isinstance(matrix_section, Mapping) else {}
+    matrix_payload["coverage"] = merged_coverage
+    data["matrix"] = matrix_payload
+
     return data
 
 
@@ -1142,6 +1181,33 @@ def _normalize_excel_options(payload: Mapping[str, object]) -> Dict[str, object]
         "font_size": font_size,
         "header_mode_internal": internal,
         "header_mode_write": write,
+    }
+
+
+def _normalize_coverage_options(payload: Mapping[str, object]) -> Dict[str, object]:
+    """اعتبارسنجی تنظیمات پوشش ماتریس."""
+
+    if not isinstance(payload, Mapping):
+        raise TypeError("matrix.coverage must be a mapping")
+    denominator_mode = str(payload.get("denominator_mode", "mentors"))
+    allowed_modes = {
+        "mentors",
+        "mentors_students_intersection",
+        "mentors_students_union",
+    }
+    if denominator_mode not in allowed_modes:
+        raise ValueError(
+            "matrix.coverage.denominator_mode must be one of "
+            "mentors, mentors_students_intersection, mentors_students_union"
+        )
+    require_student_presence = bool(payload.get("require_student_presence", False))
+    include_blocked = bool(
+        payload.get("include_blocked_candidates_in_denominator", False)
+    )
+    return {
+        "denominator_mode": denominator_mode,
+        "require_student_presence": require_student_presence,
+        "include_blocked_candidates_in_denominator": include_blocked,
     }
 
 
