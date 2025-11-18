@@ -60,6 +60,7 @@ from app.core.policy_loader import PolicyConfig, load_policy
 from app.core.inspactor_schema_helper import (
     InspactorDefaultConfig,
     missing_inspactor_columns,
+    missing_inspactor_diagnostics,
     schema_error_message,
     with_default_inspactor_columns,
 )
@@ -190,10 +191,12 @@ def assert_inspactor_schema(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFr
         ensured = ensure_required_columns(prepared, REQUIRED_INSPACTOR_COLUMNS, context)
     except ValueError as exc:
         missing = missing_inspactor_columns(prepared, REQUIRED_INSPACTOR_COLUMNS)
-        raise KeyError(schema_error_message(missing, policy)) from exc
+        diagnostics = missing_inspactor_diagnostics(prepared, missing)
+        raise KeyError(schema_error_message(missing, policy) + diagnostics) from exc
     missing_after = missing_inspactor_columns(ensured, REQUIRED_INSPACTOR_COLUMNS)
     if missing_after:
-        raise KeyError(schema_error_message(missing_after, policy))
+        diagnostics = missing_inspactor_diagnostics(ensured, missing_after)
+        raise KeyError(schema_error_message(missing_after, policy) + diagnostics)
     return ensured
 
 

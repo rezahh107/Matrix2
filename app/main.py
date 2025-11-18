@@ -10,6 +10,7 @@ import logging
 import atexit
 import traceback
 import getpass
+import re
 from datetime import datetime
 from pathlib import Path
 from types import TracebackType
@@ -97,85 +98,79 @@ def _write_gui_crash_log(traceback_text: str) -> Path:
     return log_file
 
 
-def _qt_version_tuple(version: str | None = None) -> tuple[int, int, int]:
-    """تبدیل نسخهٔ Qt به تاپل برای مقایسهٔ امن."""
-
-    raw = (version or qVersion() or "0.0.0").split(".")
-    parts: list[int] = []
-    for chunk in raw:
-        try:
-            parts.append(int(chunk))
-        except ValueError:
-            parts.append(0)
-    while len(parts) < 3:
-        parts.append(0)
-    return tuple(parts[:3])
-
-
-def _parse_qt_version(version: str | None) -> tuple[int, int, int]:
-    """تبدیل نسخهٔ Qt به تاپل (major, minor, patch) با پیش‌فرض صفر برای بخش‌های مفقود.
-
-    مثال‌ها:
-        "6.8.1" → (6, 8, 1)
-        "6.8"   → (6, 8, 0)
-        "6"     → (6, 0, 0)
-    """
+def _parse_qt_version(version: str | None) -> tuple[int, int, int] | None:
+    """تبدیل نسخهٔ Qt به تاپل سه‌تایی؛ در صورت نامعتبر بودن None برمی‌گرداند."""
 
     if not version:
-        return (0, 0, 0)
-
-    chunks = str(version).split(".")
-    parts: list[int] = []
-    for chunk in chunks:
-        try:
-            parts.append(int(chunk))
-        except ValueError:
-            parts.append(0)
-
-    while len(parts) < 3:
-        parts.append(0)
-
-    return tuple(parts[:3])
-
-
-def _is_version_at_least(current: str | tuple[int, int, int], minimum: str) -> bool:
-    """مقایسهٔ نسخهٔ Qt با حداقل نسخهٔ موردنظر بر پایهٔ تاپل سه‌تایی."""
-
-    if isinstance(current, tuple):
-        current_tuple = current
-    else:
-        current_tuple = _parse_qt_version(current)
-    return current_tuple >= _parse_qt_version(minimum)
-
-
-# جدول منسوخی ApplicationAttribute برای بازبینی هنگام ارتقای Qt.
-# مستندات: https://doc.qt.io/qt-6/qapplication.html#ApplicationAttribute-enum
-DEPRECATED_APPLICATION_ATTRIBUTES: dict[Any, str] = {}
-try:  # محافظت از import برای تست‌های بدون PySide6
-    DEPRECATED_APPLICATION_ATTRIBUTES = {
-        Qt.ApplicationAttribute.AA_EnableHighDpiScaling: "6.0.0",
-        Qt.ApplicationAttribute.AA_UseHighDpiPixmaps: "6.8.0",
-    }
-except Exception:  # pragma: no cover - رخ نمی‌دهد در محیط واقعی
-    DEPRECATED_APPLICATION_ATTRIBUTES = {}
+        return None
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", version.strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
 
 
 def _is_deprecated_application_attribute(
-    attr: Any, qt_version: str | tuple[int, int, int] | None
+    attr: Qt.ApplicationAttribute, qt_version: tuple[int, int, int] | None
 ) -> bool:
-    """تشخیص منسوخ بودن ApplicationAttribute بدون عوارض جانبی یا وابستگی به Core/Infra."""
+    """تشخیص منسوخ بودن ApplicationAttribute بر اساس جدول نسخهٔ مشخص.
 
-    if not qt_version:
-        return False
+    برای نسخه‌های نامشخص یا نامعتبر، رفتار به‌صورت محافظه‌کارانه «منسوخ» در نظر گرفته
+    می‌شود تا از بروز هشدارهای Deprecation جلوگیری شود.
+    """
 
-    deprecated_since = DEPRECATED_APPLICATION_ATTRIBUTES.get(attr)
-    if not deprecated_since:
-        return False
+    deprecated_since: dict[Qt.ApplicationAttribute, tuple[int, int, int]] = {
+        # محدوده‌های پشتیبانی‌شده: PySide6/Qt 6.5.x تا 6.8.x (به‌روزرسانی در ارتقا)
+        Qt.ApplicationAttribute.AA_EnableHighDpiScaling: (6, 8, 0),
+        Qt.ApplicationAttribute.AA_UseHighDpiPixmaps: (6, 8, 0),
+    }
 
-    try:
-        return _is_version_at_least(qt_version, deprecated_since)
-    except Exception:  # pragma: no cover - محافظت در برابر ورودی‌های نامعتبر
+    threshold = deprecated_since.get(attr)
+    if threshold is None:
         return False
+    if qt_version is None:
+        return True
+    return qt_version >= threshold
+
+
+def _set_attribute_if_supported(
+    app: QApplication, attr_name: str, qt_version_str: str | None = None
+) -> bool:
+    """تنظیم ApplicationAttribute فقط در صورت عدم منسوخ بودن.
+
+    نسخهٔ Qt یک‌بار پارس می‌شود؛ اگر نسخه نامعتبر باشد یا Attribute وجود نداشته باشد،
+    به‌صورت امن از تنظیم صرف‌نظر می‌شود.
+    """
+
+    qt_version = _parse_qt_version(qt_version_str or qVersion())
+    attribute = getattr(Qt.ApplicationAttribute, attr_name, None)
+    if attribute is None:
+        logger.debug("ApplicationAttribute.%s در این نسخه موجود نیست", attr_name)
+        return False
+    if _is_deprecated_application_attribute(attribute, qt_version):
+        logger.info(
+            "ApplicationAttribute.%s در Qt %s منسوخ است و تنظیم نمی‌شود",
+            attr_name,
+            qt_version_str or qVersion(),
+        )
+        return False
+    app.setAttribute(attribute, True)
+    return True
+
+
+def _configure_high_dpi_attributes(
+    app: QApplication, qt_version_str: str | None = None
+) -> list[str]:
+    """اعمال ویژگی‌های High DPI با رعایت قوانین deprecation."""
+
+    applied: list[str] = []
+    resolved_version = qt_version_str or qVersion()
+    for attr_name in (
+        "AA_EnableHighDpiScaling",
+        "AA_UseHighDpiPixmaps",
+    ):
+        if _set_attribute_if_supported(app, attr_name, resolved_version):
+            applied.append(attr_name)
+    return applied
 
 
 def _show_gui_crash_dialog(log_path: Path) -> None:
@@ -397,7 +392,7 @@ def setup_application() -> QApplication:
             app = QApplication(sys.argv)
 
         # فعال‌سازی High DPI با مدیریت deprecation در نسخه‌های جدید Qt
-        _apply_application_attributes(app)
+        _configure_high_dpi_attributes(app, qVersion())
         
         # تنظیمات برنامه
         app.setApplicationName("AllocationApp")

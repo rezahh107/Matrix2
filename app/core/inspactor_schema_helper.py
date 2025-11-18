@@ -5,6 +5,7 @@ from typing import Callable, Collection, Iterable, Mapping
 
 import pandas as pd
 
+from app.core.common.columns import accepted_synonyms
 from app.core.common.normalization import to_numlike_str
 
 
@@ -64,3 +65,28 @@ def schema_error_message(missing: Collection[str], policy: object) -> str:
     joined = ", ".join(columns)
     version = getattr(policy, "version", "<unknown>")
     return f"[policy {version}] missing Inspactor columns: {joined}"
+
+
+def missing_inspactor_diagnostics(df: pd.DataFrame, missing: Collection[str]) -> str:
+    """تولید گزارش خطای غنی برای ستون‌های مفقود Inspactor.
+
+    - فهرست سینونیم‌های قابل قبول برای هر ستون مفقود را بر اساس Policy بازمی‌گرداند.
+    - چند ستون اول موجود در ورودی را برای خطایابی سریع نشان می‌دهد.
+
+    Args:
+        df: دیتافریم خام ورودی.
+        missing: ستون‌های اجباری که پیدا نشده‌اند.
+
+    Returns:
+        str: متن کمکی برای الحاق به پیام خطا.
+    """
+
+    if not missing:
+        return ""
+
+    synonyms = {
+        column: accepted_synonyms("inspactor", column) for column in missing
+    }
+    seen = [str(column) for column in df.columns]
+    preview = ", ".join(seen[:8]) if seen else "<no columns>"
+    return f" | accepted: {synonyms} | seen: {preview} (total={len(seen)})"
