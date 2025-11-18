@@ -169,7 +169,13 @@ def assert_inspactor_schema(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFr
     normalized = resolve_aliases(df, context)
     coerced = coerce_semantics(normalized, context)
     default_cfg = InspactorDefaultConfig(
-        school_code_columns=(COL_SCHOOL_CODE, COL_SCHOOL1, COL_SCHOOL2, COL_SCHOOL3, COL_SCHOOL4),
+        school_code_columns=(
+            COL_SCHOOL_CODE,
+            "کد مدرسه 1",
+            "کد مدرسه 2",
+            "کد مدرسه 3",
+            "کد مدرسه 4",
+        ),
         school_count_column=COL_SCHOOL_COUNT,
         derived_factories={
             COL_POSTAL: lambda frame: pd.Series(
