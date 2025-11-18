@@ -12,23 +12,25 @@ __all__ = ["build_candidate_group_keys"]
 def _safe_int(value: object) -> int:
     """تبدیل امن مقدار ورودی به int با پیش‌فرض صفر."""
 
+    if value is None:
+        return 0
     try:
         if pd.isna(value):  # type: ignore[arg-type]
             return 0
     except Exception:
-        pass
-    try:
-        if isinstance(value, bool):
-            return int(value)
-        text = str(value).strip()
-            
-        if text.isdigit():
-            return int(text)
-    except Exception:
+        pass  # pd.isna can fail on some types
+
+    if isinstance(value, (int, bool)):
+        return int(value)
+
+    text = str(value).strip()
+    if not text:
         return 0
+
     try:
-        return int(value)  # type: ignore[arg-type]
-    except Exception:
+        # Handle integer-like floats "123.0" -> 123 and simple integers
+        return int(float(text))
+    except (ValueError, TypeError):
         return 0
 
 
