@@ -178,6 +178,8 @@ def test_infer_school_count_deterministic_on_shuffled_columns() -> None:
     result_a = infer_school_count(frame, columns)
     result_b = infer_school_count(shuffled, columns)
     expected_counts = pd.Series([2, 1], dtype="Int64")
+    assert result_a.dtype == "Int64"
+    pd.testing.assert_index_equal(result_a.index, frame.index)
     pd.testing.assert_series_equal(result_a, expected_counts, check_names=False)
     pd.testing.assert_series_equal(result_a, result_b, check_names=False)
     pd.testing.assert_series_equal(result_a, infer_school_count(frame, columns), check_names=False)
