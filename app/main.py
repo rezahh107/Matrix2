@@ -103,10 +103,12 @@ def _parse_qt_version(version: str | None) -> tuple[int, int, int] | None:
 
     if not version:
         return None
-    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", version.strip())
+    match = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?", version.strip())
     if not match:
         return None
-    return tuple(int(part) for part in match.groups())
+    major, minor, patch_str = match.groups()
+    patch = int(patch_str) if patch_str is not None else 0
+    return (int(major), int(minor), patch)
 
 
 def _is_deprecated_application_attribute(
