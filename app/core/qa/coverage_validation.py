@@ -30,7 +30,7 @@ def build_coverage_validation_fields(
         "unseen_group_count": int(metrics.unseen_viable_groups),
         "invalid_group_token_count": int(metrics.invalid_group_token_count),
         "coverage_denominator_groups": int(metrics.total_groups),
-        "total_candidates": int(total_candidates),
+        "total_candidates": total_candidates,
         "covered_groups": int(metrics.covered_groups),
         "unmatched_school_count": int(metrics.unmatched_school_count),
         "coverage_threshold": float(coverage_threshold),
