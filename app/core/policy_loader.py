@@ -1155,10 +1155,9 @@ def _apply_schema_defaults(data: Dict[str, object]) -> Dict[str, object]:
         "require_student_presence": False,
         "include_blocked_candidates_in_denominator": False,
     }
-    merged_coverage = {**coverage_defaults, **{str(k): v for k, v in coverage_section.items()}}
-    matrix_payload = dict(matrix_section)
-    matrix_payload["coverage"] = merged_coverage
-    data["matrix"] = matrix_payload
+    normalized_coverage = {str(k): v for k, v in coverage_section.items()}
+    merged_coverage = {**coverage_defaults, **normalized_coverage}
+    data["matrix"] = {**matrix_section, "coverage": merged_coverage}
 
     return data
 
