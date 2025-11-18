@@ -115,12 +115,7 @@ def _qt_version_tuple(version: str | None = None) -> tuple[int, int, int]:
 def _is_deprecated_application_attribute(attr: str, qt_version: tuple[int, int, int]) -> bool:
     """تشخیص منسوخ بودن ApplicationAttribute بدون دسترسی مستقیم به مقدار آن."""
 
-    deprecated_from = {
-        "AA_UseHighDpiPixmaps": (6, 8, 0),
-        "AA_EnableHighDpiScaling": (6, 8, 0),
-    }
-    threshold = deprecated_from.get(attr)
-    return threshold is not None and qt_version >= threshold
+    return attr == "AA_UseHighDpiPixmaps" and qt_version >= (6, 8, 0)
 
 
 def _show_gui_crash_dialog(log_path: Path) -> None:
