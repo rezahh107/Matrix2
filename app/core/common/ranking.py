@@ -9,7 +9,7 @@ from typing import Any, Dict, Mapping, Sequence
 
 import pandas as pd
 
-from app.core.common.columns import canonicalize_headers
+from app.core.common.columns import canonicalize_headers, dedupe_columns
 from app.core.policy_loader import PolicyConfig, load_policy
 from .types import natural_key
 from .ids import ensure_ranking_columns
@@ -37,7 +37,7 @@ def build_mentor_state(
     if policy is None:
         policy = load_policy()
 
-    canonical = canonicalize_headers(pool_df, header_mode="en")
+    canonical = dedupe_columns(canonicalize_headers(pool_df, header_mode="en"))
     if "mentor_sort_key" not in canonical.columns and "mentor_id" in canonical.columns:
         canonical = canonical.copy()
         canonical["mentor_sort_key"] = canonical["mentor_id"].map(natural_key)
@@ -106,7 +106,7 @@ def apply_ranking_policy(
         policy = load_policy(policy_path)
 
     ranked = candidate_pool.copy()
-    en_view = canonicalize_headers(ranked, header_mode="en")
+    en_view = dedupe_columns(canonicalize_headers(ranked, header_mode="en"))
     state_source = en_view.copy()
 
     if "allocations_new" not in ranked.columns and "allocations_new" in en_view.columns:
@@ -126,7 +126,7 @@ def apply_ranking_policy(
         ranked["کد کارمندی پشتیبان"] = mentor_id_series
 
     ranked = ensure_ranking_columns(ranked)
-    en_view = canonicalize_headers(ranked, header_mode="en")
+    en_view = dedupe_columns(canonicalize_headers(ranked, header_mode="en"))
     mentor_ids = en_view.get("mentor_id")
     if isinstance(mentor_ids, pd.DataFrame):
         mentor_ids = mentor_ids.iloc[:, 0]

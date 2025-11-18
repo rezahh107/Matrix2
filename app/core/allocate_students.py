@@ -18,6 +18,7 @@ from .common.columns import (
     CANON_FA_TO_EN,
     canonicalize_headers,
     coerce_semantics,
+    dedupe_columns,
     enrich_school_columns_en,
     ensure_series,
     enforce_join_key_types,
@@ -1283,7 +1284,9 @@ def allocate_student(
 
     progress(30, "capacity")
     state_frame = pool_state_view if pool_state_view is not None else candidate_pool
-    state_view_en = canonicalize_headers(state_frame, header_mode="en")
+    state_view_en = dedupe_columns(
+        canonicalize_headers(state_frame, header_mode="en")
+    )
 
     capacity_candidates: list[str] = []
     if "remaining_capacity" in state_view_en.columns:
