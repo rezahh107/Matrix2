@@ -88,9 +88,7 @@ def test_compute_group_coverage_flags_candidate_and_matrix_states() -> None:
         school_code_column="کد مدرسه",
     )
 
-    status_map = {
-        tuple(row[j] for j in JOIN_KEYS): row["status"] for _, row in coverage_df.iterrows()
-    }
+    status_map = coverage_df.set_index(JOIN_KEYS)["status"].to_dict()
 
     assert status_map[(101, 1, 1, 1, 0, 0)] == "covered"
     assert status_map[(102, 1, 1, 1, 0, 0)] == "blocked_candidate"
