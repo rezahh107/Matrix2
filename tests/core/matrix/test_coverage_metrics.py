@@ -1,10 +1,17 @@
 import pandas as pd
 import pytest
 
-from app.core.matrix.coverage import (
-    CoveragePolicyConfig,
-    compute_coverage_metrics,
+from app.core.build_matrix import (
+    CAPACITY_CURRENT_COL,
+    CAPACITY_SPECIAL_COL,
+    BuildConfig,
+    DomainBuildConfig,
+    _as_domain_config,
+    _explode_rows,
+    center_text,
 )
+from app.core.common.domain import COL_SCHOOL
+from app.core.matrix.coverage import CoveragePolicyConfig, compute_coverage_metrics
 from app.core.qa.coverage_validation import build_coverage_validation_fields
 
 
@@ -277,3 +284,166 @@ def test_coverage_metrics_regression_many_invalid_tokens_all_viable_groups_cover
     assert metrics.coverage_ratio == pytest.approx(1.0)
     assert coverage_df["in_coverage_denominator"].sum() == len(valid_groups)
     assert coverage_df["is_unseen_viable"].sum() == 0
+
+
+def test_coverage_metrics_normalizes_blank_gender_and_status_to_zero() -> None:
+    cfg = BuildConfig()
+    domain_cfg = _as_domain_config(cfg)
+
+    base_df = pd.DataFrame(
+        [
+            {
+                "supporter": "پشتیبان",
+                "manager": "مدیر",
+                "mentor_id": "EMP-1",
+                "mentor_row_id": 1,
+                "center_code": 1,
+                "center_text": center_text(1),
+                "group_pairs": [("رشته", 401)],
+                "genders": [""],
+                "statuses_normal": [""],
+                "statuses_school": [""],
+                "finance": [0],
+                "school_codes": [0],
+                "schools_normal": [0],
+                "alias_normal": "1234",
+                "alias_school": None,
+                "can_normal": True,
+                "can_school": False,
+                "capacity_current": 0,
+                "capacity_special": 0,
+                "capacity_remaining": 0,
+                "school_count": 0,
+            }
+        ]
+    )
+
+    cap_current_col = cfg.capacity_current_column or CAPACITY_CURRENT_COL
+    cap_special_col = cfg.capacity_special_column or CAPACITY_SPECIAL_COL
+    remaining_col = cfg.remaining_capacity_column or "remaining_capacity"
+    school_code_col = cfg.school_code_column or COL_SCHOOL
+
+    matrix_df = _explode_rows(
+        base_df.loc[base_df["can_normal"]],
+        alias_col="alias_normal",
+        status_col="statuses_normal",
+        school_col="schools_normal",
+        type_label="عادی",
+        code_to_name_school={},
+        cfg=cfg,
+        domain_cfg=domain_cfg,
+        cap_current_col=cap_current_col,
+        cap_special_col=cap_special_col,
+        remaining_col=remaining_col,
+        school_code_col=school_code_col,
+    )
+
+    policy = CoveragePolicyConfig(
+        denominator_mode="mentors",
+        require_student_presence=False,
+        include_blocked_candidates_in_denominator=False,
+    )
+
+    metrics, coverage_df, summary = compute_coverage_metrics(
+        matrix_df=matrix_df,
+        base_df=base_df,
+        students_df=None,
+        join_keys=cfg.policy.join_keys,
+        policy=policy,
+        unmatched_school_count=0,
+        invalid_group_token_count=0,
+        center_column=cfg.policy.stage_column("center"),
+        finance_column=cfg.policy.stage_column("finance"),
+        school_code_column=school_code_col,
+    )
+
+    assert int(metrics.covered_groups) == 1
+    assert int(metrics.unseen_viable_groups) == 0
+    assert metrics.coverage_ratio == 1.0
+    assert summary["candidate_only_groups"] == 0
+    assert matrix_df["جنسیت"].iat[0] == 0
+    assert matrix_df["دانش آموز فارغ"].iat[0] == 0
+    assert coverage_df.loc[0, "status"] == "covered"
+
+
+def test_coverage_metrics_normalizes_missing_join_keys_to_zero_int64() -> None:
+    cfg = BuildConfig()
+    domain_cfg = _as_domain_config(cfg)
+
+    base_df = pd.DataFrame(
+        [
+            {
+                "supporter": "پشتیبان",
+                "manager": "مدیر",
+                "mentor_id": "EMP-2",
+                "mentor_row_id": 1,
+                "center_code": pd.NA,
+                "center_text": "",
+                "group_pairs": [("رشته", 402)],
+                "genders": [1],
+                "statuses_normal": [1],
+                "statuses_school": [1],
+                "finance": [pd.NA],
+                "school_codes": [pd.NA],
+                "schools_normal": [pd.NA],
+                "alias_normal": "9999",
+                "alias_school": None,
+                "can_normal": True,
+                "can_school": False,
+                "capacity_current": 0,
+                "capacity_special": 0,
+                "capacity_remaining": 0,
+                "school_count": 0,
+            }
+        ]
+    )
+
+    cap_current_col = cfg.capacity_current_column or CAPACITY_CURRENT_COL
+    cap_special_col = cfg.capacity_special_column or CAPACITY_SPECIAL_COL
+    remaining_col = cfg.remaining_capacity_column or "remaining_capacity"
+    school_code_col = cfg.school_code_column or COL_SCHOOL
+
+    matrix_df = _explode_rows(
+        base_df.loc[base_df["can_normal"]],
+        alias_col="alias_normal",
+        status_col="statuses_normal",
+        school_col="schools_normal",
+        type_label="عادی",
+        code_to_name_school={},
+        cfg=cfg,
+        domain_cfg=domain_cfg,
+        cap_current_col=cap_current_col,
+        cap_special_col=cap_special_col,
+        remaining_col=remaining_col,
+        school_code_col=school_code_col,
+    )
+
+    join_keys = cfg.policy.join_keys
+    assert matrix_df[join_keys].isna().sum().sum() == 0
+    assert matrix_df.dtypes.loc[join_keys].apply(str).str.contains("Int64").all()
+    assert matrix_df["مرکز گلستان صدرا"].iat[0] == 0
+    assert matrix_df[school_code_col].iat[0] == 0
+    assert matrix_df["مالی حکمت بنیاد"].iat[0] == 0
+
+    policy = CoveragePolicyConfig(
+        denominator_mode="mentors",
+        require_student_presence=False,
+        include_blocked_candidates_in_denominator=False,
+    )
+
+    metrics, coverage_df, summary = compute_coverage_metrics(
+        matrix_df=matrix_df,
+        base_df=base_df,
+        students_df=None,
+        join_keys=join_keys,
+        policy=policy,
+        unmatched_school_count=0,
+        invalid_group_token_count=0,
+        center_column=cfg.policy.stage_column("center"),
+        finance_column=cfg.policy.stage_column("finance"),
+        school_code_column=school_code_col,
+    )
+
+    assert metrics.coverage_ratio == 1.0
+    assert summary["candidate_only_groups"] == 0
+    assert coverage_df.loc[0, "status"] == "covered"
