@@ -314,7 +314,11 @@ def enforce_join_key_types(df: pd.DataFrame, join_keys: Sequence[str]) -> pd.Dat
             result[column] = series.astype("Int64")
             continue
         if series.dtype == "object":
-            series = series.replace({True: 1, False: 0})
+            boolean_mask = series.isin([True, False])
+            if boolean_mask.any():
+                series = series.copy()
+                series.loc[boolean_mask] = series.loc[boolean_mask].map({True: 1, False: 0})
+            series = series.infer_objects(copy=False)
         result[column] = to_int64(series)
     return result
 
