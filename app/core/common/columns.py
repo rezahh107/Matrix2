@@ -15,6 +15,7 @@ __all__ = [
     "CANON_EN_TO_FA",
     "CANON_FA_TO_EN",
     "CANON",
+    "dedupe_columns",
     "resolve_aliases",
     "ensure_required_columns",
     "coerce_semantics",
@@ -60,6 +61,31 @@ def ensure_series(values: pd.Series | pd.DataFrame) -> pd.Series:
             return pd.Series([pd.NA] * len(values), index=values.index, dtype="object")
         return values.iloc[:, 0]
     return values
+
+
+def dedupe_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """حذف ستون‌های تکراری با حفظ اولین وقوع.
+
+    این تابع برای مراحل کاننیکال‌سازی که به خروجی بدون ستون هم‌نام نیاز
+    دارند مفید است؛ به‌ویژه زمانی که هدرهای دوزبانه به نام انگلیسی یکسان
+    تبدیل می‌شوند و باعث شکل‌گیری DataFrame چندستونه برای یک نام می‌گردند.
+
+    مثال کوتاه::
+
+        >>> df = pd.DataFrame([[1, 2]], columns=["x", "x"])
+        >>> dedupe_columns(df).columns.tolist()
+        ['x']
+
+    Args:
+        df: دیتافریم ورودی با احتمال وجود ستون تکراری.
+
+    Returns:
+        نسخهٔ جدید دیتافریم با ستون‌های یکتا (اولین تکرار حفظ می‌شود).
+    """
+
+    if df.columns.duplicated().any():
+        return df.loc[:, ~df.columns.duplicated()].copy()
+    return df.copy()
 
 
 # ---------------------------------------------------------------------------
