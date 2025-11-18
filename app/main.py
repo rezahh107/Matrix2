@@ -13,7 +13,7 @@ import getpass
 from datetime import datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Callable
+from typing import Any, Callable
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt, QSharedMemory, QTimer, qVersion
 
@@ -112,10 +112,70 @@ def _qt_version_tuple(version: str | None = None) -> tuple[int, int, int]:
     return tuple(parts[:3])
 
 
-def _is_deprecated_application_attribute(attr: str, qt_version: tuple[int, int, int]) -> bool:
-    """تشخیص منسوخ بودن ApplicationAttribute بدون دسترسی مستقیم به مقدار آن."""
+def _parse_qt_version(version: str | None) -> tuple[int, int, int]:
+    """تبدیل نسخهٔ Qt به تاپل (major, minor, patch) با پیش‌فرض صفر برای بخش‌های مفقود.
 
-    return attr == "AA_UseHighDpiPixmaps" and qt_version >= (6, 8, 0)
+    مثال‌ها:
+        "6.8.1" → (6, 8, 1)
+        "6.8"   → (6, 8, 0)
+        "6"     → (6, 0, 0)
+    """
+
+    if not version:
+        return (0, 0, 0)
+
+    chunks = str(version).split(".")
+    parts: list[int] = []
+    for chunk in chunks:
+        try:
+            parts.append(int(chunk))
+        except ValueError:
+            parts.append(0)
+
+    while len(parts) < 3:
+        parts.append(0)
+
+    return tuple(parts[:3])
+
+
+def _is_version_at_least(current: str | tuple[int, int, int], minimum: str) -> bool:
+    """مقایسهٔ نسخهٔ Qt با حداقل نسخهٔ موردنظر بر پایهٔ تاپل سه‌تایی."""
+
+    if isinstance(current, tuple):
+        current_tuple = current
+    else:
+        current_tuple = _parse_qt_version(current)
+    return current_tuple >= _parse_qt_version(minimum)
+
+
+# جدول منسوخی ApplicationAttribute برای بازبینی هنگام ارتقای Qt.
+# مستندات: https://doc.qt.io/qt-6/qapplication.html#ApplicationAttribute-enum
+DEPRECATED_APPLICATION_ATTRIBUTES: dict[Any, str] = {}
+try:  # محافظت از import برای تست‌های بدون PySide6
+    DEPRECATED_APPLICATION_ATTRIBUTES = {
+        Qt.ApplicationAttribute.AA_EnableHighDpiScaling: "6.0.0",
+        Qt.ApplicationAttribute.AA_UseHighDpiPixmaps: "6.8.0",
+    }
+except Exception:  # pragma: no cover - رخ نمی‌دهد در محیط واقعی
+    DEPRECATED_APPLICATION_ATTRIBUTES = {}
+
+
+def _is_deprecated_application_attribute(
+    attr: Any, qt_version: str | tuple[int, int, int] | None
+) -> bool:
+    """تشخیص منسوخ بودن ApplicationAttribute بدون عوارض جانبی یا وابستگی به Core/Infra."""
+
+    if not qt_version:
+        return False
+
+    deprecated_since = DEPRECATED_APPLICATION_ATTRIBUTES.get(attr)
+    if not deprecated_since:
+        return False
+
+    try:
+        return _is_version_at_least(qt_version, deprecated_since)
+    except Exception:  # pragma: no cover - محافظت در برابر ورودی‌های نامعتبر
+        return False
 
 
 def _show_gui_crash_dialog(log_path: Path) -> None:
@@ -159,6 +219,34 @@ def _install_gui_exception_guard() -> Callable[[], None]:
         sys.excepthook = previous_hook
 
     return restore
+
+
+def _apply_application_attributes(app: QApplication) -> None:
+    """تنظیم ApplicationAttribute‌ها با رعایت منسوخی و لاگ دیباگ در زمان skip."""
+
+    try:
+        qt_version_str = qVersion() or "0.0.0"
+    except Exception:  # pragma: no cover - محافظت از محیط‌های فاقد Qt
+        qt_version_str = "0.0.0"
+
+    attributes = (
+        getattr(Qt.ApplicationAttribute, "AA_EnableHighDpiScaling", None),
+        getattr(Qt.ApplicationAttribute, "AA_UseHighDpiPixmaps", None),
+    )
+
+    for attr in attributes:
+        if attr is None:
+            continue
+
+        if _is_deprecated_application_attribute(attr, qt_version_str):
+            logger.debug(
+                "Skipping deprecated Qt ApplicationAttribute %r on Qt %s",
+                attr,
+                qt_version_str,
+            )
+            continue
+
+        app.setAttribute(attr, True)
 
 
 def setup_environment() -> None:
@@ -309,24 +397,7 @@ def setup_application() -> QApplication:
             app = QApplication(sys.argv)
 
         # فعال‌سازی High DPI با مدیریت deprecation در نسخه‌های جدید Qt
-        qt_version = _qt_version_tuple()
-        for attr in (
-            "AA_EnableHighDpiScaling",
-            "AA_UseHighDpiPixmaps",
-        ):
-            if _is_deprecated_application_attribute(attr, qt_version):
-                logger.info(
-                    "ApplicationAttribute.%s در Qt %s منسوخ است و تنظیم نمی‌شود",
-                    attr,
-                    qVersion(),
-                )
-                continue
-
-            value = getattr(Qt.ApplicationAttribute, attr, None)
-            if value is None:
-                logger.debug("ApplicationAttribute.%s در این نسخه موجود نیست", attr)
-                continue
-            app.setAttribute(value, True)
+        _apply_application_attributes(app)
         
         # تنظیمات برنامه
         app.setApplicationName("AllocationApp")
