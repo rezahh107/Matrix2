@@ -15,7 +15,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Callable
 from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import Qt, QSharedMemory, QTimer
+from PySide6.QtCore import Qt, QSharedMemory, QTimer, qVersion
 
 from app.infra.logging import LoggingContext, configure_logging, install_exception_hook
 from app.ui.fonts import apply_default_font
@@ -95,6 +95,32 @@ def _write_gui_crash_log(traceback_text: str) -> Path:
     with log_file.open("a", encoding="utf-8") as handle:
         handle.write("\n".join(payload))
     return log_file
+
+
+def _qt_version_tuple(version: str | None = None) -> tuple[int, int, int]:
+    """تبدیل نسخهٔ Qt به تاپل برای مقایسهٔ امن."""
+
+    raw = (version or qVersion() or "0.0.0").split(".")
+    parts: list[int] = []
+    for chunk in raw:
+        try:
+            parts.append(int(chunk))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+def _is_deprecated_application_attribute(attr: str, qt_version: tuple[int, int, int]) -> bool:
+    """تشخیص منسوخ بودن ApplicationAttribute بدون دسترسی مستقیم به مقدار آن."""
+
+    deprecated_from = {
+        "AA_UseHighDpiPixmaps": (6, 8, 0),
+        "AA_EnableHighDpiScaling": (6, 8, 0),
+    }
+    threshold = deprecated_from.get(attr)
+    return threshold is not None and qt_version >= threshold
 
 
 def _show_gui_crash_dialog(log_path: Path) -> None:
@@ -287,11 +313,20 @@ def setup_application() -> QApplication:
         if app is None:
             app = QApplication(sys.argv)
 
-        # فعال‌سازی High DPI با fallback روی نسخه‌های جدیدتر Qt
+        # فعال‌سازی High DPI با مدیریت deprecation در نسخه‌های جدید Qt
+        qt_version = _qt_version_tuple()
         for attr in (
             "AA_EnableHighDpiScaling",
             "AA_UseHighDpiPixmaps",
         ):
+            if _is_deprecated_application_attribute(attr, qt_version):
+                logger.info(
+                    "ApplicationAttribute.%s در Qt %s منسوخ است و تنظیم نمی‌شود",
+                    attr,
+                    qVersion(),
+                )
+                continue
+
             value = getattr(Qt.ApplicationAttribute, attr, None)
             if value is None:
                 logger.debug("ApplicationAttribute.%s در این نسخه موجود نیست", attr)
