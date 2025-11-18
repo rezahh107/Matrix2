@@ -1142,19 +1142,21 @@ def _apply_schema_defaults(data: Dict[str, object]) -> Dict[str, object]:
         )
     data["emission"] = {"selection_reasons": selection_payload}
 
-    matrix_section = data.get("matrix") if isinstance(data.get("matrix"), Mapping) else {}
-    coverage_section = {}
-    if isinstance(matrix_section, Mapping):
-        coverage_section = matrix_section.get("coverage") or {}
-        if not isinstance(coverage_section, Mapping):
-            coverage_section = {}
+    matrix_section = data.get("matrix", {})
+    if not isinstance(matrix_section, Mapping):
+        matrix_section = {}
+
+    coverage_section = matrix_section.get("coverage", {})
+    if not isinstance(coverage_section, Mapping):
+        coverage_section = {}
+
     coverage_defaults = {
         "denominator_mode": "mentors",
         "require_student_presence": False,
         "include_blocked_candidates_in_denominator": False,
     }
     merged_coverage = {**coverage_defaults, **{str(k): v for k, v in coverage_section.items()}}
-    matrix_payload = dict(matrix_section) if isinstance(matrix_section, Mapping) else {}
+    matrix_payload = dict(matrix_section)
     matrix_payload["coverage"] = merged_coverage
     data["matrix"] = matrix_payload
 

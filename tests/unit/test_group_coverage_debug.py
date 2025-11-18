@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import pandas as pd
 
-import pandas as pd
-
 from app.core.matrix.coverage import compute_group_coverage_debug
 
 

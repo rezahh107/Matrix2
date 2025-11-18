@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence, Tuple
 
+import numpy as np
 import pandas as pd
 
 from app.core.common.columns import enforce_join_key_types
@@ -80,15 +81,13 @@ def _aggregate_group_status(row: pd.Series) -> Tuple[bool, str]:
     has_matrix = bool(row["matrix_row_count"] > 0)
     can_generate = bool(row.get("candidate_can_generate", False))
 
-    if has_matrix and has_candidate:
-        return has_candidate, "covered"
     if has_matrix:
-        return has_candidate, "matrix_only"
+        return has_candidate, "covered" if has_candidate else "matrix_only"
+
     if has_candidate:
-        if not can_generate:
-            return has_candidate, "blocked_candidate"
-        return has_candidate, "candidate_only"
-    return has_candidate, "matrix_only"
+        return True, "candidate_only" if can_generate else "blocked_candidate"
+
+    raise ValueError("Group status is ambiguous: no matrix rows and no candidate rows.")
 
 
 def compute_group_coverage_debug(
@@ -188,21 +187,25 @@ def compute_group_coverage_debug(
         ["candidate_row_count", "candidate_mentor_count", "matrix_row_count", "matrix_mentor_count"]
     ].astype(int)
 
-    status_labels: list[str] = []
-    has_candidate_flags: list[bool] = []
-    is_blocked_flags: list[bool] = []
-    is_viable_flags: list[bool] = []
-    for _, row in merged.iterrows():
-        has_candidate, label = _aggregate_group_status(row)
-        status_labels.append(label)
-        has_candidate_flags.append(has_candidate)
-        blocked = has_candidate and not bool(row.get("candidate_can_generate", False))
-        is_blocked_flags.append(blocked)
-        is_viable_flags.append(has_candidate and bool(row.get("candidate_can_generate", False)))
-    merged["status"] = status_labels
-    merged["has_candidate"] = has_candidate_flags
-    merged["is_blocked_candidate"] = is_blocked_flags
-    merged["is_candidate_viable"] = is_viable_flags
+    has_candidate = merged["candidate_row_count"] > 0
+    can_generate = merged.get(
+        "candidate_can_generate",
+        pd.Series(False, index=merged.index, dtype=bool),
+    )
+    has_matrix = merged["matrix_row_count"] > 0
+
+    conditions = [
+        has_matrix & has_candidate,
+        has_matrix & ~has_candidate,
+        ~has_matrix & has_candidate & ~can_generate,
+        ~has_matrix & has_candidate & can_generate,
+    ]
+    choices = ["covered", "matrix_only", "blocked_candidate", "candidate_only"]
+
+    merged["status"] = np.select(conditions, choices, default="unknown")
+    merged["has_candidate"] = has_candidate
+    merged["is_blocked_candidate"] = has_candidate & ~can_generate
+    merged["is_candidate_viable"] = has_candidate & can_generate
 
     summary = {
         "total_groups": int(len(merged)),
