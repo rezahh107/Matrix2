@@ -78,6 +78,30 @@ Applies to the entire repository. Local AGENTS.md files do not exist; this docum
 - Cross-layer tasks must be decomposed into layer-scoped sub-tasks; no single agent edits multiple layers unless explicitly authorized by SupervisorAgent.
 - Any policy/SSoT ambiguity → escalate to SupervisorAgent with references to Policy v1.0.3 & SSoT v1.0.2.
 
+## BEST-OF-N DECISION RULES FOR AGENTS
+- **When to use best-of-N:**
+  - Routine, well-specified, low-risk edits (typos, single-column additions, doc paragraph updates) → default to a single completion.
+  - Non-trivial refactors within a single layer (Core **or** Infra **or** UI) where multiple plausible designs exist → consider best-of-2 or best-of-3.
+  - Ambiguous UX/copy or divergent structural designs (layout, error-reporting style) → best-of-2 or best-of-3 may be preferable so ReviewerAgent/SupervisorAgent can select the strongest fit.
+  - Large or cross-cutting changes within one layer only use best-of-N if QA checklist and tests are well-defined; otherwise reduce scope and avoid variant sprawl.
+- **How to compare best-of-N candidates:**
+  - Never choose randomly; evaluate against Policy v1.0.3 and SSoT v1.0.2 invariants (join keys, ranking policy, determinism, trace steps) and layer boundaries (no Core↔Infra/UI inversion).
+  - Prefer smaller, localized change sets that fully satisfy the task and align with stable natural sorting and deterministic behavior.
+  - Prefer variants that add/update relevant tests and maintain clarity (minimal "magic", consistent with existing style).
+  - If candidates are equivalent, choose the one touching fewer files, avoiding speculative abstractions, and reducing future maintenance cost.
+- **Defaults and safeguards:**
+  - Routine, well-specified tasks → N = 1.
+  - Medium complexity or design choices within a single layer → N = 2.
+  - High-risk refactors with strong tests/QA guardrails → at most N = 3.
+  - Do not use best-of-N to brute-force unclear requirements; clarify or narrow scope instead. Chosen variant must keep final merged behavior deterministic.
+- **Role-specific behavior:**
+  - **CoderAgent / InfraAgent / UIAgent:** May request best-of-N for internal generation; must note in PLAN/DEBUG_REPORT why it was used.
+  - **ReviewerAgent:** Evaluates variants against Policy/SSoT invariants, QA checklist, and scope; must state why the chosen variant wins (e.g., "Variant 2 preserves join-key invariants and adds tests; Variant 1 violates layering.").
+  - **SupervisorAgent:** May enforce maximum N (N ≤ 3) and may disable best-of-N for high-risk areas (e.g., Core join/ranking logic) unless explicitly justified.
+- **Interaction with user-specified N:**
+  - Respect user-specified N while applying the comparison rules above to select the final variant.
+  - If requested N is excessive for scope (e.g., N = 10 for trivial edits), note in comments/PLAN why a smaller effective N is preferable, even if tooling produces more candidates.
+
 ## TESTING COMMANDS
 - **Core:** `pytest tests/core -q`
 - **Infra:** `pytest tests/infra -q`
@@ -103,3 +127,4 @@ Applies to the entire repository. Local AGENTS.md files do not exist; this docum
 
 ## CHANGELOG
 - **v1.0 (Global):** Replaces Eligibility Matrix-only AGENTS with global, layered contract; embeds Policy 1.0.3 & SSoT 1.0.2 invariants, dependency boundaries, routing, testing, and QA rules across Smart Student Allocation.
+- **v1.1:** Added BEST-OF-N decision rules for agents (supervised variant selection).
