@@ -2266,7 +2266,7 @@ def build_matrix(
         ):
             unseen_preview = (
                 group_coverage_df.loc[
-                    group_coverage_df["is_unseen_viable"] == True, cfg.policy.join_keys
+                    group_coverage_df["is_unseen_viable"], cfg.policy.join_keys
                 ]
                 .head(5)
                 .to_dict(orient="records")

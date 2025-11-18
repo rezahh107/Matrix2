@@ -94,7 +94,7 @@ def test_compute_coverage_metrics_excludes_blocked_candidates() -> None:
     assert metrics.unseen_viable_groups == 1
     assert metrics.invalid_group_token_count == 2
     assert metrics.blocked_groups == 1  # recorded for debug even if excluded
-    assert coverage_df[coverage_df["is_unseen_viable"] == True].iloc[0]["کدرشته"] == 103
+    assert coverage_df[coverage_df["is_unseen_viable"]].iloc[0]["کدرشته"] == 103
 
 
 def test_compute_coverage_metrics_intersects_with_students_when_requested() -> None:
