@@ -57,6 +57,12 @@ from app.core.matrix.coverage import (
 )
 from app.core.qa.coverage_validation import build_coverage_validation_fields
 from app.core.policy_loader import PolicyConfig, load_policy
+from app.core.inspactor_schema_helper import (
+    InspactorDefaultConfig,
+    missing_inspactor_columns,
+    schema_error_message,
+    with_default_inspactor_columns,
+)
 
 # =============================================================================
 # CONSTANTS
@@ -95,6 +101,15 @@ REQUIRED_INSPACTOR_COLUMNS = {
     CAPACITY_SPECIAL_COL,
     COL_GROUP,
 }
+
+DERIVED_INSPACTOR_COLUMNS = frozenset(
+    {
+        COL_SCHOOL_COUNT,
+        COL_POSTAL,
+        CAPACITY_CURRENT_COL,
+        CAPACITY_SPECIAL_COL,
+    }
+)
 
 REQUIRED_SCHOOL_COLUMNS = {COL_SCHOOL_CODE}
 
@@ -152,26 +167,34 @@ def assert_inspactor_schema(df: pd.DataFrame, policy: PolicyConfig) -> pd.DataFr
     context = "inspactor"
     normalized = resolve_aliases(df, context)
     coerced = coerce_semantics(normalized, context)
+    default_cfg = InspactorDefaultConfig(
+        school_code_columns=(COL_SCHOOL_CODE, COL_SCHOOL1, COL_SCHOOL2, COL_SCHOOL3, COL_SCHOOL4),
+        school_count_column=COL_SCHOOL_COUNT,
+        derived_factories={
+            COL_POSTAL: lambda frame: pd.Series(
+                [pd.NA] * len(frame), index=frame.index, dtype="string"
+            ),
+            CAPACITY_CURRENT_COL: lambda frame: pd.Series(
+                [0] * len(frame), index=frame.index, dtype="Int64"
+            ),
+            CAPACITY_SPECIAL_COL: lambda frame: pd.Series(
+                [0] * len(frame), index=frame.index, dtype="Int64"
+            ),
+        },
+    )
+    prepared = with_default_inspactor_columns(
+        coerced,
+        default_cfg,
+    )
     try:
-        ensured = ensure_required_columns(coerced, REQUIRED_INSPACTOR_COLUMNS, context)
+        ensured = ensure_required_columns(prepared, REQUIRED_INSPACTOR_COLUMNS, context)
     except ValueError as exc:
-        missing = _missing_inspactor_columns(coerced)
-        raise KeyError(_schema_error_message(missing, policy)) from exc
-    missing_after = _missing_inspactor_columns(ensured)
+        missing = missing_inspactor_columns(prepared, REQUIRED_INSPACTOR_COLUMNS)
+        raise KeyError(schema_error_message(missing, policy)) from exc
+    missing_after = missing_inspactor_columns(ensured, REQUIRED_INSPACTOR_COLUMNS)
     if missing_after:
-        raise KeyError(_schema_error_message(missing_after, policy))
+        raise KeyError(schema_error_message(missing_after, policy))
     return ensured
-
-
-def _missing_inspactor_columns(df: pd.DataFrame) -> list[str]:
-    columns = set(map(str, df.columns))
-    return sorted(col for col in REQUIRED_INSPACTOR_COLUMNS if col not in columns)
-
-
-def _schema_error_message(missing: Collection[str], policy: PolicyConfig) -> str:
-    columns = list(missing) or ["<unknown>"]
-    joined = ", ".join(columns)
-    return f"[policy {policy.version}] missing Inspactor columns: {joined}"
 
 
 # =============================================================================
