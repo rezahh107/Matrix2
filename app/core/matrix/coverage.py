@@ -207,6 +207,12 @@ def compute_group_coverage_debug(
     merged["is_blocked_candidate"] = has_candidate & ~can_generate
     merged["is_candidate_viable"] = has_candidate & can_generate
 
+    unknown_mask = merged["status"] == "unknown"
+    if bool(unknown_mask.any()):
+        raise ValueError(
+            "Group status is ambiguous: no matrix rows and no candidate rows."
+        )
+
     summary = {
         "total_groups": int(len(merged)),
         "covered_groups": int((merged["status"] == "covered").sum()),
