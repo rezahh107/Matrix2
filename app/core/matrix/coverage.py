@@ -39,7 +39,30 @@ class CoveragePolicyConfig:
 
 @dataclass(frozen=True)
 class CoverageMetrics:
-    """خروجی محاسبهٔ پوشش ماتریس بر اساس سیاست پوشش."""
+    """خروجی محاسبهٔ پوشش ماتریس بر اساس سیاست پوشش.
+
+    total_groups:
+        تعداد کل گروه‌هایی که بر اساس سیاست انتخاب مخرج (معمولاً mentor-only)
+        در مخرج پوشش قرار می‌گیرند.
+    covered_groups:
+        تعداد گروه‌های موجود در مخرج که حداقل یک سطر ماتریس دارند.
+    unseen_viable_groups:
+        گروه‌های قابل تولید که در مخرج هستند ولی سطر ماتریس ندارند.
+    blocked_groups:
+        گروه‌های دارای رکورد اولیه که به‌دلیل alias/capacity قابل تولید نیستند
+        (برای دیباگ گزارش می‌شوند، پیش‌فرض در مخرج نیستند).
+    candidate_groups:
+        تعداد گروه‌هایی که حداقل یک رکورد اولیه دارند (حتی اگر بلاک شده باشند).
+    matrix_only_groups:
+        گروه‌هایی که صرفاً در ماتریس نهایی دیده شده‌اند.
+    invalid_group_token_count:
+        شمار توکن/کد گروه نامعتبر در ورودی که از فضای مخرج حذف شده‌اند.
+    unmatched_school_count:
+        تعداد مدارس نامعتبر/نامچسبیده برای گزارش جداگانه.
+    coverage_ratio:
+        نسبت covered_groups به total_groups؛ توکن نامعتبر و unmatched_schools در
+        این مخرج دخیل نیستند.
+    """
 
     total_groups: int
     covered_groups: int
@@ -47,7 +70,7 @@ class CoverageMetrics:
     blocked_groups: int
     candidate_groups: int
     matrix_only_groups: int
-    invalid_group_tokens: int
+    invalid_group_token_count: int
     unmatched_school_count: int
     coverage_ratio: float
 
@@ -258,7 +281,7 @@ def compute_coverage_metrics(
     join_keys: Sequence[str],
     policy: CoveragePolicyConfig,
     unmatched_school_count: int,
-    invalid_group_tokens: int,
+    invalid_group_token_count: int,
     center_column: str,
     finance_column: str,
     school_code_column: str,
@@ -308,7 +331,7 @@ def compute_coverage_metrics(
         blocked_groups=blocked_groups,
         candidate_groups=candidate_groups,
         matrix_only_groups=matrix_only_groups,
-        invalid_group_tokens=int(invalid_group_tokens),
+        invalid_group_token_count=int(invalid_group_token_count),
         unmatched_school_count=int(unmatched_school_count),
         coverage_ratio=float(coverage_ratio),
     )

@@ -1035,6 +1035,8 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         "progress_log": progress_log,
         "meta": pd.json_normalize([meta]),
     }
+    if isinstance(unseen_groups, pd.DataFrame) and not unseen_groups.empty:
+        sheets["invalid_group_tokens"] = unseen_groups
     group_coverage_df = progress_log.attrs.get("group_coverage")
     if isinstance(group_coverage_df, pd.DataFrame):
         sheets["group_coverage_debug"] = group_coverage_df
