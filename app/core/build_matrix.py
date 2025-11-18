@@ -1599,25 +1599,45 @@ def _explode_rows(
     if df.empty:
         return pd.DataFrame()
 
-    def _optional_int(value: Any) -> int | type(pd.NA):
-        if pd.isna(value):
-            return pd.NA
-        if isinstance(value, str) and not value.strip():
-            return pd.NA
-        parsed = _coerce_int_like(value)
-        return parsed if parsed is not None else pd.NA
+    def _optional_int(value: Any) -> int | None:
+        """تبدیل مقدار به عدد صحیح در صورت امکان و بازگرداندن ``None`` برای تهی.
+
+        این تابع صرفاً تبدیل را انجام می‌دهد و نگاشت «تهی → صفر» را به لایهٔ فراخوان
+        می‌سپارد تا فقط برای کلیدهای join که Policy/SSoT آن را مجاز می‌دانند اعمال شود.
+        """
+
+        return _coerce_int_like(value)
+
+    def _normalize_demographic_key(series: pd.Series) -> pd.Series:
+        """نرمال‌سازی جنسیت/وضعیت فارغ‌التحصیلی مطابق فضای کاندید (تهی → صفر).
+
+        نمونه::
+
+            >>> _normalize_demographic_key(pd.Series(["", pd.NA, 1]))
+            0    0
+            1    0
+            2    1
+            dtype: Int64
+        """
+
+        normalized = pd.Series(series.map(_optional_int), index=series.index, dtype="Int64")
+        return normalized.fillna(0).astype("Int64")
 
     gender_series = df["genders"]
-    df["gender_code"] = gender_series.map(_optional_int).astype("Int64")
+    df["gender_code"] = _normalize_demographic_key(gender_series)
 
     status_series = df[status_col]
-    df["status_code"] = status_series.map(_optional_int).astype("Int64")
+    df["status_code"] = _normalize_demographic_key(status_series)
 
     blank_school_mask = df["school_list"].map(lambda v: pd.isna(v) or (isinstance(v, str) and not v.strip()))
     school_codes = df["school_list"].map(_coerce_int_like)
-    df["کد مدرسه"] = pd.Series(school_codes, index=df.index).fillna(0).astype("int64")
+    df["کد مدرسه"] = (
+        pd.Series(school_codes, index=df.index)
+        .fillna(0)
+        .astype("Int64")
+    )
     df.loc[blank_school_mask.fillna(True), "کد مدرسه"] = 0
-    df["کد مدرسه"] = df["کد مدرسه"].astype("int64")
+    df["کد مدرسه"] = df["کد مدرسه"].astype("Int64")
     df["نام مدرسه"] = df["کد مدرسه"].astype(str).map(code_to_name_school).fillna("")
     if school_code_col != "کد مدرسه":
         df = df.rename(columns={"کد مدرسه": school_code_col})
@@ -1651,6 +1671,8 @@ def _explode_rows(
     df["مالی حکمت بنیاد"] = safe_int_column(df, "مالی حکمت بنیاد")
     df["جنسیت"] = df["gender_code"].astype("Int64")
     df["دانش آموز فارغ"] = df["status_code"].astype("Int64")
+    df["مرکز گلستان صدرا"] = safe_int_column(df, "مرکز گلستان صدرا", default=0)
+    df["کدرشته"] = safe_int_column(df, "کدرشته", default=0)
     df["جنسیت2"] = df["جنسیت"].map(lambda v: gender_text(v) if pd.notna(v) else "")
     df["دانش آموز فارغ2"] = df["دانش آموز فارغ"].map(lambda v: status_text(v) if pd.notna(v) else "")
     df["مرکز گلستان صدرا3"] = df["center_text"]
