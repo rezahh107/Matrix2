@@ -114,6 +114,22 @@ def test_missing_required_non_derived_columns_fail() -> None:
     assert COL_MENTOR_NAME not in DERIVED_INSPACTOR_COLUMNS
 
 
+def test_missing_required_columns_report_diagnostics() -> None:
+    policy = load_policy()
+    broken = _valid_inspactor_frame().drop(
+        columns=[COL_MENTOR_NAME, COL_MANAGER_NAME, COL_GROUP]
+    )
+
+    with pytest.raises(KeyError) as excinfo:
+        assert_inspactor_schema(broken, policy)
+
+    message = str(excinfo.value)
+    assert "accepted:" in message
+    assert COL_GROUP in message
+    assert "mentor_name" in message
+    assert COL_MENTOR_ID in message  # در پیش‌نمایش ستون‌های موجود
+
+
 def test_pipeline_ordering_requires_defaults_before_ensure() -> None:
     policy = load_policy()
     aliased = pd.DataFrame(
