@@ -79,7 +79,7 @@ def test_partial_derived_missing_are_defaulted() -> None:
     ensured = assert_inspactor_schema(raw, policy)
 
     assert set(DERIVED_INSPACTOR_COLUMNS).issubset(ensured.columns)
-    assert ensured[COL_SCHOOL_COUNT].iloc[0] == 1
+    assert ensured[COL_SCHOOL_COUNT].iloc[0] == 2
     assert pat.is_integer_dtype(ensured[COL_SCHOOL_COUNT])
     assert ensured[CAPACITY_CURRENT_COL].iloc[0] == 0
     assert ensured[CAPACITY_SPECIAL_COL].iloc[0] == 0
@@ -170,6 +170,8 @@ def test_infer_school_count_deterministic_on_shuffled_columns() -> None:
 
     result_a = infer_school_count(frame, columns)
     result_b = infer_school_count(shuffled, columns)
+    expected_counts = pd.Series([2, 1], dtype="Int64")
+    pd.testing.assert_series_equal(result_a, expected_counts, check_names=False)
     pd.testing.assert_series_equal(result_a, result_b, check_names=False)
     pd.testing.assert_series_equal(result_a, infer_school_count(frame, columns), check_names=False)
 

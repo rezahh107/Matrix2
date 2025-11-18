@@ -34,7 +34,7 @@ def infer_school_count(df: pd.DataFrame, school_code_columns: Iterable[str]) -> 
         return pd.Series([0] * len(df), index=df.index, dtype="Int64")
 
     counts = [
-        sum(1 for value in row if to_numlike_str(value))
+        sum(1 for v_str in map(to_numlike_str, row) if v_str and v_str != "0")
         for row in df[present].itertuples(index=False)
     ]
     return pd.Series(counts, index=df.index, dtype="Int64")
