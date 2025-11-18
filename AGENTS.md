@@ -91,7 +91,7 @@ Applies to the entire repository. Local AGENTS.md files do not exist; this docum
   - If candidates are equivalent, choose the one touching fewer files, avoiding speculative abstractions, and reducing future maintenance cost.
 - **Defaults and safeguards:**
   - Routine, well-specified tasks → N = 1.
-  - Medium complexity or design choices within a single layer → default to N = 2, with N = 3 as an option.
+  - Medium complexity or design choices within a single layer → default to N = 2, with N = 3 as an option when side-by-side variants improve clarity.
   - High-risk refactors with strong tests/QA guardrails → at most N = 3.
   - Do not use best-of-N to brute-force unclear requirements; clarify or narrow scope instead. Chosen variant must keep final merged behavior deterministic.
 - **Role-specific behavior:**
