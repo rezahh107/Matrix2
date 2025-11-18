@@ -41,7 +41,8 @@ Applies to the entire repository. Local AGENTS.md files do not exist; this docum
 
 ## POLICY & SSoT ENFORCEMENT
 - **Immutable invariants (do NOT alter):**
-  - **Join Keys (6, int):** `"کدرشته"` (group_code), `"جنسیت"` (gender), `"دانش آموز فارغ"` (graduation_status), `"مرکز گلستان صدرا"` (center), `"مالی حکمت بنیاد"` (finance), `"کد مدرسه"` (school_code). `"کدرشته"` is used for both the `type` and `group` trace steps (one-to-many mapping).
+  - **Join Keys (6, int):** `"کدرشته"` (group_code), `"جنسیت"` (gender), `"دانش آموز فارغ"` (graduation_status), `"مرکز گلستان صدرا"` (center), `"مالی حکمت بنیاد"` (finance), `"کد مدرسه"` (school_code).
+    - **Trace mapping note:** `"کدرشته"` feeds both the `type` and `group` trace steps (one-to-many mapping from join key → trace steps).
   - **Ranking Policy (stable):** minimize `occupancy_ratio` → minimize `allocations_new` → natural sort `mentor_id` (stable sort required).
   - **Trace (8-step explainability):** `type, group, gender, graduation_status, center, finance, school, capacity_gate` with candidate counts after each filter.
   - **Determinism:** identical inputs yield identical outputs; stable sorts everywhere; no randomness/time-based logic.
