@@ -188,10 +188,7 @@ def compute_group_coverage_debug(
     ].astype(int)
 
     has_candidate = merged["candidate_row_count"] > 0
-    can_generate = merged.get(
-        "candidate_can_generate",
-        pd.Series(False, index=merged.index, dtype=bool),
-    )
+    can_generate = merged["candidate_can_generate"].astype(bool, copy=False)
     has_matrix = merged["matrix_row_count"] > 0
 
     conditions = [
