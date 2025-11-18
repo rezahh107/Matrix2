@@ -2095,7 +2095,7 @@ def build_matrix(
         join_keys=cfg.policy.join_keys,
         policy=coverage_policy,
         unmatched_school_count=unmatched_school_count,
-        invalid_group_tokens=invalid_group_token_count,
+        invalid_group_token_count=invalid_group_token_count,
         center_column=center_col,
         finance_column=finance_col,
         school_code_column=school_code_col,
@@ -2105,7 +2105,7 @@ def build_matrix(
         "coverage_total_groups": coverage_metrics.total_groups,
         "coverage_covered_groups": coverage_metrics.covered_groups,
         "coverage_unseen_viable_groups": coverage_metrics.unseen_viable_groups,
-        "coverage_invalid_group_tokens": coverage_metrics.invalid_group_tokens,
+        "coverage_invalid_group_token_count": coverage_metrics.invalid_group_token_count,
     }
     _append_progress_row(
         {
@@ -2132,7 +2132,7 @@ def build_matrix(
             "coverage_total_groups": coverage_metrics.total_groups,
             "coverage_covered_groups": coverage_metrics.covered_groups,
             "coverage_unseen_viable_groups": coverage_metrics.unseen_viable_groups,
-            "coverage_invalid_group_tokens": coverage_metrics.invalid_group_tokens,
+            "coverage_invalid_group_token_count": coverage_metrics.invalid_group_token_count,
         }
     )
     progress(
@@ -2159,7 +2159,6 @@ def build_matrix(
     min_coverage_ratio = float(cfg.min_coverage_ratio or 0.0)
     coverage_validation_fields = build_coverage_validation_fields(
         metrics=coverage_metrics,
-        invalid_group_token_count=invalid_group_token_count,
         coverage_threshold=min_coverage_ratio,
     )
 
@@ -2248,12 +2247,30 @@ def build_matrix(
             f"{coverage_ratio:.1%} (covered_groups={coverage_metrics.covered_groups}"
             f", total_groups={coverage_metrics.total_groups}"
             f", unseen_groups={coverage_metrics.unseen_viable_groups}"
-            f", invalid_tokens={invalid_group_token_count}"
+            f", invalid_tokens={coverage_metrics.invalid_group_token_count}"
             f", unmatched_schools={unmatched_school_count})"
         ),
     )
 
-    if coverage_metrics.total_groups and coverage_ratio < min_coverage_ratio:
+    coverage_gate_unseen = coverage_metrics.unseen_viable_groups
+    if (
+        coverage_metrics.total_groups
+        and coverage_ratio < min_coverage_ratio
+        and coverage_gate_unseen > 0
+    ):
+        unseen_preview: list[dict[str, object]] | None = None
+        if (
+            isinstance(group_coverage_df, pd.DataFrame)
+            and not group_coverage_df.empty
+            and "is_unseen_viable" in group_coverage_df.columns
+        ):
+            unseen_preview = (
+                group_coverage_df.loc[
+                    group_coverage_df["is_unseen_viable"] == True, cfg.policy.join_keys
+                ]
+                .head(5)
+                .to_dict(orient="records")
+            )
         message = (
             "نسبت پوشش خروجی {coverage:.1%} کمتر از حداقل مجاز {minimum:.1%} است؛ "
             "unmatched_schools={unmatched}، unseen_groups={unseen}."
@@ -2261,10 +2278,11 @@ def build_matrix(
             coverage=coverage_ratio,
             minimum=min_coverage_ratio,
             unmatched=unmatched_school_count,
-            unseen=coverage_metrics.unseen_viable_groups,
+            unseen=coverage_gate_unseen,
         )
         error = ValueError(message)
         setattr(error, "is_coverage_threshold_error", True)
+        setattr(error, "coverage_unseen_preview", unseen_preview)
         raise error
 
     if dedup_threshold_exceeded:
