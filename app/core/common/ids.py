@@ -45,6 +45,7 @@ __all__ = [
 ]
 
 _NUMERIC_RE = re.compile(r"(\d+)")
+_MENTOR_NAME_CANON = CANON_EN_TO_FA["mentor_name"]
 
 
 def natural_key(text: Any) -> tuple[object, ...]:
@@ -80,6 +81,24 @@ def _normalize_name(value: Any) -> str:
     return normalize_fa(value)
 
 
+def _resolve_mentor_name_column(df: pd.DataFrame) -> str:
+    """انتخاب ستون معتبر نام پشتیبان با پشتیبانی از سینونیم‌های متداول."""
+
+    candidates = (
+        "پشتیبان",
+        _MENTOR_NAME_CANON,
+        f"{_MENTOR_NAME_CANON} | mentor_name",
+        "mentor_name",
+        "mentor name",
+    )
+    for column in candidates:
+        if column in df.columns:
+            return column
+    raise KeyError(
+        f"Missing mentor name column; tried {candidates} — seen: {list(df.columns)}"
+    )
+
+
 def _normalize_code_raw(value: Any) -> str:
     """کد کارمندی را برای ذخیره‌سازی بدون حذف صفرهای پیشرو نرمال می‌کند."""
 
@@ -100,13 +119,16 @@ def build_mentor_id_map(matrix_df: pd.DataFrame) -> Dict[str, str]:
         KeyError: در صورت فقدان ستون‌های مورد نیاز.
     """
 
-    required = {"پشتیبان", "کد کارمندی پشتیبان"}
+    mentor_column = _resolve_mentor_name_column(matrix_df)
+    required = {mentor_column, "کد کارمندی پشتیبان"}
     missing = required - set(matrix_df.columns)
     if missing:
-        raise KeyError(f"Missing columns for mentor id map: {sorted(missing)}")
+        raise KeyError(
+            f"Missing columns for mentor id map: {sorted(missing)} | seen: {list(matrix_df.columns)}"
+        )
 
-    mentor_series = matrix_df["پشتیبان"].map(_normalize_name)
-    code_series = matrix_df["کد کارمندی پشتیبان"].map(_normalize_code_raw)
+    mentor_series = ensure_series(matrix_df[mentor_column]).map(_normalize_name)
+    code_series = ensure_series(matrix_df["کد کارمندی پشتیبان"]).map(_normalize_code_raw)
 
     mapping: Dict[str, str] = {}
     for name, code in zip(mentor_series, code_series, strict=False):
@@ -133,10 +155,11 @@ def inject_mentor_id(pool: pd.DataFrame, id_map: Mapping[str, str]) -> pd.DataFr
         KeyError: اگر ستون «پشتیبان» موجود نباشد.
     """
 
-    if "پشتیبان" not in pool.columns:
-        raise KeyError("Column 'پشتیبان' is required for mentor id injection")
+    mentor_column = _resolve_mentor_name_column(pool)
 
     result = pool.copy()
+    if "پشتیبان" not in result.columns:
+        result["پشتیبان"] = ensure_series(result[mentor_column])
     if "کد کارمندی پشتیبان" not in result.columns:
         result["کد کارمندی پشتیبان"] = ""
 
