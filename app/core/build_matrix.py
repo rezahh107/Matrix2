@@ -55,7 +55,7 @@ from app.core.matrix.coverage import (
     CoveragePolicyConfig,
     compute_coverage_metrics,
 )
-from app.core.matrix.validation import build_coverage_validation_fields
+from app.core.qa.coverage_validation import build_coverage_validation_fields
 from app.core.policy_loader import PolicyConfig, load_policy
 
 # =============================================================================
@@ -2160,6 +2160,7 @@ def build_matrix(
     coverage_validation_fields = build_coverage_validation_fields(
         metrics=coverage_metrics,
         coverage_threshold=min_coverage_ratio,
+        total_rows=total_rows,
     )
 
     duplicate_threshold = int(cfg.join_key_duplicate_threshold or 0)
@@ -2252,6 +2253,33 @@ def build_matrix(
         ),
     )
 
+    if dedup_threshold_exceeded:
+        message = (
+            "حذف رکوردهای تکراری ({removed:.1%}) از آستانهٔ مجاز ({threshold:.1%}) بیشتر است."
+        ).format(
+            removed=dedup_removed_ratio,
+            threshold=dedup_threshold,
+        )
+        LOGGER.error(
+            "dedupe threshold exceeded: removed=%s threshold=%s rows_before=%s rows_after=%s",
+            f"{dedup_removed_ratio:.4f}",
+            f"{dedup_threshold:.4f}",
+            rows_before_dedupe,
+            rows_after_dedupe,
+        )
+        progress(
+            85,
+            (
+                "⚠️ dedupe threshold exceeded: removed="
+                f"{dedup_removed_rows} ratio={dedup_removed_ratio:.1%}"
+            ),
+        )
+        error = ValueError(message)
+        setattr(error, "is_dedup_removed_threshold_error", True)
+        setattr(error, "dedup_removed_rows", int(dedup_removed_rows))
+        setattr(error, "dedup_removed_ratio", float(dedup_removed_ratio))
+        raise error
+
     coverage_gate_unseen = coverage_metrics.unseen_viable_groups
     if (
         coverage_metrics.total_groups
@@ -2283,33 +2311,6 @@ def build_matrix(
         error = ValueError(message)
         setattr(error, "is_coverage_threshold_error", True)
         setattr(error, "coverage_unseen_preview", unseen_preview)
-        raise error
-
-    if dedup_threshold_exceeded:
-        message = (
-            "حذف رکوردهای تکراری ({removed:.1%}) از آستانهٔ مجاز ({threshold:.1%}) بیشتر است."
-        ).format(
-            removed=dedup_removed_ratio,
-            threshold=dedup_threshold,
-        )
-        LOGGER.error(
-            "dedupe threshold exceeded: removed=%s threshold=%s rows_before=%s rows_after=%s",
-            f"{dedup_removed_ratio:.4f}",
-            f"{dedup_threshold:.4f}",
-            rows_before_dedupe,
-            rows_after_dedupe,
-        )
-        progress(
-            85,
-            (
-                "⚠️ dedupe threshold exceeded: removed="
-                f"{dedup_removed_rows} ratio={dedup_removed_ratio:.1%}"
-            ),
-        )
-        error = ValueError(message)
-        setattr(error, "is_dedup_removed_threshold_error", True)
-        setattr(error, "dedup_removed_rows", int(dedup_removed_rows))
-        setattr(error, "dedup_removed_ratio", float(dedup_removed_ratio))
         raise error
 
     return (

@@ -5,6 +5,7 @@ from typing import List, Mapping, Sequence
 import pandas as pd
 
 from app.core.common.columns import enforce_join_key_types
+from app.core.common.domain import COL_GROUP, COL_GENDER, COL_STATUS
 
 __all__ = ["build_candidate_group_keys"]
 
@@ -73,9 +74,9 @@ def build_candidate_group_keys(
 
     records: List[Mapping[str, object]] = []
 
-    track_key = next((key for key in join_keys if "رشته" in key or "گروه" in key), "کدرشته")
-    gender_key = next((key for key in join_keys if "جنسیت" in key), "جنسیت")
-    status_key = next((key for key in join_keys if "دانش" in key), "دانش آموز فارغ")
+    track_key = join_keys[0] if join_keys else COL_GROUP
+    gender_key = join_keys[1] if len(join_keys) > 1 else COL_GENDER
+    status_key = join_keys[2] if len(join_keys) > 2 else COL_STATUS
 
     for row in base_df.to_dict(orient="records"):
         mentor_id = row.get("mentor_id", "")

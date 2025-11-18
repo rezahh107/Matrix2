@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
@@ -277,7 +277,13 @@ class PolicyConfig:
     emission: EmissionOptions
     fairness_strategy: str
     center_management: CenterManagementConfig
-    coverage_options: MatrixCoverageOptions
+    coverage_options: MatrixCoverageOptions = field(
+        default_factory=lambda: MatrixCoverageOptions(
+            denominator_mode="mentors",
+            require_student_presence=False,
+            include_blocked_candidates_in_denominator=False,
+        )
+    )
 
     @property
     def ranking(self) -> List[str]:
