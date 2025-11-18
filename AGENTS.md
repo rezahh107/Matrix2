@@ -81,7 +81,7 @@ Applies to the entire repository. Local AGENTS.md files do not exist; this docum
 ## BEST-OF-N DECISION RULES FOR AGENTS
 - **When to use best-of-N:**
   - Routine, well-specified, low-risk edits (typos, single-column additions, doc paragraph updates) → default to a single completion.
-  - Non-trivial refactors within a single layer (Core **or** Infra **or** UI) where multiple plausible designs exist → consider best-of-2 or best-of-3.
+  - Non-trivial refactors within a single layer (**Core**, **Infra**, or **UI**) where multiple plausible designs exist → consider best-of-2 or best-of-3.
   - Ambiguous UX/copy or divergent structural designs (layout, error-reporting style) → best-of-2 or best-of-3 may be preferable so ReviewerAgent/SupervisorAgent can select the strongest fit.
   - Large or cross-cutting changes within one layer only use best-of-N if QA checklist and tests are well-defined; otherwise reduce scope and avoid variant sprawl.
 - **How to compare best-of-N candidates:**
@@ -91,7 +91,7 @@ Applies to the entire repository. Local AGENTS.md files do not exist; this docum
   - If candidates are equivalent, choose the one touching fewer files, avoiding speculative abstractions, and reducing future maintenance cost.
 - **Defaults and safeguards:**
   - Routine, well-specified tasks → N = 1.
-  - Medium complexity or design choices within a single layer → N = 2.
+  - Medium complexity or design choices within a single layer → default to N = 2, with N = 3 as an option.
   - High-risk refactors with strong tests/QA guardrails → at most N = 3.
   - Do not use best-of-N to brute-force unclear requirements; clarify or narrow scope instead. Chosen variant must keep final merged behavior deterministic.
 - **Role-specific behavior:**
