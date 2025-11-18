@@ -5,7 +5,7 @@ from app.core.matrix.coverage import (
     CoveragePolicyConfig,
     compute_coverage_metrics,
 )
-from app.core.matrix.validation import build_coverage_validation_fields
+from app.core.qa.coverage_validation import build_coverage_validation_fields
 
 
 JOIN_KEYS = [
@@ -191,6 +191,7 @@ def test_build_coverage_validation_fields_aligns_with_metrics() -> None:
     result = build_coverage_validation_fields(
         metrics=metrics,
         coverage_threshold=0.95,
+        total_rows=len(matrix_df),
     )
 
     assert set(result.keys()) == {
@@ -198,6 +199,7 @@ def test_build_coverage_validation_fields_aligns_with_metrics() -> None:
         "unseen_group_count",
         "invalid_group_token_count",
         "coverage_denominator_groups",
+        "total_candidates",
         "covered_groups",
         "unmatched_school_count",
         "coverage_threshold",
@@ -206,6 +208,7 @@ def test_build_coverage_validation_fields_aligns_with_metrics() -> None:
     assert result["unseen_group_count"] == metrics.unseen_viable_groups
     assert result["invalid_group_token_count"] == metrics.invalid_group_token_count
     assert result["coverage_denominator_groups"] == metrics.total_groups
+    assert result["total_candidates"] == int(round(len(matrix_df) / metrics.coverage_ratio))
     assert result["covered_groups"] == metrics.covered_groups
     assert result["unmatched_school_count"] == metrics.unmatched_school_count
 
