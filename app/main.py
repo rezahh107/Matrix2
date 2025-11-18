@@ -14,7 +14,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Callable
+from typing import Any, Callable
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt, QSharedMemory, QTimer, qVersion
 
@@ -214,6 +214,34 @@ def _install_gui_exception_guard() -> Callable[[], None]:
         sys.excepthook = previous_hook
 
     return restore
+
+
+def _apply_application_attributes(app: QApplication) -> None:
+    """تنظیم ApplicationAttribute‌ها با رعایت منسوخی و لاگ دیباگ در زمان skip."""
+
+    try:
+        qt_version_str = qVersion() or "0.0.0"
+    except Exception:  # pragma: no cover - محافظت از محیط‌های فاقد Qt
+        qt_version_str = "0.0.0"
+
+    attributes = (
+        getattr(Qt.ApplicationAttribute, "AA_EnableHighDpiScaling", None),
+        getattr(Qt.ApplicationAttribute, "AA_UseHighDpiPixmaps", None),
+    )
+
+    for attr in attributes:
+        if attr is None:
+            continue
+
+        if _is_deprecated_application_attribute(attr, qt_version_str):
+            logger.debug(
+                "Skipping deprecated Qt ApplicationAttribute %r on Qt %s",
+                attr,
+                qt_version_str,
+            )
+            continue
+
+        app.setAttribute(attr, True)
 
 
 def setup_environment() -> None:
