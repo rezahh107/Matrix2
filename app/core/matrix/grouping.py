@@ -74,9 +74,10 @@ def build_candidate_group_keys(
 
     records: List[Mapping[str, object]] = []
 
-    track_key = join_keys[0] if join_keys else COL_GROUP
-    gender_key = join_keys[1] if len(join_keys) > 1 else COL_GENDER
-    status_key = join_keys[2] if len(join_keys) > 2 else COL_STATUS
+    keys_iter = iter(join_keys)
+    track_key = next(keys_iter, COL_GROUP)
+    gender_key = next(keys_iter, COL_GENDER)
+    status_key = next(keys_iter, COL_STATUS)
 
     for row in base_df.to_dict(orient="records"):
         mentor_id = row.get("mentor_id", "")
