@@ -73,8 +73,40 @@ for rule in _RULES:
     _LOOKUP.setdefault(normalize_fa(rule.standard), rule)
 
 
+_IGNORED_COLUMNS_NORMALIZED: frozenset[str] = frozenset(
+    normalize_fa(name)
+    for name in (
+        "نوع مدرسه",
+        "مدیر مدرسه",
+        "نام کامل مدرسه",
+        "حوزه در خود مدرسه",
+        "حوزه در خود مدرسه2",
+        "منطقه‌ی آموزش‌وپرورش",
+        "ناحیه آموزش و پرورش",
+    )
+)
+
+
 def _is_relevant_column(name: str) -> bool:
+    """تعیین می‌کند آیا ستون ورودی برای گزارش مدرسه قابل‌توجه است یا خیر.
+
+    ورودی‌هایی که با نام‌های متادیتای مدرسه (مثل «نوع مدرسه»، «مدیر مدرسه»)
+    یا نسخه‌های پیشونددار آن‌ها (مثلاً «1حوزه در خود مدرسه») تطبیق داشته باشند
+    نادیده گرفته می‌شوند تا هشدار «ستون‌های ناشناخته» فقط برای موارد واقعی
+    صادر شود.
+
+    Args:
+        name: نام اصلی ستون در DataFrame ورودی.
+
+    Returns:
+        ``True`` اگر ستون مرتبط با مدرسه تشخیص داده شود و باید گزارش شود؛ در
+        غیر این صورت ``False``.
+    """
+
     normalized = normalize_fa(name)
+    normalized_without_prefix = normalize_fa(normalized.lstrip("0123456789"))
+    if normalized in _IGNORED_COLUMNS_NORMALIZED or normalized_without_prefix in _IGNORED_COLUMNS_NORMALIZED:
+        return False
     return any(token in normalized for token in ("مدرسه", "school", "اموزش", "آموزش"))
 
 

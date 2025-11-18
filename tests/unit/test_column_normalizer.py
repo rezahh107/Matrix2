@@ -1,3 +1,5 @@
+import warnings
+
 import pandas as pd
 
 from app.core.common.column_normalizer import ColumnNormalizationReport, normalize_input_columns
@@ -16,7 +18,9 @@ def test_normalize_input_columns_adds_aliases_and_cleans_values() -> None:
         }
     )
 
-    normalized, report = normalize_input_columns(df, kind="SchoolReport")
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("ignore", UserWarning)
+        normalized, report = normalize_input_columns(df, kind="SchoolReport")
 
     assert list(normalized["کد مدرسه"]) == [4001, 4002]
     assert list(normalized["school_code"]) == ["4001", "4002"]
@@ -65,3 +69,35 @@ def test_normalize_input_columns_collector_runs_even_when_report_disabled() -> N
 
     assert len(captured) == 1
     assert captured[0].aliases_added  # "school_code" + "school_name"
+
+
+def test_normalize_input_columns_ignores_known_metadata_columns() -> None:
+    df = pd.DataFrame(
+        {
+            "کد مدرسه": ["4001"],
+            "نوع مدرسه": ["نمونه"],
+            "منطقه‌ی آموزش‌وپرورش": ["ناحیه ۱"],
+            "1حوزه در خود مدرسه": ["الف"],
+            "حوزه در خود مدرسه2": ["ب"],
+            "نام کامل مدرسه": ["مدرسه نمونه"],
+            "مدیر مدرسه": ["مدیر"],
+        }
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        normalized, report = normalize_input_columns(df, kind="InspactorReport")
+
+    assert "کد مدرسه" in normalized.columns
+    assert not report.unmatched
+
+
+def test_normalize_input_columns_still_reports_unhandled_columns() -> None:
+    df = pd.DataFrame({"نام مدرسه جدید": ["x"], "کد مدرسه": ["5001"]})
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", UserWarning)
+        _, report = normalize_input_columns(df, kind="SchoolReport")
+
+    assert report.unmatched == ("نام مدرسه جدید",)
+    assert any("ستون‌های ناشناخته" in str(w.message) for w in caught)

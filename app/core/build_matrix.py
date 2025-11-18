@@ -1581,6 +1581,21 @@ def _explode_rows(
     remaining_col: str,
     school_code_col: str,
 ) -> pd.DataFrame:
+
+    def _build_school_code_series(values: pd.Series, index: pd.Index) -> pd.Series:
+        """تولید ستون «کد مدرسه» با dtype یکنواخت ``Int64`` بدون هشدارهای آیندهٔ pandas.
+
+        مثال::
+
+            >>> _build_school_code_series(pd.Series([None, "4001"]), pd.RangeIndex(2))
+            0       0
+            1    4001
+            dtype: Int64
+        """
+
+        numeric = pd.Series(values.map(_coerce_int_like), index=index, dtype="Int64")
+        return numeric.fillna(0).astype("Int64")
+
     if base.empty:
         return pd.DataFrame()
 
@@ -1630,12 +1645,7 @@ def _explode_rows(
     df["status_code"] = _normalize_demographic_key(status_series)
 
     blank_school_mask = df["school_list"].map(lambda v: pd.isna(v) or (isinstance(v, str) and not v.strip()))
-    school_codes = df["school_list"].map(_coerce_int_like)
-    df["کد مدرسه"] = (
-        pd.Series(school_codes, index=df.index)
-        .fillna(0)
-        .astype("Int64")
-    )
+    df["کد مدرسه"] = _build_school_code_series(df["school_list"], df.index)
     df.loc[blank_school_mask.fillna(True), "کد مدرسه"] = 0
     df["کد مدرسه"] = df["کد مدرسه"].astype("Int64")
     df["نام مدرسه"] = df["کد مدرسه"].astype(str).map(code_to_name_school).fillna("")

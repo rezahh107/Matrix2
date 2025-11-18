@@ -26,12 +26,29 @@ _SCHEMA_DEFINED_NAME = "__SELECTION_REASON_SCHEMA_HASH__"
 
 
 def _warn_fonts_not_embedded() -> None:
+    """هشدار می‌دهد که فونت‌های سفارشی در فایل Excel جاسازی نمی‌شوند.
+
+    این پیام تنها یک‌بار در هر پردازش صادر می‌شود تا کاربران برای اشتراک‌گذاری
+    امن، خروجی را به PDF تبدیل کنند.
+    """
+
     global _FONT_WARNING_EMITTED
     if not _FONT_WARNING_EMITTED:
         _LOGGER.warning(
             "فونت‌های سفارشی در فایل‌های Excel جاسازی نمی‌شوند؛ برای اشتراک‌گذاری امن، خروجی را به PDF تبدیل کنید."
         )
         _FONT_WARNING_EMITTED = True
+
+
+def _reset_font_warning_flag() -> None:
+    """بازنشانی پرچم هشدار فونت برای سناریوهای تست.
+
+    این تابع در محیط تولید استفاده نمی‌شود اما اجازه می‌دهد تست‌ها اطمینان
+    حاصل کنند که هشدار فونت فقط یک‌بار در هر جلسهٔ کاری صادر می‌شود.
+    """
+
+    global _FONT_WARNING_EMITTED
+    _FONT_WARNING_EMITTED = False
 
 
 def _format_xlsxwriter(
