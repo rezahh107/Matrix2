@@ -51,6 +51,11 @@ from app.core.common.domain import (
     school_code_norm,
 )
 from app.core.common.normalization import normalize_header, resolve_group_code
+from app.core.matrix.coverage import (
+    CoveragePolicyConfig,
+    compute_coverage_metrics,
+)
+from app.core.matrix.validation import build_coverage_validation_fields
 from app.core.policy_loader import PolicyConfig, load_policy
 
 # =============================================================================
@@ -1974,7 +1979,7 @@ def build_matrix(
     unmatched_schools_df = (
         pd.DataFrame(unmatched_schools).drop_duplicates() if unmatched_schools else pd.DataFrame()
     )
-    unseen_group_count = len(unseen_groups_df)
+    invalid_group_token_count = len(unseen_groups_df)
     unmatched_school_count = len(unmatched_schools_df)
 
     dedup_threshold = float(cfg.dedup_removed_ratio_threshold or 0.0)
@@ -1983,6 +1988,8 @@ def build_matrix(
     dedup_removed_rows = 0
     dedup_removed_ratio = 0.0
     dedup_threshold_exceeded = False
+    group_coverage_df = pd.DataFrame()
+    group_coverage_summary: dict[str, int] = {}
 
     if not matrix.empty:
         matrix = matrix.copy()
@@ -2076,6 +2083,71 @@ def build_matrix(
         _validate_alias_contract(matrix, cfg=cfg)
         _validate_school_code_contract(matrix, school_code_col=school_code_col)
 
+    coverage_policy = CoveragePolicyConfig(
+        denominator_mode=cfg.policy.coverage_options.denominator_mode,
+        require_student_presence=cfg.policy.coverage_options.require_student_presence,
+        include_blocked_candidates_in_denominator=cfg.policy.coverage_options.include_blocked_candidates_in_denominator,
+    )
+    coverage_metrics, group_coverage_df, group_coverage_summary = compute_coverage_metrics(
+        matrix_df=matrix,
+        base_df=base_df,
+        students_df=None,
+        join_keys=cfg.policy.join_keys,
+        policy=coverage_policy,
+        unmatched_school_count=unmatched_school_count,
+        invalid_group_tokens=invalid_group_token_count,
+        center_column=center_col,
+        finance_column=finance_col,
+        school_code_column=school_code_col,
+    )
+    group_coverage_summary = {
+        **group_coverage_summary,
+        "coverage_total_groups": coverage_metrics.total_groups,
+        "coverage_covered_groups": coverage_metrics.covered_groups,
+        "coverage_unseen_viable_groups": coverage_metrics.unseen_viable_groups,
+        "coverage_invalid_group_tokens": coverage_metrics.invalid_group_tokens,
+    }
+    _append_progress_row(
+        {
+            "step": "group_coverage_debug",
+            "pct": 92,
+            "message": (
+                "group coverage computed: "
+                f"total={group_coverage_summary.get('total_groups', 0)} "
+                f"covered={group_coverage_summary.get('covered_groups', 0)} "
+                f"candidate_only={group_coverage_summary.get('candidate_only_groups', 0)} "
+                f"blocked={group_coverage_summary.get('blocked_candidate_groups', 0)}"
+            ),
+            "groups_total": int(group_coverage_summary.get("total_groups", 0)),
+            "groups_covered": int(group_coverage_summary.get("covered_groups", 0)),
+            "groups_candidate_only": int(
+                group_coverage_summary.get("candidate_only_groups", 0)
+            ),
+            "groups_blocked_candidate": int(
+                group_coverage_summary.get("blocked_candidate_groups", 0)
+            ),
+            "groups_matrix_only": int(
+                group_coverage_summary.get("matrix_only_groups", 0)
+            ),
+            "coverage_total_groups": coverage_metrics.total_groups,
+            "coverage_covered_groups": coverage_metrics.covered_groups,
+            "coverage_unseen_viable_groups": coverage_metrics.unseen_viable_groups,
+            "coverage_invalid_group_tokens": coverage_metrics.invalid_group_tokens,
+        }
+    )
+    progress(
+        92,
+        (
+            "group coverage: "
+            f"total={group_coverage_summary.get('total_groups', 0)} "
+            f"covered={group_coverage_summary.get('covered_groups', 0)} "
+            f"candidate_only={group_coverage_summary.get('candidate_only_groups', 0)} "
+            f"blocked={group_coverage_summary.get('blocked_candidate_groups', 0)} "
+            f"coverage_total={coverage_metrics.total_groups} "
+            f"coverage_unseen={coverage_metrics.unseen_viable_groups}"
+        ),
+    )
+
     total_rows = len(matrix)
     matrix.insert(0, "counter", range(1, total_rows + 1))
 
@@ -2083,9 +2155,13 @@ def build_matrix(
     if len(matrix) != len(nodup):
         raise AssertionError("Duplicate rows before counter!")
 
-    total_candidates = total_rows + unmatched_school_count + unseen_group_count
-    coverage_ratio = total_rows / total_candidates if total_candidates else 1.0
+    coverage_ratio = coverage_metrics.coverage_ratio
     min_coverage_ratio = float(cfg.min_coverage_ratio or 0.0)
+    coverage_validation_fields = build_coverage_validation_fields(
+        metrics=coverage_metrics,
+        invalid_group_token_count=invalid_group_token_count,
+        coverage_threshold=min_coverage_ratio,
+    )
 
     duplicate_threshold = int(cfg.join_key_duplicate_threshold or 0)
     base_row = {
@@ -2102,17 +2178,23 @@ def build_matrix(
         "capacity_special_capacity_lost": capacity_metrics.total_special_capacity_lost,
         "capacity_percent_pool_kept": capacity_metrics.percent_pool_kept,
         "r0_skipped": 1 if r0_skipped else 0,
-        "unmatched_school_count": unmatched_school_count,
-        "unseen_group_count": unseen_group_count,
+        "group_coverage_total": int(group_coverage_summary.get("total_groups", 0)),
+        "group_coverage_covered": int(group_coverage_summary.get("covered_groups", 0)),
+        "group_coverage_candidate_only": int(
+            group_coverage_summary.get("candidate_only_groups", 0)
+        ),
+        "group_coverage_blocked": int(
+            group_coverage_summary.get("blocked_candidate_groups", 0)
+        ),
+        "group_coverage_matrix_only": int(
+            group_coverage_summary.get("matrix_only_groups", 0)
+        ),
         "school_lookup_mismatch_count": int(school_mismatch_count),
         "school_lookup_mismatch_refs": int(school_reference_count),
         "school_lookup_mismatch_ratio": float(school_mismatch_ratio),
         "school_lookup_mismatch_threshold": float(school_lookup_threshold),
         "join_key_duplicate_rows": int(len(duplicate_join_keys_df)),
         "join_key_duplicate_threshold": duplicate_threshold,
-        "coverage_ratio": coverage_ratio,
-        "coverage_threshold": min_coverage_ratio,
-        "total_candidates": total_candidates,
         "dedup_removed_rows": int(dedup_removed_rows),
         "dedup_removed_ratio": dedup_removed_ratio,
         "dedup_removed_threshold": dedup_threshold,
@@ -2122,6 +2204,7 @@ def build_matrix(
         "warning_message": pd.NA,
         "warning_payload": pd.NA,
     }
+    base_row.update(coverage_validation_fields)
     duplicate_warning_rows = _build_duplicate_warning_rows(
         duplicate_summary,
         join_keys=cfg.policy.join_keys,
@@ -2152,6 +2235,9 @@ def build_matrix(
 
     progress_log = pd.DataFrame(progress_rows)
     progress_log.attrs["column_normalization_reports"] = normalization_meta
+    progress_log.attrs["group_coverage"] = group_coverage_df
+    progress_log.attrs["group_coverage_summary"] = group_coverage_summary
+    progress_log.attrs["coverage_metrics"] = coverage_metrics
 
     removed_df = removed_mentors
     progress(90, "matrix assembly complete")
@@ -2159,13 +2245,15 @@ def build_matrix(
         95,
         (
             "coverage ratio "
-            f"{coverage_ratio:.1%} (rows={total_rows}"
-            f", unmatched_schools={unmatched_school_count}"
-            f", unseen_groups={unseen_group_count})"
+            f"{coverage_ratio:.1%} (covered_groups={coverage_metrics.covered_groups}"
+            f", total_groups={coverage_metrics.total_groups}"
+            f", unseen_groups={coverage_metrics.unseen_viable_groups}"
+            f", invalid_tokens={invalid_group_token_count}"
+            f", unmatched_schools={unmatched_school_count})"
         ),
     )
 
-    if total_candidates and coverage_ratio < min_coverage_ratio:
+    if coverage_metrics.total_groups and coverage_ratio < min_coverage_ratio:
         message = (
             "نسبت پوشش خروجی {coverage:.1%} کمتر از حداقل مجاز {minimum:.1%} است؛ "
             "unmatched_schools={unmatched}، unseen_groups={unseen}."
@@ -2173,7 +2261,7 @@ def build_matrix(
             coverage=coverage_ratio,
             minimum=min_coverage_ratio,
             unmatched=unmatched_school_count,
-            unseen=unseen_group_count,
+            unseen=coverage_metrics.unseen_viable_groups,
         )
         error = ValueError(message)
         setattr(error, "is_coverage_threshold_error", True)
