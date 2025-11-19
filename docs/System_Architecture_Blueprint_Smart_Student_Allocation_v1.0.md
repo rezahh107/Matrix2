@@ -90,7 +90,7 @@
 
 ### 5.2 MentorProfile و حاکمیت استخر پشتیبان‌ها
 - **Domain Model:** علاوه‌بر ظرفیت و نگاشت گروه‌های join-key، هر پشتیبان/مدیر دارای شئ «MentorProfile» در SSoT است که شامل `mentor_id`, مدیر مربوطه، ظرفیت اعلام‌شده، داده‌های وضعیت تخصیص (مثلاً `allocations_new`) و فیلد `mentor_status` می‌شود. وضعیت فعلاً دو مقدار اصلی `ACTIVE` و `FROZEN` دارد و می‌تواند با الگوهای محدودکنندهٔ `RESTRICTED_*` توسعه یابد.
- - **Governance & Storage:** MentorProfile در همان منبع Policy (مثلاً policy.json یا پروفایل مجزا زیر کنترل Infra) نگهداری می‌شود و هر تغییر UI/CLI باید با نسخه‌گذاری و audit log ذخیره شود. هیچ تغییری در استخر نباید صرفاً با حذف ردیف از InspactorReport اعمال شود؛ Infra موظف است چنین تغییراتی را rejected/flagged کند تا Policy-First نقض نشود و اجرای بعدی mentor_status را بدون وابستگی به Excel مصرف کند.
+- **Governance & Storage:** MentorProfile در همان منبع Policy (مثلاً policy.json یا پروفایل مجزا زیر کنترل Infra) نگهداری می‌شود و هر تغییر UI/CLI باید با نسخه‌گذاری و audit log ذخیره شود. هیچ تغییری در استخر نباید صرفاً با حذف ردیف از InspactorReport اعمال شود؛ Infra موظف است چنین تغییراتی را rejected/flagged کند تا Policy-First نقض نشود و اجرای بعدی mentor_status را بدون وابستگی به Excel مصرف کند.
 - **Infra Responsibilities:**
   - نگهداری و بارگذاری MentorProfile از policy.json یا فایل پروفایل مجزا (همچنان تحت SSoT). تغییرات UI را به همان منبع برمی‌گرداند.
   - ادغام پروفایل‌ها با دادهٔ InspactorReport پیش از تحویل به Core و تهیهٔ گزارش‌های تحلیلی (مثلاً پیشنهاد فریز بر اساس HistoryStore) بدون اعمال خودکار.
