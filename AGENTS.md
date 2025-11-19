@@ -62,6 +62,13 @@ Applies to the entire repository. Local AGENTS.md files do not exist; this docum
   6. **QAAgent / ReviewerAgent** تست‌های واحد/یکپارچه برای history/channel را اضافه یا به‌روزرسانی کرده و اجرای آن‌ها را قبل از merge الزامی می‌کند.
 - هیچ تغییر history/channel بدون عبور از این چرخه و تأیید SupervisorAgent و QAAgent اجازهٔ merge ندارد؛ Trace و summary باید ستون `allocation_channel` و شمارش dedupe را منعکس کنند.
 
+## MENTOR POOL GOVERNANCE (MentorProfile)
+- **Policy-First:** هر تغییری در استخر پشتیبان‌ها باید از طریق MentorProfile/mentor_status در Policy/SSoT اعمال شود (`ACTIVE`, `FROZEN`, و در صورت نیاز `RESTRICTED_*`). حذف ردیف از InspactorReport یا Excel تنها به‌عنوان workaround اضطراری مجاز است و باید در گزارش عملیات ثبت شود.
+- **Infra Ownership:** InfraAgent مسئول خواندن/نوشتن MentorProfile (policy.json یا فایل پروفایل مجزا) و تحویل DataFrame تمیز به Core است. تغییراتی که از UI/CLI می‌آیند باید در همین منبع ذخیره شوند و audit log versioned داشته باشند.
+- **Core Behavior:** CoderAgent باید مرحلهٔ BuildMentorPool را طوری نگه دارد که تنها پروفایل‌های `ACTIVE` وارد eligibility matrix شوند و وضعیت هر mentor در trace/summary ثبت شود. Core هرگز نام‌ها یا شناسه‌ها را هاردکد نمی‌کند و فقط روی mentor_status تصمیم می‌گیرد؛ Join Keys و ranking بدون تغییر باقی می‌مانند.
+- **UI/CLI Responsibilities:** UIAgent باید پنل «مدیریت استخر پشتیبان‌ها» را به MentorProfile متصل کند تا اپراتور بتواند وضعیت را مشاهده/تغییر دهد و پیشنهادهای HistoryStore را صرفاً به‌عنوان توصیه ببیند. هیچ تغییری نباید local-only باشد؛ هر دکمهٔ toggle باید موفقیت persistence را اعلام کند.
+- **QA Enforcement:** ReviewerAgent باید اطمینان دهد که تست‌های یکپارچه وجود دارد تا نشان دهند mentor_status=`FROZEN` حتی در صورت بازگشت در InspactorReport به استخر وارد نمی‌شود و trace دلیل سیاستی (مثلاً `FROZEN (Policy v1.0.3)`) را گزارش می‌کند.
+
 ## ALLOWED ACTIONS
 - Edit only files within assigned agent scope and layer boundaries.
 - Use pandas in Core for tabular logic; avoid inplace mutations; copy before transforms when needed.
