@@ -29,7 +29,12 @@ def derive_channel_map(students_df: pd.DataFrame, policy: PolicyConfig) -> pd.Se
     channel_strings = derive_channels_for_students(students_df, policy).map(
         lambda item: item.value
     )
-    return pd.Series(channel_strings.values, index=students_df["student_id"].values)
+    channel_series = pd.Series(
+        channel_strings.values, index=students_df["student_id"].values
+    )
+    if not channel_series.index.is_unique:
+        channel_series = channel_series[~channel_series.index.duplicated(keep="first")]
+    return channel_series
 
 
 __all__ = [

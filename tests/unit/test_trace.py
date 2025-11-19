@@ -12,6 +12,7 @@ from app.core.policy_loader import (
     GenderCode,
     GenderCodes,
     PolicyAliasRule,
+    MentorSchoolBindingPolicy,
     PolicyColumns,
     PolicyConfig,
     RankingRule,
@@ -83,6 +84,11 @@ def _policy_payload() -> dict[str, object]:
             "font_size": 8,
             "header_mode_internal": "en",
             "header_mode_write": "fa_en",
+        },
+        "mentor_school_binding": {
+            "global_mode": "global",
+            "restricted_mode": "restricted",
+            "empty_tokens": ["", "0", "۰"],
         },
     }
 
@@ -190,6 +196,11 @@ def test_build_trace_plan_rejects_noncanonical_order() -> None:
             capacity_current="تعداد داوطلبان تحت پوشش",
             capacity_special="تعداد تحت پوشش خاص",
             remaining_capacity="remaining_capacity",
+        ),
+        mentor_school_binding=MentorSchoolBindingPolicy(
+            global_mode="global",
+            restricted_mode="restricted",
+            empty_tokens=("", "0", "۰"),
         ),
         join_keys=[
             "کدرشته",

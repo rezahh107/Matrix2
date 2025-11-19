@@ -56,7 +56,11 @@ from app.core.matrix.coverage import (
     compute_coverage_metrics,
 )
 from app.core.qa.coverage_validation import build_coverage_validation_fields
-from app.core.policy_loader import PolicyConfig, load_policy
+from app.core.policy_loader import (
+    MentorSchoolBindingPolicy,
+    PolicyConfig,
+    load_policy,
+)
 from app.core.inspactor_schema_helper import (
     InspactorDefaultConfig,
     missing_inspactor_columns,
@@ -1073,6 +1077,17 @@ def capacity_gate(
 # =============================================================================
 # SCHOOL CODE EXTRACTION
 # =============================================================================
+
+
+@dataclass(frozen=True)
+class MentorSchoolBindingInfo:
+    """متادیتای وضعیت مدرسهٔ پشتیبان (global یا restricted)."""
+
+    codes: list[int]
+    has_school_constraint: bool
+    binding_mode: str
+
+
 def to_int_str_or_none(value: Any) -> str | None:
     parsed = _coerce_int_like(value)
     if parsed is None or parsed == 0:
@@ -1086,15 +1101,18 @@ def collect_school_codes_from_row(
     school_cols: list[str],
     *,
     domain_cfg: DomainBuildConfig,
-) -> list[int]:
-    """استخراج کدهای مدرسه با نرمال‌سازی دامنه‌ای."""
+    binding_policy: MentorSchoolBindingPolicy,
+) -> MentorSchoolBindingInfo:
+    """استخراج کدهای مدرسه و تعیین mode (global/restricted)."""
 
     normalized_codes: list[int] = []
     seen: set[int] = set()
+    has_reference = False
     for col in school_cols:
         raw = r.get(col)
-        if raw is None:
+        if binding_policy.is_empty_value(raw):
             continue
+        has_reference = True
         candidate = to_int_str_or_none(raw)
         if candidate is None:
             candidate = name_to_code.get(normalize_fa(raw), None)
@@ -1102,7 +1120,11 @@ def collect_school_codes_from_row(
         if normalized > 0 and normalized not in seen:
             normalized_codes.append(normalized)
             seen.add(normalized)
-    return normalized_codes
+    return MentorSchoolBindingInfo(
+        codes=normalized_codes,
+        has_school_constraint=has_reference,
+        binding_mode=binding_policy.binding_mode(has_reference),
+    )
 
 # =============================================================================
 # PROGRESS (optional)
@@ -1281,6 +1303,7 @@ def _prepare_base_rows(
     school_count_col = cfg.school_count_column or COL_SCHOOL_COUNT
     capacity_current_col = cfg.capacity_current_column or CAPACITY_CURRENT_COL
     capacity_special_col = cfg.capacity_special_column or CAPACITY_SPECIAL_COL
+    binding_policy = cfg.policy.mentor_school_binding
 
     for row in insp.to_dict(orient="records"):
         mentor_id_raw = row.get(COL_MENTOR_ID, "")
@@ -1297,12 +1320,15 @@ def _prepare_base_rows(
         manager_name = str(row.get(COL_MANAGER_NAME, "")).strip()
         postal_raw = row.get(postal_col, "")
 
-        school_codes = collect_school_codes_from_row(
+        school_binding = collect_school_codes_from_row(
             pd.Series(row),
             school_name_to_code,
             school_cols,
             domain_cfg=domain_cfg,
+            binding_policy=binding_policy,
         )
+        school_codes = school_binding.codes
+        has_school_constraint = school_binding.has_school_constraint
         school_count = safe_int_value(row.get(COL_SCHOOL_COUNT, 0), default=0)
 
         covered_now, special_limit, remaining_capacity = normalize_capacity_values(
@@ -1363,6 +1389,7 @@ def _prepare_base_rows(
             postal_code=postal_raw,
             school_codes=school_codes,
             cfg=domain_cfg,
+            has_school_constraint=has_school_constraint,
         )
 
         alias_normal_raw = compute_alias(MentorType.NORMAL, postal_raw, mentor_id, cfg=domain_cfg)
@@ -1389,8 +1416,18 @@ def _prepare_base_rows(
             "statuses_school": school_statuses,
             "alias_normal": alias_normal,
             "alias_school": alias_school,
-            "can_normal": mentor_mode in (MentorType.NORMAL, MentorType.DUAL) and bool(alias_normal),
-            "can_school": mentor_mode in (MentorType.SCHOOL, MentorType.DUAL) and has_school_codes,
+            "mentor_school_binding_mode": school_binding.binding_mode,
+            "has_school_constraint": has_school_constraint,
+            "can_normal": (
+                not has_school_constraint
+                and mentor_mode in (MentorType.NORMAL, MentorType.DUAL)
+                and bool(alias_normal)
+            ),
+            "can_school": (
+                has_school_constraint
+                and mentor_mode in (MentorType.SCHOOL, MentorType.DUAL)
+                and has_school_codes
+            ),
             "capacity_current": covered_now,
             "capacity_special": special_limit,
             "capacity_remaining": remaining_capacity,
@@ -1415,12 +1452,28 @@ def _detect_school_lookup_mismatches(
     school_columns: Sequence[str],
     code_to_name_school: Mapping[str, str],
     school_name_to_code: Mapping[str, str],
+    binding_policy: MentorSchoolBindingPolicy,
 ) -> tuple[pd.DataFrame, int, int]:
     """بررسی مقادیر ستون‌های نام مدرسه و ثبت مقادیر ناشناخته."""
 
     columns = [col for col in school_columns if col in insp.columns]
     if not columns:
-        return pd.DataFrame(columns=["row_index", "پشتیبان", "مدیر", "reason", "school_column", "school_value"]), 0, 0
+        return (
+            pd.DataFrame(
+                columns=[
+                    "row_index",
+                    "پشتیبان",
+                    "مدیر",
+                    "reason",
+                    "school_column",
+                    "school_value",
+                    "raw_school_value",
+                    "source_index",
+                ]
+            ),
+            0,
+            0,
+        )
 
     row_positions = {idx: pos + 1 for pos, idx in enumerate(insp.index)}
     issues: list[dict[str, object]] = []
@@ -1428,19 +1481,20 @@ def _detect_school_lookup_mismatches(
     for column in columns:
         series = insp[column]
         for idx, raw_value in series.items():
-            if pd.isna(raw_value):
-                continue
-            text = str(raw_value).strip()
-            if not text:
+            if binding_policy.is_empty_value(raw_value):
                 continue
             total_refs += 1
             reason: str | None = None
+            text = str(raw_value).strip()
             candidate = to_int_str_or_none(text)
+            normalized_display = text
             if candidate is not None:
+                normalized_display = candidate
                 if candidate not in code_to_name_school:
                     reason = f"unknown school code ({text})"
             else:
                 normalized = normalize_fa(text)
+                normalized_display = normalized or text
                 if normalized and normalized not in school_name_to_code:
                     reason = f"unknown school name ({text})"
             if reason is None:
@@ -1454,7 +1508,9 @@ def _detect_school_lookup_mismatches(
                     "مدیر": manager,
                     "reason": reason,
                     "school_column": column,
-                    "school_value": text,
+                    "school_value": normalized_display,
+                    "raw_school_value": text,
+                    "source_index": idx,
                 }
             )
 
@@ -1698,6 +1754,22 @@ def _explode_rows(
         ],
         errors="ignore",
     )
+
+    binding_policy = cfg.policy.mentor_school_binding
+    if "mentor_school_binding_mode" not in df.columns:
+        df["mentor_school_binding_mode"] = binding_policy.global_mode
+    else:
+        df["mentor_school_binding_mode"] = (
+            df["mentor_school_binding_mode"]
+            .astype("string")
+            .fillna(binding_policy.global_mode)
+        )
+    if "has_school_constraint" not in df.columns:
+        df["has_school_constraint"] = False
+    else:
+        df["has_school_constraint"] = (
+            df["has_school_constraint"].fillna(False).astype(bool)
+        )
     ordered_columns = [
         "جایگزین",
         "پشتیبان",
@@ -1713,6 +1785,8 @@ def _explode_rows(
         school_code_display,
         "نام مدرسه",
         "عادی مدرسه",
+        "mentor_school_binding_mode",
+        "has_school_constraint",
         "جنسیت2",
         "دانش آموز فارغ2",
         "مرکز گلستان صدرا3",
@@ -1891,6 +1965,7 @@ def build_matrix(
             school_columns=school_name_columns,
             code_to_name_school=code_to_name_school,
             school_name_to_code=school_name_to_code,
+            binding_policy=cfg.policy.mentor_school_binding,
         )
     )
     school_mismatch_ratio = (
@@ -1941,10 +2016,31 @@ def build_matrix(
         included_col=included_col,
         group_cols=group_cols,
     )
+    invalid_school_indices: set[Any] = set()
     if school_lookup_issues.empty:
-        school_lookup_invalid = pd.DataFrame(columns=invalid_mentors_df.columns)
+        school_lookup_invalid = pd.DataFrame(
+            columns=[
+                "row_index",
+                "پشتیبان",
+                "مدیر",
+                "reason",
+                "school_column",
+                "school_value",
+                "raw_school_value",
+            ]
+        )
     else:
-        school_lookup_invalid = school_lookup_issues
+        if "source_index" in school_lookup_issues.columns:
+            invalid_school_indices = set(
+                school_lookup_issues["source_index"].dropna().tolist()
+            )
+            school_lookup_invalid = school_lookup_issues.drop(
+                columns=["source_index"], errors="ignore"
+            )
+        else:
+            school_lookup_invalid = school_lookup_issues
+    if invalid_school_indices:
+        insp_valid = insp_valid.drop(index=list(invalid_school_indices), errors="ignore")
     if invalid_mentors_df.empty:
         invalid_mentors_df = school_lookup_invalid.copy()
     elif not school_lookup_invalid.empty:
@@ -1981,6 +2077,17 @@ def build_matrix(
         gender_col=gender_col,
         included_col=included_col,
     )
+    if not school_lookup_invalid.empty and "raw_school_value" in school_lookup_invalid.columns:
+        derived_unmatched = [
+            {
+                "raw_school": str(row.get("raw_school_value", "")),
+                "supporter": row.get("پشتیبان", ""),
+                "manager": row.get("مدیر", ""),
+            }
+            for row in school_lookup_invalid.to_dict("records")
+        ]
+        if derived_unmatched:
+            unmatched_schools.extend(derived_unmatched)
 
     progress(55, "assembling matrix variants")
     cap_current_col = cfg.capacity_current_column or CAPACITY_CURRENT_COL
@@ -2036,6 +2143,8 @@ def build_matrix(
                 finance_col,
                 school_code_col,
                 "عادی مدرسه",
+                "mentor_school_binding_mode",
+                "has_school_constraint",
                 "نام مدرسه",
                 "جنسیت2",
                 "دانش آموز فارغ2",
