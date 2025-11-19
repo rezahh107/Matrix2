@@ -10,9 +10,12 @@ from typing import Iterable, Literal, Mapping, Sequence
 
 import pandas as pd
 
+from app.core.allocation.engine import enrich_summary_with_history
+from app.core.allocation.history_metrics import METRIC_COLUMNS, compute_history_metrics
 from app.core.common.columns import CANON_EN_TO_FA, canonicalize_headers, ensure_series
 from app.core.common.normalization import normalize_fa
 from app.core.pipeline import enrich_student_contacts
+from app.core.policy_loader import PolicyConfig
 from app.infra.excel.common import (
     attach_contact_columns,
     enforce_text_columns,
@@ -344,13 +347,52 @@ def build_sabt_export_frame(
     return export_df
 
 
-def collect_trace_debug_sheets(trace_df: pd.DataFrame | None) -> dict[str, pd.DataFrame]:
+def _empty_history_metrics_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=METRIC_COLUMNS)
+
+
+def _build_history_metrics_sheet(
+    summary_df: pd.DataFrame | None,
+    *,
+    students_df: pd.DataFrame | None,
+    history_info_df: pd.DataFrame | None,
+    policy: PolicyConfig | None,
+) -> pd.DataFrame:
+    if summary_df is None or summary_df.empty:
+        return _empty_history_metrics_df()
+
+    enriched_summary = summary_df
+    if students_df is not None and policy is not None:
+        enriched_summary = enrich_summary_with_history(
+            summary_df,
+            students_df=students_df,
+            history_info_df=history_info_df,
+            policy=policy,
+        )
+    try:
+        return compute_history_metrics(enriched_summary)
+    except KeyError:
+        return _empty_history_metrics_df()
+
+
+def collect_trace_debug_sheets(
+    trace_df: pd.DataFrame | None,
+    *,
+    students_df: pd.DataFrame | None = None,
+    history_info_df: pd.DataFrame | None = None,
+    policy: PolicyConfig | None = None,
+) -> dict[str, pd.DataFrame]:
     """ساخت شیت‌های تشخیصی از تریس برای خروجی Excel بدون تغییر رفتار اصلی.
 
     اگر ``trace_df.attrs`` شامل ``summary_df``، ``unallocated_summary`` یا
     ``policy_violations`` باشد، آن‌ها را در یک دیکشنری با کلیدهای ایمن برمی‌گرداند
     تا توسط :func:`write_xlsx_atomic` روی شیت‌های مجزا (summary_df،
     unallocated_summary، policy_violations، FinalStatus_counts) نوشته شوند.
+    زمانی که ``students_df``، ``history_info_df`` و ``policy`` مهیا باشند، این تابع
+    خلاصهٔ تاریخچه را با :func:`enrich_summary_with_history` تکمیل کرده و شیت
+    «HistoryMetrics» را با استفاده از :func:`compute_history_metrics` تولید می‌کند.
+    در صورت فقدان دادهٔ تاریخچه، یک شیت خالی با سربرگ‌های استاندارد بازگردانده
+    می‌شود تا مسیر تشخیصی پایدار بماند.
     """
 
     if trace_df is None:
@@ -358,6 +400,7 @@ def collect_trace_debug_sheets(trace_df: pd.DataFrame | None) -> dict[str, pd.Da
 
     sheets: dict[str, pd.DataFrame] = {}
     summary_df = trace_df.attrs.get("summary_df")
+    history_metrics_df = _empty_history_metrics_df()
     if isinstance(summary_df, pd.DataFrame) and not summary_df.empty:
         sheets["summary_df"] = summary_df.copy()
         value_counts = trace_df.attrs.get("final_status_counts")
@@ -365,6 +408,12 @@ def collect_trace_debug_sheets(trace_df: pd.DataFrame | None) -> dict[str, pd.Da
             counts_df = value_counts.reset_index()
             counts_df.columns = ["final_status", "count"]
             sheets["FinalStatus_counts"] = counts_df
+        history_metrics_df = _build_history_metrics_sheet(
+            summary_df,
+            students_df=students_df,
+            history_info_df=history_info_df,
+            policy=policy,
+        )
 
     unallocated_summary = trace_df.attrs.get("unallocated_summary")
     if isinstance(unallocated_summary, pd.DataFrame) and not unallocated_summary.empty:
@@ -373,6 +422,8 @@ def collect_trace_debug_sheets(trace_df: pd.DataFrame | None) -> dict[str, pd.Da
     policy_violations = trace_df.attrs.get("policy_violations")
     if isinstance(policy_violations, pd.DataFrame) and not policy_violations.empty:
         sheets["policy_violations"] = policy_violations.copy()
+
+    sheets["HistoryMetrics"] = history_metrics_df
 
     return sheets
 

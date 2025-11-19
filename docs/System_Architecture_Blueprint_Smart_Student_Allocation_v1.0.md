@@ -42,23 +42,24 @@
 
 ## 4. Data Flow (Intake → Matrix → Allocation → Export → UI → Logs)
 ```
-[WordPress/Gravity Forms] --(Infra intake adapter)--> [Normalized DataFrames]
-[HistoryStore] ------------------------------^              |
-[Excel Inputs] ----------/                                  | (policy + history snapshot)
-                                                    (Infra passes policy + data)
-                                                       |
-                                                   [Core]
+[WordPress/Gravity Forms] --(Infra intake adapter)--\
+[Excel Inputs] --------------------------------------> [Normalized DataFrames]
+[HistoryStore] --(Infra reads snapshot)-------------/      |
+                                                           |
+                                              (Infra passes policy + data + history)
+                                                           |
+                                                       [Core]
   Normalize → Validate → Build Eligibility Matrix → Load history → `dedupe_by_national_id` → derive `allocation_channel` → Allocate → Trace → QA Checks
-                                                       |
-                                        results/traces DataFrames (pure)
-                                                       |
-                                                 [Infra]
+                                                           |
+                                            results/traces DataFrames (pure)
+                                                           |
+                                                     [Infra]
    write_xlsx_atomic → ImportToSabt exporter → filesystem artifacts/logs
-                                                       |
-                                                     [UI]
+                                                           |
+                                                         [UI]
      display progress/logs → operator actions → re-run/inspect
-                                                       |
-                                               [Agents Layer]
+                                                           |
+                                                   [Agents Layer]
      governance, QA checklists, version alignment, CI hooks
 ```
 
@@ -88,20 +89,19 @@
 - **`dedupe_by_national_id` (Core):** تابعی خالص/برداری که ورودی دانش‌آموزان را با تاریخچه مقایسه می‌کند، آن‌ها را به `allocated_before` و `new_candidates` تقسیم می‌نماید و `dedupe_reason` را به trace اضافه می‌کند. نرمال‌سازی اعداد فارسی/لاتین و حذف نویز (dash، فاصله) بخشی از همین تابع است.
 - **AllocationChannel (Core + PolicyConfig):** کانال SCHOOL / GOLESTAN / SADRA / GENERIC به کمک `AllocationChannelConfig` تعیین می‌شود و به خروجی‌های trace/export افزوده می‌گردد تا UI/گزارش‌ها بتوانند جریان‌های مدرسه‌ای، مراکز گلستان/صدرا و مسیر GENERIC را جداگانه پایش کنند. هیچ شناسه‌ای در Core هاردکد نمی‌شود؛ همهٔ قواعد از PolicyConfig تغذیه می‌شوند.
 
-### 5.2 MentorProfile و حاکمیت استخر پشتیبان‌ها
-- **Domain Model:** علاوه‌بر ظرفیت و نگاشت گروه‌های join-key، هر پشتیبان/مدیر دارای شئ «MentorProfile» در SSoT است که شامل `mentor_id`, مدیر مربوطه، ظرفیت اعلام‌شده، داده‌های وضعیت تخصیص (مثلاً `allocations_new`) و فیلد `mentor_status` می‌شود. وضعیت فعلاً دو مقدار اصلی `ACTIVE` و `FROZEN` دارد و می‌تواند با الگوهای محدودکنندهٔ `RESTRICTED_*` توسعه یابد.
-- **Governance & Storage:** MentorProfile در همان منبع Policy (مثلاً policy.json یا پروفایل مجزا زیر کنترل Infra) نگهداری می‌شود و هر تغییر UI/CLI باید با نسخه‌گذاری و audit log ذخیره شود. هیچ تغییری در استخر نباید صرفاً با حذف ردیف از InspactorReport اعمال شود؛
-  Infra موظف است چنین تغییراتی را rejected/flagged کند تا Policy-First نقض نشود و اجرای بعدی mentor_status را بدون وابستگی به Excel مصرف کند.
-- **Infra Responsibilities:**
+### 5.2 MentorProfile و حاکمیت استخر پشتیبان‌ها (الزامات برنامه‌ریزی‌شده)
+- **Domain Model (Planned):** علاوه‌بر ظرفیت و نگاشت گروه‌های join-key، هر پشتیبان/مدیر دارای شئ «MentorProfile» در SSoT خواهد بود که شامل `mentor_id`, مدیر مربوطه، ظرفیت اعلام‌شده، داده‌های وضعیت تخصیص و معیارهای رتبه‌بندی (مثلاً `allocations_new`) و فیلد `mentor_status` می‌شود. وضعیت فعلاً دو مقدار اصلی `ACTIVE` و `FROZEN` دارد و می‌تواند با الگوهای محدودکنندهٔ `RESTRICTED_*` توسعه یابد.
+- **Governance & Storage (Planned):** MentorProfile در همان منبع Policy (مثلاً policy.json یا پروفایل مجزا زیر کنترل Infra) نگهداری می‌شود و هر تغییر UI/CLI باید با نسخه‌گذاری و audit log ذخیره شود. هیچ تغییری در استخر نباید صرفاً با حذف ردیف از InspactorReport اعمال شود؛ Infra موظف است چنین تغییراتی را rejected/flagged کند تا Policy-First نقض نشود.
+- **Infra Responsibilities (Planned):**
   - نگهداری و بارگذاری MentorProfile از policy.json یا فایل پروفایل مجزا (همچنان تحت SSoT). تغییرات UI را به همان منبع برمی‌گرداند.
   - ادغام پروفایل‌ها با دادهٔ InspactorReport پیش از تحویل به Core و تهیهٔ گزارش‌های تحلیلی (مثلاً پیشنهاد فریز بر اساس HistoryStore) بدون اعمال خودکار.
-- **Core Responsibilities:**
+- **Core Responsibilities (Planned):**
   - مرحلهٔ صریح «BuildMentorPool» قبل از ساخت ماتریس را اجرا می‌کند؛ فقط پروفایل‌های `ACTIVE` وارد می‌شوند و پروفایل‌های `FROZEN` ظرفیت صفر تلقی شده و حذف می‌شوند.
   - محدودیت‌های `RESTRICTED_*` در صورت تعریف، به‌عنوان قید eligibility هنگام ساخت ماتریس اعمال می‌شوند نه به‌عنوان استثناء رتبه‌بندی؛ ۶ کلید join و سیاست رتبه‌بندی ثابت می‌مانند.
-- **UI Responsibilities:**
+- **UI Responsibilities (Planned):**
   - یک پنل PySide6/CLI برای «مدیریت استخر پشتیبان‌ها» نمایش می‌دهد که در آن اپراتور می‌تواند وضعیت mentor_status را مشاهده و میان `ACTIVE`/`FROZEN` (و حالت‌های محدود) جابه‌جا کند.
   - این پنل همچنین پیشنهادهای HistoryStore (مثلاً «این پشتیبان در سال جاری سهم خود را پر کرده است») را نشان می‌دهد؛ تصمیم نهایی و اعمال‌شدن فقط زمانی معتبر است که تغییر در SSoT ذخیره شود و در خروجی trace/گزارش عملیات یک رویداد «status_changed» ثبت شود.
-- **HistoryStore & AllocationChannel Interaction:** HistoryStore صرفاً ورودی تحلیلی/پیشنهادی است و خودکار کسی را فریز نمی‌کند؛ AllocationChannel جریان دانش‌آموز را تعیین می‌کند و هیچ‌گاه mentor_status را override نمی‌کند. Core تنها به MentorProfile/Policy برای تصمیم ورود یا خروج از استخر تکیه دارد و در نتیجه رفتار سیستم قابل بازتولید باقی می‌ماند و ۶ کلید Join و سیاست رتبه‌بندی تغییر نمی‌کنند.
+- **HistoryStore & AllocationChannel Interaction (Planned):** HistoryStore صرفاً ورودی تحلیلی/پیشنهادی است و خودکار کسی را فریز نمی‌کند؛ AllocationChannel جریان دانش‌آموز را تعیین می‌کند و هیچ‌گاه mentor_status را override نمی‌کند. Core تنها به MentorProfile/Policy برای تصمیم ورود یا خروج از استخر تکیه دارد و در نتیجه رفتار سیستم قابل بازتولید باقی می‌ماند. این رفتارها هنوز در کد مستقر نشده‌اند و به‌عنوان الزام آینده مستند شده‌اند تا از سردرگمی QA/توسعه جلوگیری شود.
 
 ## 6. Dependency Graph (ASCII)
 ```
@@ -127,7 +127,7 @@ External (WP, Excel, FS) --> Infra --> Core
 4. **History Snapshot & Dedupe**: Infra loads HistoryStore snapshot; Core runs `dedupe_by_national_id` to split `allocated_before` و `new_candidates`, ثبت `dedupe_reason` در trace، و آماده‌سازی ورودی کانال‌ها.
 5. **Channel Derivation & Allocation**: Core با `AllocationChannelConfig` مقدار `allocation_channel` را به ازای هر دانش‌آموز تعیین می‌کند و سپس همان رتبه‌بندی ثابت (`occupancy_ratio` → `allocations_new` → `mentor_id`) را اجرا می‌کند؛ trace/summary کانال‌محور تولید می‌شود.
 6. **QA/Validation**: Core runs invariant checks; Infra logs results; Agents/CI apply QA checklist.
-7. **Export & History Update**: Infra writes Excel artifacts via `write_xlsx_atomic`; converts to ImportToSabt; sanitizes sheet names; version stamps outputs؛ رکوردهای موفق جدید به HistoryStore اضافه می‌شود.
+7. **Export & History Update**: Infra writes Excel artifacts via `write_xlsx_atomic`; converts to ImportToSabt; sanitizes sheet names; version stamps outputs؛ رکوردهای موفق جدید به HistoryStore به‌شکل اتمیک/مقاوم اضافه می‌شود (هم‌راستا با FR-EXPORT-01).
 8. **UI Orchestration**: PySide6 shell triggers pipeline, shows progress via injected callback, surfaces traces/logs; optional CLI mirrors flow.
 9. **Audit & Governance**: Agents validate outputs, ensure AGENTS.md compliance, update meta reports; SupervisorAgent checks version drift؛ trace/کانال/تاریخچه برای تحلیل بعدی بایگانی می‌شود.
 
