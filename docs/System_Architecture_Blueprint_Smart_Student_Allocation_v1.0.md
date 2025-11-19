@@ -42,23 +42,24 @@
 
 ## 4. Data Flow (Intake → Matrix → Allocation → Export → UI → Logs)
 ```
-[WordPress/Gravity Forms] --(Infra intake adapter)--> [Normalized DataFrames]
-[HistoryStore] ------------------------------^              |
-[Excel Inputs] ----------/                                  | (policy + history snapshot)
-                                                    (Infra passes policy + data)
-                                                       |
-                                                   [Core]
+[WordPress/Gravity Forms] --(Infra intake adapter)--\
+[Excel Inputs] --------------------------------------> [Normalized DataFrames]
+[HistoryStore] --(Infra reads snapshot)-------------/      |
+                                                           |
+                                              (Infra passes policy + data + history)
+                                                           |
+                                                       [Core]
   Normalize → Validate → Build Eligibility Matrix → Load history → `dedupe_by_national_id` → derive `allocation_channel` → Allocate → Trace → QA Checks
-                                                       |
-                                        results/traces DataFrames (pure)
-                                                       |
-                                                 [Infra]
+                                                           |
+                                            results/traces DataFrames (pure)
+                                                           |
+                                                     [Infra]
    write_xlsx_atomic → ImportToSabt exporter → filesystem artifacts/logs
-                                                       |
-                                                     [UI]
+                                                           |
+                                                         [UI]
      display progress/logs → operator actions → re-run/inspect
-                                                       |
-                                               [Agents Layer]
+                                                           |
+                                                   [Agents Layer]
      governance, QA checklists, version alignment, CI hooks
 ```
 
@@ -126,7 +127,7 @@ External (WP, Excel, FS) --> Infra --> Core
 4. **History Snapshot & Dedupe**: Infra loads HistoryStore snapshot; Core runs `dedupe_by_national_id` to split `allocated_before` و `new_candidates`, ثبت `dedupe_reason` در trace، و آماده‌سازی ورودی کانال‌ها.
 5. **Channel Derivation & Allocation**: Core با `AllocationChannelConfig` مقدار `allocation_channel` را به ازای هر دانش‌آموز تعیین می‌کند و سپس همان رتبه‌بندی ثابت (`occupancy_ratio` → `allocations_new` → `mentor_id`) را اجرا می‌کند؛ trace/summary کانال‌محور تولید می‌شود.
 6. **QA/Validation**: Core runs invariant checks; Infra logs results; Agents/CI apply QA checklist.
-7. **Export & History Update**: Infra writes Excel artifacts via `write_xlsx_atomic`; converts to ImportToSabt; sanitizes sheet names; version stamps outputs؛ رکوردهای موفق جدید به HistoryStore اضافه می‌شود.
+7. **Export & History Update**: Infra writes Excel artifacts via `write_xlsx_atomic`; converts to ImportToSabt; sanitizes sheet names; version stamps outputs؛ رکوردهای موفق جدید به HistoryStore به‌شکل اتمیک/مقاوم اضافه می‌شود (هم‌راستا با FR-EXPORT-01).
 8. **UI Orchestration**: PySide6 shell triggers pipeline, shows progress via injected callback, surfaces traces/logs; optional CLI mirrors flow.
 9. **Audit & Governance**: Agents validate outputs, ensure AGENTS.md compliance, update meta reports; SupervisorAgent checks version drift؛ trace/کانال/تاریخچه برای تحلیل بعدی بایگانی می‌شود.
 
