@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
-from typing import Literal
+from typing import Literal, cast
 
 from app.core.policy.config import AllocationChannelConfig
 from app.core.policy.loader import compute_schema_hash, validate_policy_columns
@@ -1038,9 +1038,7 @@ def _version_gate(
 
 
 def _to_config(data: Mapping[str, object]) -> PolicyConfig:
-    allocation_channels_obj = data.get("allocation_channels")
-    if not isinstance(allocation_channels_obj, AllocationChannelConfig):
-        allocation_channels_obj = AllocationChannelConfig.empty()
+    allocation_channels_obj = cast(AllocationChannelConfig, data["allocation_channels"])
 
     return PolicyConfig(
         version=str(data["version"]),
