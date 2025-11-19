@@ -42,5 +42,9 @@ def test_allocation_capacity_violation() -> None:
     )
 
     assert not result.passed
-    assert result.violations[0].rule_id == "QA_RULE_ALLOC_01"
+    assert len(result.violations) == 2
+
+    violation_messages = {v.message for v in result.violations}
+    assert "تخصیص بیش از ظرفیت منتور" in violation_messages
+    assert "نسبت اشغال با فرمول ظرفیت هم‌خوان نیست" in violation_messages
 
