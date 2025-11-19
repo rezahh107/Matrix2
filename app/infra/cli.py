@@ -37,6 +37,7 @@ from app.core.canonical_frames import (
 )
 from app.core.build_matrix import BuildConfig, build_matrix
 from app.core.policy_loader import PolicyConfig, load_policy
+from app.core.qa.invariants import run_all_invariants
 from app.infra.excel_writer import write_selection_reasons_sheet
 from app.infra.excel.export_allocations import (
     DEFAULT_SABT_PROFILE_PATH,
@@ -1079,6 +1080,21 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
     normalization_reports = progress_log.attrs.get("column_normalization_reports")
     if normalization_reports:
         meta["column_normalization_reports"] = normalization_reports
+
+    progress(72, "qa invariants")
+    qa_report = run_all_invariants(
+        policy=policy,
+        matrix=matrix,
+        inspactor=insp_df,
+        invalid_mentors=invalid_mentors,
+    )
+    if not qa_report.passed:
+        failed_rules = {violation.rule_id for violation in qa_report.violations}
+        detail = "; ".join(f"{v.rule_id}: {v.message}" for v in qa_report.violations)
+        raise ValueError(
+            "QA invariants failed: "
+            f"rules={sorted(failed_rules)} details={detail or 'n/a'}"
+        )
     sheets = {
         "matrix": matrix,
         "validation": validation,
@@ -1286,6 +1302,20 @@ def _allocate_and_write(
 
     if sabt_allocations_df is not None:
         sabt_allocations_df = _ensure_valid_dataframe(sabt_allocations_df, "allocations_sabt")
+
+    qa_report = run_all_invariants(
+        policy=policy,
+        allocation=allocations_df,
+        allocation_summary=updated_pool_df,
+        student_report=None,
+    )
+    if not qa_report.passed:
+        failed_rules = {violation.rule_id for violation in qa_report.violations}
+        detail = "; ".join(f"{v.rule_id}: {v.message}" for v in qa_report.violations)
+        raise ValueError(
+            "QA invariants failed: "
+            f"rules={sorted(failed_rules)} details={detail or 'n/a'}"
+        )
 
     # تبدیل نهایی به فرمت‌های قابل نوشتن در Excel
     allocations_df = _make_excel_safe(allocations_df)

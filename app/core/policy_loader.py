@@ -249,6 +249,44 @@ class MatrixCoverageOptions:
 
 
 @dataclass(frozen=True)
+class MentorSchoolBindingPolicy:
+    """سیاست اتصال مدرسه به پشتیبان برای تعیین global/restricted.
+
+    Attributes
+    ----------
+    global_mode:
+        مقدار متنی برای ردیف‌های بدون الزام مدرسه‌ای.
+    restricted_mode:
+        مقدار متنی برای ردیف‌های مقید به مدرسه.
+    empty_tokens:
+        مقادیر خالی/بی‌اثر که به‌عنوان نبود مدرسه تفسیر می‌شوند.
+    """
+
+    global_mode: str = "global"
+    restricted_mode: str = "restricted"
+    empty_tokens: tuple[str, ...] = ("", "0", "-", "—", "_", "nan", "NaN")
+
+    @property
+    def empty_placeholders(self) -> tuple[str, ...]:
+        """سازگاری عقبرو برای نام قدیمی فیلد مقادیر تهی."""
+
+        return self.empty_tokens
+
+    def binding_mode(self, has_reference: bool) -> str:
+        """حالت اتصال را بر اساس وجود مرجع مدرسه برمی‌گرداند."""
+
+        return self.restricted_mode if has_reference else self.global_mode
+
+    def is_empty_value(self, value: object) -> bool:
+        """آیا مقدار ورودی نمایانگر نبود مدرسه است؟"""
+
+        if value is None:
+            return True
+        text = str(value).strip()
+        return text in self.empty_tokens
+
+
+@dataclass(frozen=True)
 class PolicyConfig:
     """ساختار دادهٔ فقط‌خواندنی برای نگهداری سیاست بارگذاری‌شده."""
 
@@ -287,6 +325,9 @@ class PolicyConfig:
             require_student_presence=False,
             include_blocked_candidates_in_denominator=False,
         )
+    )
+    mentor_school_binding: MentorSchoolBindingPolicy = field(
+        default_factory=MentorSchoolBindingPolicy
     )
 
     @property
@@ -1095,6 +1136,9 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
                 data["coverage_options"]["include_blocked_candidates_in_denominator"]
             ),
         ),
+        mentor_school_binding=_to_mentor_school_binding(
+            data.get("mentor_school_binding", {})
+        ),
         allocation_channels=allocation_channels_obj,
     )
 
@@ -1137,6 +1181,15 @@ def _to_center_management_config(data: Mapping[str, object]) -> CenterManagement
         strict_manager_validation=bool(data.get("strict_manager_validation", False)),
         default_center_for_invalid=fallback,
         school_student_column=str(data.get("school_student_column", "is_school_student")),
+    )
+
+
+def _to_mentor_school_binding(data: Mapping[str, object]) -> MentorSchoolBindingPolicy:
+    tokens = data.get("empty_tokens", data.get("empty_placeholders", ("", "0", "-", "—", "_", "nan", "NaN")))
+    return MentorSchoolBindingPolicy(
+        global_mode=str(data.get("global_mode", "global")),
+        restricted_mode=str(data.get("restricted_mode", "restricted")),
+        empty_tokens=tuple(str(item) for item in tokens),
     )
 
 

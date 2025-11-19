@@ -1443,6 +1443,15 @@ def _prepare_base_rows(
         records.append(base)
 
     base_df = pd.DataFrame(records)
+    required_flags = {
+        "mentor_school_binding_mode": binding_policy.global_mode,
+        "has_school_constraint": False,
+        "can_normal": False,
+        "can_school": False,
+    }
+    for col, default in required_flags.items():
+        if col not in base_df.columns:
+            base_df[col] = default
     return base_df, unseen_groups, unmatched_schools
 
 
@@ -1452,11 +1461,12 @@ def _detect_school_lookup_mismatches(
     school_columns: Sequence[str],
     code_to_name_school: Mapping[str, str],
     school_name_to_code: Mapping[str, str],
-    binding_policy: MentorSchoolBindingPolicy,
+    binding_policy: MentorSchoolBindingPolicy | None = None,
 ) -> tuple[pd.DataFrame, int, int]:
     """بررسی مقادیر ستون‌های نام مدرسه و ثبت مقادیر ناشناخته."""
 
     columns = [col for col in school_columns if col in insp.columns]
+    binding = binding_policy or MentorSchoolBindingPolicy()
     if not columns:
         return (
             pd.DataFrame(
@@ -1481,7 +1491,7 @@ def _detect_school_lookup_mismatches(
     for column in columns:
         series = insp[column]
         for idx, raw_value in series.items():
-            if binding_policy.is_empty_value(raw_value):
+            if binding.is_empty_value(raw_value):
                 continue
             total_refs += 1
             reason: str | None = None
