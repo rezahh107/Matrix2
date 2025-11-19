@@ -153,17 +153,15 @@ def derive_channels_for_students(
         center_column = policy.stage_column("center")
     except KeyError:
         center_column = None
-    center_series = _column_as_int(students_df, center_column)
-    _apply_center_channel(result, center_series, rules=rules, channel=AllocationChannel.GOLESTAN)
-    _apply_center_channel(result, center_series, rules=rules, channel=AllocationChannel.SADRA)
 
-    registration_series = _column_as_int(
-        students_df, rules.registration_center_column
-    )
-    _apply_center_channel(
-        result, registration_series, rules=rules, channel=AllocationChannel.GOLESTAN
-    )
-    _apply_center_channel(result, registration_series, rules=rules, channel=AllocationChannel.SADRA)
+    for column in (center_column, rules.registration_center_column):
+        series = _column_as_int(students_df, column)
+        _apply_center_channel(
+            result, series, rules=rules, channel=AllocationChannel.GOLESTAN
+        )
+        _apply_center_channel(
+            result, series, rules=rules, channel=AllocationChannel.SADRA
+        )
 
     return result
 
