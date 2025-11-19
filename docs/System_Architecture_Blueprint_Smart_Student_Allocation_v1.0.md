@@ -14,12 +14,12 @@
 
 ## 2. Layered Architecture
 - **Core Layer (Pure Logic)**
-  - Responsibilities: Policy interpretation, eligibility matrix logic, allocation engine, ranking, trace generation, validation rules, deterministic transforms, pure DataFrames.
+  - Responsibilities: Policy interpretation, eligibility matrix logic, allocation engine, ranking, trace generation, validation rules, deterministic transforms, pure DataFrames، و اجرای منطق تاریخچه/کانال شامل تابع خالص `dedupe_by_national_id` و محاسبهٔ `allocation_channel`.
   - Prohibitions: No file/network/Qt I/O, no WordPress/Excel handling, no hardcoded paths/dates, no Qt signals; pandas allowed for table logic.
   - Inputs: In-memory DataFrames, policy JSON, progress callback (function), pre-mapped reference data.
   - Outputs: In-memory DataFrames/records (eligibility matrix, allocation results, traces, error taxonomies).
 - **Infra Layer (I/O & Adapters)**
-  - Responsibilities: Excel read/write (atomic fallback), filesystem layout, WordPress intake fetch/normalize (Gravity Forms), ImportToSabt exporter, logging, configuration loading (`config/policy.json`), premap construction, schema validation.
+  - Responsibilities: Excel read/write (atomic fallback), filesystem layout, WordPress intake fetch/normalize (Gravity Forms), ImportToSabt exporter, logging, configuration loading (`config/policy.json`), premap construction, schema validation، و نگهداری `HistoryStore` (بارگذاری/به‌روزرسانی تاریخچه تخصیص بر اساس کد ملی).
   - Prohibitions: Allocation logic, ranking changes, trace mutation beyond recording, UI widgets.
   - Inputs/Outputs: Filesystem paths, HTTP (WordPress), Excel sheets, JSON configs.
 - **UI Layer (PySide6 Shell + Optional CLI)**
@@ -43,11 +43,12 @@
 ## 4. Data Flow (Intake → Matrix → Allocation → Export → UI → Logs)
 ```
 [WordPress/Gravity Forms] --(Infra intake adapter)--> [Normalized DataFrames]
-[Excel Inputs] ----------/                                  |
+[HistoryStore] ------------------------------^              |
+[Excel Inputs] ----------/                                  | (policy + history snapshot)
                                                     (Infra passes policy + data)
                                                        |
                                                    [Core]
-  Normalize → Validate → Build Eligibility Matrix → Allocate → Trace → QA Checks
+  Normalize → Validate → Build Eligibility Matrix → Load history → `dedupe_by_national_id` → derive `allocation_channel` → Allocate → Trace → QA Checks
                                                        |
                                         results/traces DataFrames (pure)
                                                        |
@@ -65,11 +66,11 @@
 - **Core** (pure logic modules)
   - `app/core/policy_loader.py`: validates `config/policy.json` against Policy/SSoT schema (no I/O beyond data received).
   - `app/core/common`: natural sort helper, join-key enforcement, error taxonomy.
-  - `app/core/matrix`: eligibility matrix builder using Policy rules, deterministic filters.
-  - `app/core/allocation`: ranking & assignment engine, 8-step trace creation, occupancy/allocations counters.
+  - `app/core/matrix`: eligibility matrix builder using Policy rules, deterministic filters، نرمال‌سازی کد ملی و آماده‌سازی داده برای HistoryStore/کانال.
+  - `app/core/allocation`: ranking & assignment engine, 8-step trace creation, occupancy/allocations counters، اجرای `dedupe_by_national_id`, محاسبهٔ `allocation_channel`, و الحاق خلاصهٔ تاریخچه/کانال به trace.
   - `app/core/qa`: validation of matrix/allocation outputs vs Policy invariants.
 - **Infra** (adapters & I/O)
-  - `app/infra/io_utils.py`: Excel read/write (atomic fallback), filesystem paths, schema validation, premap construction.
+  - `app/infra/io_utils.py`: Excel read/write (atomic fallback), filesystem paths, schema validation, premap construction، و قراردادهای خواندن/نوشتن برای `HistoryStore`.
   - `app/infra/intake_wordpress.py`: Gravity Forms fetch, schema mapping, numeric normalization of Join Keys.
   - `app/infra/exporter_importtosabt.py`: transforms allocation outputs to ImportToSabt schema.
   - `app/infra/logging.py`: structured logs, trace persistence, version stamping.
@@ -81,6 +82,11 @@
   - AGENTS.md (repo root): global rules for agents (agentsmd.net compliant).
   - Eligibility Matrix AGENTS.md: subsystem rules (already existing) guiding matrix/validator/allocator agents.
   - CI/CD scripts: enforce policy version, run QA checklist, prevent forbidden dependencies.
+
+### 5.1 مدیریت تاریخچه و کانال سیاست‌محور
+- **HistoryStore (Infra):** دادهٔ پایداری است که برای هر `national_id_normalized` رکوردهایی شامل `mentor_id`, `allocation_date`, ۶ کلید Join، و متادیتای مدرسه/مرکز را نگه می‌دارد. این مخزن تنها توسط Infra خوانده/نوشته می‌شود و Core به نسخهٔ درون‌حافظه‌ای آن دسترسی دارد.
+- **`dedupe_by_national_id` (Core):** تابعی خالص/برداری که ورودی دانش‌آموزان را با تاریخچه مقایسه می‌کند، آن‌ها را به `allocated_before` و `new_candidates` تقسیم می‌نماید و `dedupe_reason` را به trace اضافه می‌کند. نرمال‌سازی اعداد فارسی/لاتین و حذف نویز (dash، فاصله) بخشی از همین تابع است.
+- **AllocationChannel (Core + PolicyConfig):** کانال SCHOOL / GOLESTAN / SADRA / GENERIC به کمک `AllocationChannelConfig` تعیین می‌شود و به خروجی‌های trace/export افزوده می‌گردد تا UI/گزارش‌ها بتوانند جریان‌های مدرسه‌ای، مراکز گلستان/صدرا و مسیر GENERIC را جداگانه پایش کنند. هیچ شناسه‌ای در Core هاردکد نمی‌شود؛ همهٔ قواعد از PolicyConfig تغذیه می‌شوند.
 
 ## 6. Dependency Graph (ASCII)
 ```
@@ -103,11 +109,12 @@ External (WP, Excel, FS) --> Infra --> Core
 1. **Intake**: Infra pulls Gravity Forms/WordPress submissions and Excel files; normalizes fields; coerces Join Keys to `int`; runs schema QA.
 2. **Policy Load**: Infra reads `config/policy.json`; validates against Policy/SSoT schema; passes immutable config to Core.
 3. **Matrix Build**: Core constructs eligibility matrix (filters per Policy §§3–9) using stable ordering; records intermediate counts.
-4. **Allocation**: Core ranks mentors by `occupancy_ratio` → `allocations_new` → `mentor_id` (natural + stable); assigns students; enforces capacity; generates 8-step trace and error taxonomy.
-5. **QA/Validation**: Core runs invariant checks; Infra logs results; Agents/CI apply QA checklist.
-6. **Export**: Infra writes Excel artifacts via `write_xlsx_atomic`; converts to ImportToSabt; sanitizes sheet names; version stamps outputs.
-7. **UI Orchestration**: PySide6 shell triggers pipeline, shows progress via injected callback, surfaces traces/logs; optional CLI mirrors flow.
-8. **Audit & Governance**: Agents validate outputs, ensure AGENTS.md compliance, update meta reports; SupervisorAgent checks version drift.
+4. **History Snapshot & Dedupe**: Infra loads HistoryStore snapshot; Core runs `dedupe_by_national_id` to split `allocated_before` و `new_candidates`, ثبت `dedupe_reason` در trace، و آماده‌سازی ورودی کانال‌ها.
+5. **Channel Derivation & Allocation**: Core با `AllocationChannelConfig` مقدار `allocation_channel` را به ازای هر دانش‌آموز تعیین می‌کند و سپس همان رتبه‌بندی ثابت (`occupancy_ratio` → `allocations_new` → `mentor_id`) را اجرا می‌کند؛ trace/summary کانال‌محور تولید می‌شود.
+6. **QA/Validation**: Core runs invariant checks; Infra logs results; Agents/CI apply QA checklist.
+7. **Export & History Update**: Infra writes Excel artifacts via `write_xlsx_atomic`; converts to ImportToSabt; sanitizes sheet names; version stamps outputs؛ رکوردهای موفق جدید به HistoryStore اضافه می‌شود.
+8. **UI Orchestration**: PySide6 shell triggers pipeline, shows progress via injected callback, surfaces traces/logs; optional CLI mirrors flow.
+9. **Audit & Governance**: Agents validate outputs, ensure AGENTS.md compliance, update meta reports; SupervisorAgent checks version drift؛ trace/کانال/تاریخچه برای تحلیل بعدی بایگانی می‌شود.
 
 ## 9. Extension & Plugin Model
 - Safe extensions (must respect dependency rules):

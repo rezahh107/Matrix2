@@ -25,6 +25,12 @@ Intake (Gravity Forms) → Normalization/Matrix Builder → Allocation Engine �
                                      ↘ Desktop UI (PySide6) orchestration ↗
 ```
 
+### حافظهٔ تخصیص و کانال‌های جریان دانش‌آموز
+- **حافظهٔ تخصیص (HistoryStore):** زیرساخت، تاریخچهٔ تخصیص‌های موفق را با کلید طبیعی «کد ملی نرمال‌شده» نگه می‌دارد تا سیستم در هر اجرا بداند چه دانش‌آموزی قبلاً منتور گرفته است. این حافظه بخشی از تعهد شفافیت است و بدون تغییر در ۶ کلید Join یا سیاست رتبه‌بندی، ورودی‌های جدید را با گذشته می‌سنجد.
+- **تشخیص تکرار با `dedupe_by_national_id`:** Core پیش از ورود به الگوریتم رتبه‌بندی، دانش‌آموزان را بر اساس کد ملی به دو دستهٔ «قبلاً تخصیص‌گرفته» و «کاندید جدید» تقسیم می‌کند؛ در نتیجه دانش‌آموزی که در تاریخچه وجود دارد دوباره وارد صف allocation نمی‌شود مگر اینکه سیاست اجازه دهد و علت در trace ثبت می‌شود.
+- **کانال‌های تخصیص (AllocationChannel):** سیاست، هر دانش‌آموز را به یکی از چهار کانال SCHOOL / GOLESTAN / SADRA / GENERIC هدایت می‌کند تا جریان‌های مدرسه‌ای، مراکز گلستان/صدرا و مسیر عمومی متمایز و قابل توضیح باشند. کانال‌ها از PolicyConfig/AllocationChannelConfig خوانده می‌شوند و صرفاً مسیر اجرای همان رتبه‌بندی ثابت را مشخص می‌کنند.
+- **Explainability:** گزارش‌های trace و خلاصهٔ مدیریتی باید نشان دهند دانش‌آموز در کدام کانال پردازش شده و آیا به دلیل تاریخچه از صف اصلی خارج شده است؛ این رفتار افزوده به شفافیت کمک می‌کند بدون اینکه اساس رتبه‌بندی یا ظرفیت را تغییر دهد.
+
 ## Scope & Phases
 ### Overall Scope
 Unified Smart Student Allocation ecosystem covering intake, matrix, allocation, audit, export, and operator UI, governed by Policy/SSoT and executed by agents following AGENTS.md.
@@ -44,6 +50,8 @@ Unified Smart Student Allocation ecosystem covering intake, matrix, allocation, 
 ## Invariants & Constraints
 - **6 Join Keys (int, immutable):** `کدرشته`, `جنسیت`, `دانش آموز فارغ`, `مرکز گلستان صدرا`, `مالی حکمت بنیاد`, `کد مدرسه`; used consistently across intake, matrix, allocation, exporter.
 - **Ranking policy (Policy §10.1):** sort by `occupancy_ratio` → `allocations_new` → `mentor_id` (natural + stable); deterministic ties.
+- **حافظهٔ تخصیص:** تاریخچهٔ تخصیص‌ها با کلید ملی نگهداری می‌شود و قبل از ورود به رتبه‌بندی اعمال می‌شود؛ این مکانیسم صرفاً ورودی صف را مدیریت می‌کند و در هستهٔ سیاست رتبه‌بندی دخالتی ندارد.
+- **کانال‌های تخصیص:** مقدار `allocation_channel` برای هر دانش‌آموز به‌صورت سیاست‌محور و بدون هاردکد مرکز/مدرسه تعیین می‌شود و به‌عنوان متادیتای trace/خلاصه نگه داشته می‌شود.
 - **Determinism:** same inputs/policy versions yield the same outputs; stable sorts; explicit version tagging (policy_version, ssot_version, schema versions).
 - **Policy-First boundaries:** Core has no I/O or Qt; Infra handles Excel/WordPress/filesystem; UI is PySide6-only for desktop, Gravity Forms-only for intake; CLI/web entrypoints wrap Infra/Core without redefining policy.
 - **Explainability:** 8-step trace (`type`, `group`, `gender`, `graduation_status`, `center`, `finance`, `school`, `capacity_gate`) with candidate counts and allocation reasons per student; audit logs retained.
@@ -53,6 +61,7 @@ Unified Smart Student Allocation ecosystem covering intake, matrix, allocation, 
 ## Quality Attributes
 - **Determinism & reproducibility:** stable/natural sorts; seeded runs if needed; explicit policy_version/ssot_version in outputs.
 - **Auditability & explainability:** per-student trace, status/reason codes, versioned logs; 8-step trace completeness.
+- **تاریخچه و کانال‌محوری:** خروجی‌ها باید نشان دهند چه دانش‌آموزی از تاریخچه حذف شده یا در چه کانالی پردازش شده است؛ این اطلاعات برای یادگیری‌های بعدی و تحلیل انحراف‌ها ضروری است و در کنار trace اصلی ذخیره می‌شود.
 - **Performance:** typical batches (10k students) under budget; avoid repeated merges; premap mentor code mapping; no pandas inplace.
 - **Robustness to data issues:** Persian/number normalization, mobile/ID validation per policy, resilience to crosswalk drift with clear errors.
 - **Maintainability:** clear separation of concerns; AGENTS.md for agent operations; SSoT/Policy for domain rules; this Vision/Scope for product boundaries; modular roles for agents.
