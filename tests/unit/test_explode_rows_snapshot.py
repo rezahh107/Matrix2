@@ -47,6 +47,8 @@ _COLUMN_ORDER_BASE = (
     "کد مدرسه",
     "نام مدرسه",
     "عادی مدرسه",
+    "mentor_school_binding_mode",
+    "has_school_constraint",
     "جنسیت2",
     "دانش آموز فارغ2",
     "مرکز گلستان صدرا3",
@@ -137,6 +139,11 @@ def _canonicalize(
         if column in df.columns:
             numeric = pd.to_numeric(df[column], errors="coerce")
             df[column] = numeric.astype("Int64")
+
+    string_columns = {"mentor_school_binding_mode"}
+    for column in string_columns:
+        if column in df.columns:
+            df[column] = df[column].astype("string")
 
     return df
 

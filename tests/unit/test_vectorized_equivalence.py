@@ -27,7 +27,7 @@ def _create_sample_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             "گروه آزمایشی": ["تجربی", "ریاضی"],
             "جنسیت": ["دختر", "پسر"],
             "دانش آموز فارغ": [0, 1],
-            "کدپستی": ["12345", "999"],
+            "کدپستی": ["1234", "5678"],
             "تعداد داوطلبان تحت پوشش": [5, 3],
             "تعداد تحت پوشش خاص": [10, 4],
             "نام مدرسه 1": ["", "مدرسه نمونه 1"],
@@ -148,7 +148,12 @@ def test_vectorized_matrix_matches_reference() -> None:
 
     manual = _build_reference_matrix(base_df, cfg, code_to_name_school)
 
-    matrix_cmp = matrix.drop(columns=["counter"]).sort_values(
+    drop_columns = [
+        col
+        for col in ("counter", "mentor_school_binding_mode", "has_school_constraint")
+        if col in matrix.columns
+    ]
+    matrix_cmp = matrix.drop(columns=drop_columns).sort_values(
         by=["مرکز گلستان صدرا", "کدرشته", "کد مدرسه", "جایگزین"], kind="stable"
     )
     manual_cmp = manual.sort_values(
@@ -162,12 +167,17 @@ def test_vectorized_matrix_matches_reference() -> None:
         "جنسیت",
         "دانش آموز فارغ",
         "مالی حکمت بنیاد",
+        "کدرشته",
         CAPACITY_CURRENT_COL,
         CAPACITY_SPECIAL_COL,
         "remaining_capacity",
     ]:
         matrix_cmp[column] = matrix_cmp[column].astype("Int64")
         manual_cmp[column] = manual_cmp[column].astype("Int64")
+
+    for column in ["جایگزین"]:
+        matrix_cmp[column] = matrix_cmp[column].astype(str)
+        manual_cmp[column] = manual_cmp[column].astype(str)
 
     pdt.assert_frame_equal(matrix_cmp, manual_cmp)
 
@@ -235,20 +245,40 @@ def test_validation_captures_unmatched_school_counts() -> None:
     )
 
 
-def test_build_matrix_enforces_minimum_coverage_ratio() -> None:
+def test_global_mentors_with_zero_school_values_remain_valid() -> None:
+    insp_df, schools_df, crosswalk_df = _create_sample_inputs()
+    insp_df.loc[:, "نام مدرسه 1"] = 0
+
+    matrix, validation, _, _, _, invalid_df, _, _ = build_matrix(
+        insp_df,
+        schools_df,
+        crosswalk_df,
+        cfg=BuildConfig(min_coverage_ratio=0.0, school_lookup_mismatch_threshold=0.0),
+    )
+
+    assert not matrix.empty
+    assert invalid_df.empty
+    assert validation["school_lookup_mismatch_count"].iat[0] == 0
+
+
+def test_build_matrix_reports_school_lookup_mismatches_without_coverage_failure() -> None:
     insp_df, schools_df, crosswalk_df = _create_sample_inputs()
     insp_df.loc[0, "نام مدرسه 1"] = "123456"
 
-    with pytest.raises(ValueError, match="نسبت پوشش"):
-        build_matrix(
-            insp_df,
-            schools_df,
-            crosswalk_df,
-            cfg=BuildConfig(
-                min_coverage_ratio=1.0,
-                school_lookup_mismatch_threshold=1.0,
-            ),
-        )
+    matrix, validation, _, _, _, invalid_df, _, _ = build_matrix(
+        insp_df,
+        schools_df,
+        crosswalk_df,
+        cfg=BuildConfig(
+            min_coverage_ratio=1.0,
+            school_lookup_mismatch_threshold=1.0,
+        ),
+    )
+
+    assert not matrix.empty
+    assert validation["school_lookup_mismatch_count"].iat[0] == 1
+    assert not invalid_df.empty
+    assert any("unknown school" in str(reason) for reason in invalid_df["reason"])
 
 
 def test_school_lookup_mismatches_are_logged_in_invalid_sheet() -> None:

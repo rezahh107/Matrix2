@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from numbers import Number
 from typing import Callable, Mapping, Sequence
 
+import numpy as np
 import pandas as pd
 
 from ..policy_loader import PolicyConfig, load_policy
@@ -422,10 +423,42 @@ def filter_by_school(
     if school_code.value is None:
         return pool
     target = int(school_code.value)
-    filtered, matched = filter_school_by_value(pool, column, target)
-    if not matched:
+    constraint_mask: pd.Series | None = None
+    constraint_col = "has_school_constraint"
+    if constraint_col in pool.columns:
+        series = pool[constraint_col]
+        constraint_mask = pd.Series(series.fillna(False).astype(bool), index=pool.index)
+    elif "mentor_school_binding_mode" in pool.columns:
+        restricted_mode = policy.mentor_school_binding.restricted_mode
+        binding_series = pool["mentor_school_binding_mode"].astype("string").fillna("")
+        constraint_mask = binding_series.str.strip().eq(restricted_mode)
+
+    if constraint_mask is None:
+        filtered, matched = filter_school_by_value(pool, column, target)
+        if not matched:
+            return pool
+        return filtered
+
+    restricted_mask = constraint_mask.astype(bool)
+    mask_values = restricted_mask.to_numpy(dtype=bool, copy=False)
+    if not bool(mask_values.any()):
         return pool
-    return filtered
+
+    restricted_positions = np.flatnonzero(mask_values)
+    restricted = pool.iloc[mask_values].copy()
+    restricted["__row_pos"] = restricted_positions
+    keep_values = (~mask_values).copy()
+
+    filtered_restricted, matched = filter_school_by_value(restricted, column, target)
+    if not matched:
+        return pool.iloc[keep_values]
+
+    positions = filtered_restricted.get("__row_pos")
+    if positions is not None:
+        keep_values = keep_values.copy()
+        keep_values[positions.to_numpy(dtype=int, copy=False)] = True
+    result = pool.iloc[keep_values]
+    return result
 
 
 def apply_join_filters(
