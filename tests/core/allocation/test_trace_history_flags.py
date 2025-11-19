@@ -44,6 +44,32 @@ def test_attach_history_flags_enriches_summary() -> None:
     assert enriched.loc[2, "dedupe_reason"] == "no_history_match"
 
 
+def test_attach_history_flags_uses_latest_history_row() -> None:
+    summary_df = pd.DataFrame(
+        [
+            {"student_id": 1, "final_status": "ALLOCATED"},
+        ]
+    )
+    history_info_df = pd.DataFrame(
+        [
+            {
+                "student_id": 1,
+                "history_status": "no_history_match",
+                "dedupe_reason": "initial",
+            },
+            {
+                "student_id": 1,
+                "history_status": "already_allocated",
+                "dedupe_reason": "latest",
+            },
+        ]
+    )
+
+    enriched = attach_history_flags(summary_df, history_info_df)
+
+    assert enriched.loc[0, "history_status"] == "already_allocated"
+    assert enriched.loc[0, "dedupe_reason"] == "latest"
+
 
 def test_attach_history_flags_empty_summary_returns_copy() -> None:
     summary_df = pd.DataFrame(columns=["student_id", "final_status"])

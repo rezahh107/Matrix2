@@ -33,7 +33,9 @@ def attach_history_flags(
 
     این تابع هیچ تغییری درجا انجام نمی‌دهد و نسخهٔ جدیدی از ``summary_df`` را برمی‌گرداند.
     اگر برای یک شناسه داده‌ای در ``history_info_df`` یافت نشود، مقدار خنثی (رشتهٔ خالی)
-    در هر دو ستون قرار می‌گیرد تا هم‌خوانی با خروجی نهایی حفظ شود.
+    در هر دو ستون قرار می‌گیرد تا هم‌خوانی با خروجی نهایی حفظ شود. در صورت وجود چند
+    رکورد برای یک شناسه نیز آخرین رکورد حفظ می‌شود تا با رفتار ستون‌های اسنپ‌شات و
+    ستون «same_history_mentor» هم‌سو و گزارش خروجی هماهنگ باشد.
     """
 
     if summary_df.empty:
@@ -46,7 +48,7 @@ def attach_history_flags(
         raise KeyError("history_info_df باید ستون‌های 'history_status' و 'dedupe_reason' را داشته باشد")
 
     subset = history_info_df[[key_column, "history_status", "dedupe_reason"]].copy()
-    subset = subset.drop_duplicates(subset=[key_column], keep="first")
+    subset = subset.drop_duplicates(subset=[key_column], keep="last")
     subset = subset.set_index(key_column)
 
     history_status_map = subset["history_status"]
