@@ -17,12 +17,13 @@ Single, authoritative contract for all LLM and human agents to operate the Smart
 Applies to the entire repository. Local AGENTS.md files do not exist; this document governs every path. All agents must comply with Vision/Scope v1.0, Architecture Blueprint v1.0, Policy v1.0.3, and SSoT v1.0.2. Policy/SSoT content is referenced, never redefined.
 
 ## AGENT ROLES
-- **CoderAgent**: Implements deterministic code within assigned layer, honoring dependency rules and reproducibility. No scope creep beyond assigned layer.
-- **InfraAgent**: Builds adapters, I/O, Excel pipelines, WordPress intake bridges within `app/infra`, `scripts`, `tools` respecting Core contracts. Chooses engines explicitly; handles atomic Excel writes per Infra specs.
-- **UIAgent**: Works in PySide6 shell within `app/ui` and `run_gui.py`; no business logic; consumes Infra/Core services only.
-- **DocumentationAgent**: Updates docs in `docs/`, `README*`, guides. References Policy/SSoT without redefining. Maintains clarity for navigation and operations.
-- **ReviewerAgent**: Enforces Policy/SSoT alignment, dependency boundaries, determinism, QA checklist, and join/ranking invariants. Blocks drift.
-- **SupervisorAgent**: Routes tasks to roles, checks version coherence (Policy 1.0.3, SSoT 1.0.2), ensures CI/test coverage and adherence to Architecture Blueprint.
+- **PolicyAgent / SSoTOwner**: مالک روایت Policy و SSoT؛ معانی ستون‌ها، HistoryStore، و AllocationChannelConfig را در `policy.json` تعریف می‌کند. هر تغییر در SCHOOL/GOLESTAN/SADRA/GENERIC یا قواعد dedupe باید ابتدا در Policy ثبت و با Coder/Infra/Docs/QA هماهنگ شود.
+- **CoderAgent (Core)**: Implements deterministic code within assigned layer, honoring dependency rules and reproducibility. مسئول پیاده‌سازی خالص توابعی مانند `dedupe_by_national_id`, `derive_allocation_channel`, و trace مرتبط؛ هیچ I/O یا hardcode برای school/center ندارد و فقط به PolicyConfig تکیه می‌کند. No scope creep beyond assigned layer.
+- **InfraAgent**: Builds adapters, I/O, Excel pipelines, WordPress intake bridges within `app/infra`, `scripts`, `tools` respecting Core contracts. Chooses engines explicitly; handles atomic Excel writes per Infra specs. مسئول نگهداشت HistoryStore (ذخیره‌سازی، نرمال‌سازی کد ملی، تحویل DataFrame تمیز به Core) و خواندن/نوشتن `policy.json`.
+- **UIAgent**: Works in PySide6 shell within `app/ui` and `run_gui.py`; no business logic; consumes Infra/Core services only. برچسب‌گذاری و نمایش `allocation_channel`, `dedupe_reason`, و وضعیت‌های already_allocated/new_candidates را طبق Policy و Docs انجام می‌دهد و با Core/Docs برای اصطلاحات هماهنگ می‌ماند.
+- **DocumentationAgent**: Updates docs in `docs/`, `README*`, guides. References Policy/SSoT without redefining. Maintains clarity for navigation and operations. مسئول همگام‌سازی روایت HistoryStore، dedupe، AllocationChannel، و ستون `allocation_channel` در Vision/Scope، Architecture، Phase0، و این AGENTS.
+- **QAAgent / ReviewerAgent**: Enforces Policy/SSoT alignment, dependency boundaries, determinism, QA checklist, and join/ranking invariants. Blocks drift. طراح تست برای `dedupe_by_national_id`, توابع کانال، پوشش ۶ کلید join، و رتبه‌بندی ثابت است؛ هر تغییر history/channel بدون تست واحد/یکپارچه رد می‌شود.
+- **SupervisorAgent**: Routes tasks to roles, checks version coherence (Policy 1.0.3, SSoT 1.0.2), ensures CI/test coverage and adherence to Architecture Blueprint. مالک جریان تغییرات history/channel (Policy→Core→Infra→Docs→UI→QA) و حل تعارضات بین لایه‌ها است.
 
 ## REPOSITORY STRUCTURE & NAVIGATION
 - **Core (`app/core`)**: Deterministic, pure logic (pandas allowed). No I/O, no Qt, no network. Honors natural+stable sorting. Uses injectable `progress(pct:int, msg:str)` only.
@@ -47,8 +48,19 @@ Applies to the entire repository. Local AGENTS.md files do not exist; this docum
   - **Trace (8-step explainability):** `type, group, gender, graduation_status, center, finance, school, capacity_gate` with candidate counts after each filter.
   - **Determinism:** identical inputs yield identical outputs; stable sorts everywhere; no randomness/time-based logic.
   - **Policy Version:** 1.0.3; **SSoT Version:** 1.0.2. Never downgrade/upgrade silently.
+- **History-Aware invariants:** `HistoryStore` باید تنها مرجع گذشتهٔ تخصیص باشد؛ نرمال‌سازی کد ملی و `dedupe_by_national_id` فقط در Core و بر اساس Policy تعریف می‌شود؛ هیچ عامل دیگری اجازهٔ تغییر semantics را ندارد. `AllocationChannel`، `AllocationChannelConfig`، و ستون `allocation_channel` در summary/trace باید دقیقاً از Policy تبعیت کنند و کانال‌ها محدود به `SCHOOL`, `GOLESTAN`, `SADRA`, `GENERIC` هستند.
 - **Policy-First:** Load policy from config/policy.json (or policy.yaml equivalent); never hardcode policy constants in Core.
 - **SSoT-First:** Use SSoT datasets/schemas as canonical truth; avoid schema drift.
+
+## HISTORY & ALLOCATION CHANNEL COORDINATION
+- هر ویژگی history-aware (HistoryStore, national_code normalization, dedupe) یا AllocationChannel باید جریان زیر را طی کند:
+  1. **PolicyAgent / SSoTOwner** قواعد را در `policy.json` و مستندات Policy ثبت/به‌روزرسانی می‌کند.
+  2. **CoderAgent** منطق خالص (`dedupe_by_national_id`, `derive_allocation_channel`, `derive_channels_for_students`) را مطابق Policy پیاده‌سازی یا اصلاح می‌کند؛ ۶ کلید join و ranking دست‌نخورده می‌مانند.
+  3. **InfraAgent** HistoryStore و I/O (Excel/DB/WordPress) را با قواعد جدید همگام می‌کند و ورودی تمیز برای Core فراهم می‌سازد.
+  4. **DocumentationAgent** همهٔ اسناد (Vision/Scope، Architecture، Phase0، READMEها) را با روایت جدید history/channel هم‌راستا می‌کند و تغییرات را در changelogها ثبت می‌کند.
+  5. **UIAgent** نمایش و diagnostics (allocation_channel, dedupe_reason, already_allocated/new_candidates) را به‌روزرسانی می‌کند و از Policy/Docs برای copywriting کمک می‌گیرد.
+  6. **QAAgent / ReviewerAgent** تست‌های واحد/یکپارچه برای history/channel را اضافه یا به‌روزرسانی کرده و اجرای آن‌ها را قبل از merge الزامی می‌کند.
+- هیچ تغییر history/channel بدون عبور از این چرخه و تأیید SupervisorAgent و QAAgent اجازهٔ merge ندارد؛ Trace و summary باید ستون `allocation_channel` و شمارش dedupe را منعکس کنند.
 
 ## ALLOWED ACTIONS
 - Edit only files within assigned agent scope and layer boundaries.
@@ -112,10 +124,10 @@ Applies to the entire repository. Local AGENTS.md files do not exist; this docum
 ## QA CHECKLISTS FOR AGENTS
 - **Policy/SSoT:** Policy version == 1.0.3, SSoT version == 1.0.2; Join Keys (6) and Ranking Policy unchanged; Trace 8-step preserved.
 - **Determinism:** Stable sorts, no randomness/time; natural key for identifiers; reproducible fixtures.
-- **Boundaries:** UI→Infra→Core dependency flow; no I/O/Qt in Core; no policy constants hardcoded.
+- **Boundaries:** UI→Infra→Core dependency flow; no I/O/Qt in Core; no policy constants hardcoded; HistoryStore فقط توسط Infra نوشته و توسط Core به‌شکل خالص مصرف می‌شود؛ AllocationChannel تنها از PolicyConfig خوانده می‌شود.
 - **Data Contracts:** Join keys typed as int; schemas match SSoT; premap used to avoid repeated merges; no inplace pandas ops.
-- **Excel/Adapters:** Atomic Excel writer with sanitized sheet names; engine selection explicit (openpyxl/xlsxwriter fallback).
-- **Testing:** Relevant pytest suites updated; golden outputs refreshed deterministically.
+- **Excel/Adapters:** Atomic Excel writer with sanitized sheet names; engine selection explicit (openpyxl/xlsxwriter fallback); HistoryStore read/write سنجیده می‌شود (type-safety، نرمال‌سازی کد ملی، dedupe traceable).
+- **Testing:** Relevant pytest suites updated; golden outputs refreshed deterministically؛ تست‌های ویژه برای `dedupe_by_national_id`, `derive_allocation_channel`, `allocation_channel` در summary/trace و سناریوهای already_allocated/new_candidates الزامی‌اند.
 - **Docs:** Changes reference Vision/Scope and Architecture Blueprint; no policy redefinition; navigation instructions intact.
 
 ## VERSIONING POLICY
@@ -128,3 +140,4 @@ Applies to the entire repository. Local AGENTS.md files do not exist; this docum
 ## CHANGELOG
 - **v1.0 (Global):** Replaces Eligibility Matrix-only AGENTS with global, layered contract; embeds Policy 1.0.3 & SSoT 1.0.2 invariants, dependency boundaries, routing, testing, and QA rules across Smart Student Allocation.
 - **v1.1:** Added BEST-OF-N decision rules for agents (supervised variant selection).
+- **v1.2:** تعریف صریح نقش‌ها و جریان هماهنگی برای HistoryStore، `dedupe_by_national_id`، و `AllocationChannel` (SCHOOL / GOLESTAN / SADRA / GENERIC) بدون نقض Policy-First و ۶ کلید join.
