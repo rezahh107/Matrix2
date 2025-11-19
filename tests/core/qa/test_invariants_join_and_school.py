@@ -45,7 +45,10 @@ def test_school_rule_blocks_unrestricted_in_invalid_list() -> None:
     result = check_SCHOOL_01(matrix=matrix, invalid_mentors=invalid, policy=policy)
 
     assert not result.passed
-    assert result.violations[0].rule_id == "QA_RULE_SCHOOL_01"
+    assert len(result.violations) == 1
+    violation = result.violations[0]
+    assert violation.rule_id == "QA_RULE_SCHOOL_01"
+    assert violation.message == "منتور آزاد در لیست خطای مدرسه دیده شده است"
 
 
 def test_school_rule_requires_school_for_restricted() -> None:
@@ -57,5 +60,8 @@ def test_school_rule_requires_school_for_restricted() -> None:
     result = check_SCHOOL_01(matrix=matrix, invalid_mentors=None, policy=policy)
 
     assert not result.passed
-    assert result.violations[0].rule_id == "QA_RULE_SCHOOL_01"
+    assert len(result.violations) == 1
+    violation = result.violations[0]
+    assert violation.rule_id == "QA_RULE_SCHOOL_01"
+    assert violation.message == "منتور مقید مدرسه بدون کد مدرسه معتبر"
 
