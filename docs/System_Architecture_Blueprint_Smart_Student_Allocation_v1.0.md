@@ -127,7 +127,7 @@ External (WP, Excel, FS) --> Infra --> Core
 4. **History Snapshot & Dedupe**: Infra loads HistoryStore snapshot; Core runs `dedupe_by_national_id` to split `allocated_before` و `new_candidates`, ثبت `dedupe_reason` در trace، و آماده‌سازی ورودی کانال‌ها.
 5. **Channel Derivation & Allocation**: Core با `AllocationChannelConfig` مقدار `allocation_channel` را به ازای هر دانش‌آموز تعیین می‌کند و سپس همان رتبه‌بندی ثابت (`occupancy_ratio` → `allocations_new` → `mentor_id`) را اجرا می‌کند؛ trace/summary کانال‌محور تولید می‌شود.
 6. **QA/Validation**: Core runs invariant checks; Infra logs results; Agents/CI apply QA checklist.
-7. **Export & History Update**: Infra writes Excel artifacts via `write_xlsx_atomic`; converts to ImportToSabt; sanitizes sheet names; version stamps outputs؛ رکوردهای موفق جدید به HistoryStore به‌شکل اتمیک/مقاوم اضافه می‌شود (هم‌راستا با FR-EXPORT-01).
+7. **Export & History Update**: Infra writes Excel artifacts via `write_xlsx_atomic`; converts to ImportToSabt; sanitizes sheet names; version stamps outputs؛ رکوردهای موفق جدید به HistoryStore به‌شکل اتمیک/مقاوم اضافه می‌شود (هم‌راستا با FR-EXPORT-01). اگر درج HistoryStore پس از موفقیت ImportToSabt/Excel شکست بخورد، Infra اجرای تخصیص را failed علامت می‌زند، خروجی را به UI/Core برنمی‌گرداند، حداقل سه تلاش مجدد با backoff انجام می‌دهد و تا بازیابی کامل، تحویل artifact به اپراتور را مسدود می‌کند تا HistoryStore و خروجی منطبق باقی بمانند.
 8. **UI Orchestration**: PySide6 shell triggers pipeline, shows progress via injected callback, surfaces traces/logs; optional CLI mirrors flow.
 9. **Audit & Governance**: Agents validate outputs, ensure AGENTS.md compliance, update meta reports; SupervisorAgent checks version drift؛ trace/کانال/تاریخچه برای تحلیل بعدی بایگانی می‌شود.
 
