@@ -46,7 +46,8 @@ def attach_history_flags(
         raise KeyError("history_info_df باید ستون‌های 'history_status' و 'dedupe_reason' را داشته باشد")
 
     subset = history_info_df[[key_column, "history_status", "dedupe_reason"]].copy()
-    subset = subset.drop_duplicates(subset=[key_column], keep="first")
+    # از آخرین رکورد موجود پیروی می‌کنیم تا ستون‌های وضعیت و اسنپ‌شات با هم همگام بمانند.
+    subset = subset.drop_duplicates(subset=[key_column], keep="last")
     subset = subset.set_index(key_column)
 
     history_status_map = subset["history_status"]
