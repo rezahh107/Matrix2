@@ -90,7 +90,7 @@
 
 ### 5.2 MentorProfile و حاکمیت استخر پشتیبان‌ها
 - **Domain Model:** علاوه‌بر ظرفیت و نگاشت گروه‌های join-key، هر پشتیبان/مدیر دارای شئ «MentorProfile» در SSoT است که شامل `mentor_id`, مدیر مربوطه، ظرفیت اعلام‌شده، داده‌های وضعیت تخصیص (مثلاً `allocations_new`) و فیلد `mentor_status` می‌شود. وضعیت فعلاً دو مقدار اصلی `ACTIVE` و `FROZEN` دارد و می‌تواند با الگوهای محدودکنندهٔ `RESTRICTED_*` توسعه یابد.
-- **Governance & Storage:** MentorProfile در همان منبع Policy (مثلاً policy.json یا پروفایل مجزا زیر کنترل Infra) نگهداری می‌شود و هر تغییر UI/CLI باید با نسخه‌گذاری و audit log ذخیره شود. هیچ تغییری در استخر نباید صرفاً با حذف ردیف از InspactorReport اعمال شود؛ Infra موظف است چنین تغییراتی را rejected/flagged کند تا Policy-First نقض نشود.
+ - **Governance & Storage:** MentorProfile در همان منبع Policy (مثلاً policy.json یا پروفایل مجزا زیر کنترل Infra) نگهداری می‌شود و هر تغییر UI/CLI باید با نسخه‌گذاری و audit log ذخیره شود. هیچ تغییری در استخر نباید صرفاً با حذف ردیف از InspactorReport اعمال شود؛ Infra موظف است چنین تغییراتی را rejected/flagged کند تا Policy-First نقض نشود و اجرای بعدی mentor_status را بدون وابستگی به Excel مصرف کند.
 - **Infra Responsibilities:**
   - نگهداری و بارگذاری MentorProfile از policy.json یا فایل پروفایل مجزا (همچنان تحت SSoT). تغییرات UI را به همان منبع برمی‌گرداند.
   - ادغام پروفایل‌ها با دادهٔ InspactorReport پیش از تحویل به Core و تهیهٔ گزارش‌های تحلیلی (مثلاً پیشنهاد فریز بر اساس HistoryStore) بدون اعمال خودکار.
@@ -100,7 +100,7 @@
 - **UI Responsibilities:**
   - یک پنل PySide6/CLI برای «مدیریت استخر پشتیبان‌ها» نمایش می‌دهد که در آن اپراتور می‌تواند وضعیت mentor_status را مشاهده و میان `ACTIVE`/`FROZEN` (و حالت‌های محدود) جابه‌جا کند.
   - این پنل همچنین پیشنهادهای HistoryStore (مثلاً «این پشتیبان در سال جاری سهم خود را پر کرده است») را نشان می‌دهد؛ تصمیم نهایی و اعمال‌شدن فقط زمانی معتبر است که تغییر در SSoT ذخیره شود و در خروجی trace/گزارش عملیات یک رویداد «status_changed» ثبت شود.
-- **HistoryStore & AllocationChannel Interaction:** HistoryStore صرفاً ورودی تحلیلی/پیشنهادی است و خودکار کسی را فریز نمی‌کند؛ AllocationChannel جریان دانش‌آموز را تعیین می‌کند و هیچ‌گاه mentor_status را override نمی‌کند. Core تنها به MentorProfile/Policy برای تصمیم ورود یا خروج از استخر تکیه دارد و در نتیجه رفتار سیستم قابل بازتولید باقی می‌ماند.
+- **HistoryStore & AllocationChannel Interaction:** HistoryStore صرفاً ورودی تحلیلی/پیشنهادی است و خودکار کسی را فریز نمی‌کند؛ AllocationChannel جریان دانش‌آموز را تعیین می‌کند و هیچ‌گاه mentor_status را override نمی‌کند. Core تنها به MentorProfile/Policy برای تصمیم ورود یا خروج از استخر تکیه دارد و در نتیجه رفتار سیستم قابل بازتولید باقی می‌ماند و ۶ کلید Join و سیاست رتبه‌بندی تغییر نمی‌کنند.
 
 ## 6. Dependency Graph (ASCII)
 ```
