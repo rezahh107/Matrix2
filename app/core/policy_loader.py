@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from typing import Literal
 
+from app.core.policy.config import AllocationChannelConfig
 from app.core.policy.loader import compute_schema_hash, validate_policy_columns
 
 VersionMismatchMode = Literal["raise", "warn", "migrate"]
@@ -277,6 +278,9 @@ class PolicyConfig:
     emission: EmissionOptions
     fairness_strategy: str
     center_management: CenterManagementConfig
+    allocation_channels: AllocationChannelConfig = field(
+        default_factory=AllocationChannelConfig.empty
+    )
     coverage_options: MatrixCoverageOptions = field(
         default_factory=lambda: MatrixCoverageOptions(
             denominator_mode="mentors",
@@ -420,6 +424,9 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     coverage_options = _normalize_coverage_options(
         (data.get("matrix") or {}).get("coverage", {})
     )
+    allocation_channels = _normalize_allocation_channels(
+        data.get("allocation_channels"), normal_statuses=normal_statuses
+    )
 
     return {
         "version": version,
@@ -449,6 +456,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "emission": data.get("emission", {}),
         "fairness_strategy": fairness_strategy,
         "coverage_options": coverage_options,
+        "allocation_channels": allocation_channels,
     }
 
 
@@ -693,6 +701,71 @@ def _infer_centers_from_map(center_map: Mapping[str, int]) -> list[Mapping[str, 
             }
         )
     return inferred
+
+
+def _normalize_allocation_channels(
+    payload: object, *, normal_statuses: Sequence[int]
+) -> AllocationChannelConfig:
+    if payload is None:
+        return AllocationChannelConfig.empty()
+    if not isinstance(payload, Mapping):
+        raise TypeError("allocation_channels must be a mapping")
+
+    school_codes_raw = payload.get("school_codes", [])
+    school_codes = tuple(
+        _ensure_int_sequence("allocation_channels.school_codes", school_codes_raw)
+    )
+
+    center_payload = payload.get("center_channels", {})
+    if not isinstance(center_payload, Mapping):
+        raise TypeError("allocation_channels.center_channels must be a mapping")
+    center_channels: Dict[str, Tuple[int, ...]] = {}
+    for name, values in center_payload.items():
+        normalized_name = str(name or "").strip().upper()
+        if not normalized_name:
+            raise ValueError("center channel name must be a non-empty string")
+        value_list = _ensure_int_sequence(
+            f"allocation_channels.center_channels.{normalized_name}", values
+        )
+        seen: set[int] = set()
+        deduped: list[int] = []
+        for item in value_list:
+            if item not in seen:
+                deduped.append(item)
+                seen.add(item)
+        center_channels[normalized_name] = tuple(deduped)
+
+    registration_column_raw = payload.get("registration_center_column")
+    registration_column: str | None
+    if isinstance(registration_column_raw, (str, bytes)):
+        registration_column = str(registration_column_raw).strip() or None
+    else:
+        registration_column = None
+
+    educational_status_column_raw = payload.get("educational_status_column")
+    educational_status_column: str | None
+    if isinstance(educational_status_column_raw, (str, bytes)):
+        educational_status_column = str(educational_status_column_raw).strip() or None
+    else:
+        educational_status_column = None
+
+    active_status_values_raw = payload.get("active_status_values")
+    if active_status_values_raw is None:
+        active_status_values = tuple(int(item) for item in normal_statuses)
+    else:
+        active_status_values = tuple(
+            _ensure_int_sequence(
+                "allocation_channels.active_status_values", active_status_values_raw
+            )
+        )
+
+    return AllocationChannelConfig(
+        school_codes=school_codes,
+        center_channels=center_channels,
+        registration_center_column=registration_column,
+        educational_status_column=educational_status_column,
+        active_status_values=active_status_values,
+    )
 
 
 def _ensure_bool(name: str, value: object) -> bool:
@@ -971,6 +1044,10 @@ def _version_gate(
 
 
 def _to_config(data: Mapping[str, object]) -> PolicyConfig:
+    allocation_channels_obj = data.get("allocation_channels")
+    if not isinstance(allocation_channels_obj, AllocationChannelConfig):
+        allocation_channels_obj = AllocationChannelConfig.empty()
+
     return PolicyConfig(
         version=str(data["version"]),
         normal_statuses=[int(item) for item in data["normal_statuses"]],  # type: ignore[index]
@@ -1026,6 +1103,7 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
                 data["coverage_options"]["include_blocked_candidates_in_denominator"]
             ),
         ),
+        allocation_channels=allocation_channels_obj,
     )
 
 
@@ -1104,6 +1182,13 @@ def parse_policy_dict(
 
     prepared = _prepare_policy_payload(data, expected_version, on_version_mismatch)
     normalized = _normalize_policy_payload(prepared)
+    allocation_channels_obj = normalized.get("allocation_channels")
+    if not isinstance(allocation_channels_obj, AllocationChannelConfig):
+        allocation_channels_obj = _normalize_allocation_channels(
+            prepared.get("allocation_channels"),
+            normal_statuses=normalized["normal_statuses"],
+        )
+        normalized["allocation_channels"] = allocation_channels_obj
     config = _to_config(normalized)
     _version_gate(config.version, expected_version, on_version_mismatch)
     return config
@@ -1155,6 +1240,11 @@ def _apply_schema_defaults(data: Dict[str, object]) -> Dict[str, object]:
     coverage_section = matrix_section.get("coverage", {})
     if not isinstance(coverage_section, Mapping):
         coverage_section = {}
+
+    if "allocation_channels" not in data or not isinstance(
+        data.get("allocation_channels"), Mapping
+    ):
+        data["allocation_channels"] = {}
 
     coverage_defaults = {
         "denominator_mode": "mentors",

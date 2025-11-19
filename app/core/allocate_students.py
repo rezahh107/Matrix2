@@ -62,6 +62,7 @@ from .common.types import (
 from .counter import normalize_digits, strip_hidden_chars
 from .policy_loader import PolicyConfig, load_policy
 from .reason.selection_reason import build_selection_reason_rows as _build_selection_reason_rows
+from .allocation.trace import attach_allocation_channel
 
 ProgressFn = Callable[[int, str], None]
 
@@ -1840,6 +1841,9 @@ def allocate_batch(
                     trace_summary_df[column] = trace_summary_df["student_id"].map(
                         student_indexed[column]
                     )
+        trace_summary_df = attach_allocation_channel(
+            trace_summary_df, students_norm, policy=policy
+        )
         trace_df.attrs["summary_df"] = trace_summary_df
         trace_df.attrs["unallocated_summary"] = build_unallocated_summary(
             trace_summary_df, policy=policy
