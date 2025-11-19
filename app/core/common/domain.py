@@ -375,11 +375,19 @@ def mentor_type(postal_code: Any, school_count: int | None, *, cfg: BuildConfig)
     return MentorType.NORMAL
 
 
-def classify_mentor_mode(postal_code: Any, school_codes: Sequence[Any], *, cfg: BuildConfig) -> MentorType:
-    """طبقه‌بندی نوع پشتیبان بر اساس کدپستی و کدهای مدرسه."""
+def classify_mentor_mode(
+    postal_code: Any,
+    school_codes: Sequence[Any],
+    *,
+    cfg: BuildConfig,
+    has_school_constraint: bool | None = None,
+) -> MentorType:
+    """طبقه‌بندی نوع پشتیبان بر اساس کدپستی، کد مدرسه و پرچم الزام مدرسه."""
 
     normalized_codes = [school_code_norm(code, cfg=cfg) for code in school_codes]
     school_count = sum(1 for code in normalized_codes if code > 0)
+    if has_school_constraint is True and school_count == 0:
+        school_count = 1
     return mentor_type(postal_code, school_count, cfg=cfg)
 
 
