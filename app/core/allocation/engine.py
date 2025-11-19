@@ -36,4 +36,49 @@ __all__ = [
     "AllocationChannel",
     "annotate_students_with_channel",
     "derive_channel_map",
+    "enrich_summary_with_history",
 ]
+
+
+def enrich_summary_with_history(
+    summary_df: pd.DataFrame,
+    *,
+    students_df: pd.DataFrame,
+    history_info_df: pd.DataFrame | None,
+    policy: PolicyConfig,
+) -> pd.DataFrame:
+    """تکمیل خلاصهٔ تریس با کانال تخصیص و داده‌های تاریخچه.
+
+    این تابع به ترتیب زیر ستون‌های تشریحی را اضافه می‌کند:
+    1. ``allocation_channel`` بر اساس PolicyConfig.
+    2. ``history_status`` و ``dedupe_reason`` در صورت وجود اطلاعات تاریخچه.
+    3. ستون‌های اسنپ‌شات تاریخچه (مثلاً ``history_mentor_id``) برای استفادهٔ Trace.
+    4. ستون بولی ``same_history_mentor`` که تنها بعد از دریافت اسنپ‌شات محاسبه می‌شود.
+
+    ترتیب ردیف‌ها و کلیدهای اصلی تغییری نمی‌کند و منطق رتبه‌بندی همچنان دست‌نخورده
+    باقی می‌ماند؛ ستون‌های جدید صرفاً برای تشخیص و گزارش‌گیری هستند.
+    """
+
+    if summary_df is None:
+        raise ValueError("summary_df نباید None باشد")
+
+    from .trace import (  # واردات تنبل برای جلوگیری از وابستگی حلقوی
+        attach_allocation_channel,
+        attach_history_flags,
+        attach_history_snapshot,
+        attach_same_history_mentor,
+    )
+
+    result = attach_allocation_channel(summary_df, students_df, policy=policy)
+    if history_info_df is None:
+        return result
+    result = attach_history_flags(result, history_info_df, key_column="student_id")
+    result = attach_history_snapshot(result, history_info_df, key_column="student_id")
+    result = attach_same_history_mentor(
+        result,
+        history_info_df,
+        key_column="student_id",
+        mentor_column="mentor_id",
+        history_mentor_column="history_mentor_id",
+    )
+    return result

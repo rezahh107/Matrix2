@@ -1,66 +1,107 @@
+from __future__ import annotations
+
 import pandas as pd
+from pandas.testing import assert_frame_equal
 
-from app.core.allocation import dedupe_by_national_id
-
-
-def test_student_with_history_is_allocated():
-    students = pd.DataFrame({"name": ["old"], "national_code": ["0012345678"]})
-    history = pd.DataFrame({"national_code": ["0012345678"]})
-
-    allocated_df, new_df = dedupe_by_national_id(students, history)
-
-    assert allocated_df["name"].tolist() == ["old"]
-    assert new_df.empty
+from app.core.allocation.dedupe import (
+    HISTORY_SNAPSHOT_COLUMNS,
+    HistoryStatus,
+    dedupe_by_national_id,
+)
 
 
-def test_student_without_history_is_new_candidate():
-    students = pd.DataFrame({"name": ["newbie"], "national_code": ["1234567890"]})
-    history = pd.DataFrame({"national_code": ["0012345678"]})
-
-    allocated_df, new_df = dedupe_by_national_id(students, history)
-
-    assert allocated_df.empty
-    assert new_df["name"].tolist() == ["newbie"]
-    assert new_df["dedupe_reason"].tolist() == ["no_history_match"]
-
-
-def test_empty_history_puts_everyone_in_new_candidates():
-    students = pd.DataFrame({"name": ["a", "b"], "national_code": ["1111111111", "2222222222"]})
-    history = pd.DataFrame(columns=["national_code"])
-
-    allocated_df, new_df = dedupe_by_national_id(students, history)
-
-    assert allocated_df.empty
-    assert set(new_df["name"]) == {"a", "b"}
-    assert set(new_df["dedupe_reason"]) == {"no_history_match"}
-
-
-def test_missing_or_invalid_national_code_treated_as_new():
-    students = pd.DataFrame(
-        {
-            "name": ["missing", "nan", "empty", "text"],
-            "national_code": [None, pd.NA, "", "ABC"],
-        }
+def _build_students_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"student_id": 1, "name": "allocated", "national_code": "0012345678"},
+            {"student_id": 2, "name": "fresh", "national_code": "9876543210"},
+            {"student_id": 3, "name": "invalid", "national_code": "123"},
+        ]
     )
-    history = pd.DataFrame({"national_code": ["0012345678"]})
-
-    allocated_df, new_df = dedupe_by_national_id(students, history)
-
-    assert allocated_df.empty
-    assert set(new_df["name"]) == {"missing", "nan", "empty", "text"}
-    assert set(new_df["dedupe_reason"]) == {"missing_or_invalid_national_code"}
 
 
-def test_idempotency_same_input_same_output():
-    students = pd.DataFrame(
-        {"name": ["old", "new"], "national_code": ["0012345678", "9999999999"]}
+def _build_history_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "student_id": 100,
+                "national_code": "0012345678",
+                "mentor_id": 900,
+                "مرکز گلستان صدرا": 10,
+            },
+        ]
     )
-    history = pd.DataFrame({"national_code": ["0012345678"]})
+
+
+def test_dedupe_history_status_labels() -> None:
+    students = _build_students_df()
+    history = _build_history_df()
+
+    already_allocated_df, new_candidates_df = dedupe_by_national_id(students, history)
+
+    expected_columns = {"history_status", "dedupe_reason", *HISTORY_SNAPSHOT_COLUMNS}
+    assert expected_columns.issubset(already_allocated_df.columns)
+    assert expected_columns.issubset(new_candidates_df.columns)
+
+    allocated_row = already_allocated_df.set_index("student_id").loc[1]
+    assert allocated_row["history_status"] == HistoryStatus.ALREADY_ALLOCATED.value
+    assert allocated_row["dedupe_reason"] == "history_match"
+
+    new_rows = new_candidates_df.set_index("student_id")
+    assert new_rows.loc[2, "history_status"] == HistoryStatus.NO_HISTORY_MATCH.value
+    assert new_rows.loc[2, "dedupe_reason"] == "no_history_match"
+    assert (
+        new_rows.loc[3, "history_status"]
+        == HistoryStatus.MISSING_OR_INVALID_NATIONAL_ID.value
+    )
+    assert new_rows.loc[3, "dedupe_reason"] == "missing_or_invalid_national_code"
+
+
+
+def test_dedupe_idempotent_with_history_status() -> None:
+    students = _build_students_df()
+    history = _build_history_df()
 
     first_allocated, first_new = dedupe_by_national_id(students, history)
     second_allocated, second_new = dedupe_by_national_id(students, history)
 
-    assert first_allocated.equals(second_allocated)
-    assert first_new.equals(second_new)
-    assert set(first_allocated["national_code"]) == {"0012345678"}
-    assert set(first_new["national_code"]) == {"9999999999"}
+    assert_frame_equal(first_allocated, second_allocated)
+    assert_frame_equal(first_new, second_new)
+
+
+def test_dedupe_history_snapshot_mentor_id() -> None:
+    students = pd.DataFrame(
+        [
+            {"student_id": 1, "name": "allocated", "national_code": "0012345678"},
+            {"student_id": 2, "name": "fresh", "national_code": "9876543210"},
+            {"student_id": 3, "name": "invalid", "national_code": None},
+        ]
+    )
+    history = pd.DataFrame(
+        [
+            {
+                "row": 1,
+                "national_code": "0012345678",
+                "mentor_id": 111,
+                "مرکز گلستان صدرا": 20,
+            },
+            {
+                "row": 2,
+                "national_code": "0012345678",
+                "mentor_id": 222,
+                "مرکز گلستان صدرا": 30,
+            },
+        ]
+    )
+
+    already_allocated_df, new_candidates_df = dedupe_by_national_id(students, history)
+
+    allocated = already_allocated_df.set_index("student_id")
+    assert allocated.loc[1, "history_mentor_id"] == 222
+    assert allocated.loc[1, "history_center_code"] == 30
+
+    new_candidates = new_candidates_df.set_index("student_id")
+    assert pd.isna(new_candidates.loc[2, "history_mentor_id"])
+    assert pd.isna(new_candidates.loc[2, "history_center_code"])
+    assert pd.isna(new_candidates.loc[3, "history_mentor_id"])
+    assert pd.isna(new_candidates.loc[3, "history_center_code"])
