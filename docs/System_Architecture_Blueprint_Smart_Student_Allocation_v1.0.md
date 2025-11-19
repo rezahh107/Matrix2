@@ -89,7 +89,7 @@
 - **AllocationChannel (Core + PolicyConfig):** کانال SCHOOL / GOLESTAN / SADRA / GENERIC به کمک `AllocationChannelConfig` تعیین می‌شود و به خروجی‌های trace/export افزوده می‌گردد تا UI/گزارش‌ها بتوانند جریان‌های مدرسه‌ای، مراکز گلستان/صدرا و مسیر GENERIC را جداگانه پایش کنند. هیچ شناسه‌ای در Core هاردکد نمی‌شود؛ همهٔ قواعد از PolicyConfig تغذیه می‌شوند.
 
 ### 5.2 MentorProfile و حاکمیت استخر پشتیبان‌ها
-- **Domain Model:** علاوه‌بر ظرفیت و نگاشت گروه‌های join-key، هر پشتیبان/مدیر دارای شئ «MentorProfile» در SSoT است که شامل `mentor_id`, مدیر مربوطه، ظرفیت اعلام‌شده، متادیتاهای trace (مثلاً `allocations_new`) و فیلد `mentor_status` می‌شود. وضعیت فعلاً دو مقدار اصلی `ACTIVE` و `FROZEN` دارد و می‌تواند با الگوهای محدودکنندهٔ `RESTRICTED_*` توسعه یابد.
+- **Domain Model:** علاوه‌بر ظرفیت و نگاشت گروه‌های join-key، هر پشتیبان/مدیر دارای شئ «MentorProfile» در SSoT است که شامل `mentor_id`, مدیر مربوطه، ظرفیت اعلام‌شده، داده‌های وضعیت تخصیص (مثلاً `allocations_new`) و فیلد `mentor_status` می‌شود. وضعیت فعلاً دو مقدار اصلی `ACTIVE` و `FROZEN` دارد و می‌تواند با الگوهای محدودکنندهٔ `RESTRICTED_*` توسعه یابد.
 - **Governance & Storage:** MentorProfile در همان منبع Policy (مثلاً policy.json یا پروفایل مجزا زیر کنترل Infra) نگهداری می‌شود و هر تغییر UI/CLI باید با نسخه‌گذاری و audit log ذخیره شود. هیچ تغییری در استخر نباید صرفاً با حذف ردیف از InspactorReport اعمال شود؛ Infra موظف است چنین تغییراتی را rejected/flagged کند تا Policy-First نقض نشود.
 - **Infra Responsibilities:**
   - نگهداری و بارگذاری MentorProfile از policy.json یا فایل پروفایل مجزا (همچنان تحت SSoT). تغییرات UI را به همان منبع برمی‌گرداند.
