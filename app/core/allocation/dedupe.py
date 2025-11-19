@@ -204,24 +204,12 @@ def dedupe_by_national_id(
                 mapped = mapped.where(pd.notna(mapped), pd.NA)
             frame[column] = mapped
 
-    already_allocated_df = students_df.loc[already_mask].copy()
-    already_allocated_df["history_status"] = history_status.loc[
-        already_allocated_df.index
-    ].astype("string")
-    already_allocated_df["dedupe_reason"] = reasons.loc[
-        already_allocated_df.index
-    ].astype("string")
-    _attach_snapshot(
-        already_allocated_df, student_norm.loc[already_allocated_df.index]
-    )
+    enriched_df = students_df.copy()
+    enriched_df["history_status"] = history_status.astype("string")
+    enriched_df["dedupe_reason"] = reasons.astype("string")
+    _attach_snapshot(enriched_df, student_norm)
 
-    new_candidates_df = students_df.loc[~already_mask].copy()
-    new_candidates_df["history_status"] = history_status.loc[
-        new_candidates_df.index
-    ].astype("string")
-    new_candidates_df["dedupe_reason"] = reasons.loc[
-        new_candidates_df.index
-    ].astype("string")
-    _attach_snapshot(new_candidates_df, student_norm.loc[new_candidates_df.index])
+    already_allocated_df = enriched_df.loc[already_mask].copy()
+    new_candidates_df = enriched_df.loc[~already_mask].copy()
 
     return already_allocated_df, new_candidates_df
