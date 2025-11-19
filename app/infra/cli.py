@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import platform
 import sys
 from datetime import datetime, timezone
@@ -28,6 +29,8 @@ from pandas import testing as pd_testing
 from pandas.api import types as pd_types
 
 from app.core.allocate_students import allocate_batch, build_selection_reason_rows
+from app.core.allocation.engine import enrich_summary_with_history
+from app.core.allocation.history_metrics import compute_history_metrics
 from app.core.canonical_frames import (
     canonicalize_allocation_frames,
     sanitize_pool_for_allocation as _sanitize_pool_for_allocation,
@@ -84,6 +87,8 @@ _DEFAULT_EXPORTER_CONFIG_PATH = Path("config/SmartAlloc_Exporter_Config_v1.json"
 _DEFAULT_SABT_TEMPLATE_PATH = Path("templates/ImportToSabt (1404) - Copy.xlsx")
 _DEFAULT_ALLOC_PROFILE_PATH = DEFAULT_SABT_PROFILE_PATH
 
+logger = logging.getLogger(__name__)
+
 
 def _default_progress(pct: int, message: str) -> None:
     """چاپ سادهٔ وضعیت پیشرفت در حالت headless."""
@@ -108,6 +113,56 @@ def _print_metrics(report: Dict[str, Dict[str, Any]]) -> None:
 
     summary = summarize_report(report)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def _log_history_metrics(
+    summary_df: pd.DataFrame | None,
+    *,
+    students_df: pd.DataFrame,
+    history_info_df: pd.DataFrame | None,
+    policy: PolicyConfig,
+) -> None:
+    """ثبت خلاصهٔ KPI تاریخچه به‌صورت لاگ برای هر کانال تخصیص.
+
+    در صورت نبود دادهٔ تاریخچه یا ستون‌های لازم، پیام واضحی چاپ می‌شود و از
+    شکست جلوگیری می‌شود.
+    """
+
+    if summary_df is None or summary_df.empty:
+        logger.info("History metrics unavailable (no summary rows).")
+        return
+
+    if history_info_df is None:
+        logger.info("History metrics unavailable (no history info).")
+        return
+
+    try:
+        enriched_summary = enrich_summary_with_history(
+            summary_df,
+            students_df=students_df,
+            history_info_df=history_info_df,
+            policy=policy,
+        )
+        history_metrics_df = compute_history_metrics(enriched_summary)
+    except KeyError:
+        logger.info("History metrics unavailable (missing columns).")
+        return
+
+    if history_metrics_df.empty:
+        logger.info("History metrics unavailable (empty metrics).")
+        return
+
+    for _, row in history_metrics_df.iterrows():
+        logger.info(
+            "HistoryMetrics[channel=%s] total=%d already=%d no_match=%d missing=%d same_mentor=%d ratio=%.3f",
+            row["allocation_channel"],
+            int(row["students_total"]),
+            int(row["history_already_allocated"]),
+            int(row["history_no_history_match"]),
+            int(row["history_missing_or_invalid"]),
+            int(row["same_history_mentor_true"]),
+            float(row["same_history_mentor_ratio"]),
+        )
 
 
 def _detect_reader(path: Path) -> Callable[[Path], pd.DataFrame]:
@@ -1257,7 +1312,21 @@ def _allocate_and_write(
     sheets["trace"] = trace_df
     sheets[sheet_name] = selection_reasons_df
 
-    debug_sheets = collect_trace_debug_sheets(trace_df)
+    summary_df_attr = trace_df.attrs.get("summary_df")
+    history_info_df = trace_df.attrs.get("history_info_df")
+    _log_history_metrics(
+        summary_df_attr,
+        students_df=students_base,
+        history_info_df=history_info_df,
+        policy=policy,
+    )
+
+    debug_sheets = collect_trace_debug_sheets(
+        trace_df,
+        students_df=students_base,
+        history_info_df=history_info_df,
+        policy=policy,
+    )
     for name, df in debug_sheets.items():
         sheets[name] = _make_excel_safe(df)
         header_overrides[name] = None
