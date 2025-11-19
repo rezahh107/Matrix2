@@ -727,13 +727,7 @@ def _normalize_allocation_channels(
         value_list = _ensure_int_sequence(
             f"allocation_channels.center_channels.{normalized_name}", values
         )
-        seen: set[int] = set()
-        deduped: list[int] = []
-        for item in value_list:
-            if item not in seen:
-                deduped.append(item)
-                seen.add(item)
-        center_channels[normalized_name] = tuple(deduped)
+        center_channels[normalized_name] = tuple(dict.fromkeys(value_list))
 
     registration_column_raw = payload.get("registration_center_column")
     registration_column: str | None
@@ -1182,13 +1176,6 @@ def parse_policy_dict(
 
     prepared = _prepare_policy_payload(data, expected_version, on_version_mismatch)
     normalized = _normalize_policy_payload(prepared)
-    allocation_channels_obj = normalized.get("allocation_channels")
-    if not isinstance(allocation_channels_obj, AllocationChannelConfig):
-        allocation_channels_obj = _normalize_allocation_channels(
-            prepared.get("allocation_channels"),
-            normal_statuses=normalized["normal_statuses"],
-        )
-        normalized["allocation_channels"] = allocation_channels_obj
     config = _to_config(normalized)
     _version_gate(config.version, expected_version, on_version_mismatch)
     return config
