@@ -18,6 +18,7 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from typing import Literal, cast
 
 from app.core.policy.config import AllocationChannelConfig
+from app.core.allocation.mentor_pool import MentorPoolGovernanceConfig
 from app.core.policy.loader import compute_schema_hash, validate_policy_columns
 
 VersionMismatchMode = Literal["raise", "warn", "migrate"]
@@ -557,6 +558,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "emission": data.get("emission", {}),
         "fairness_strategy": fairness_strategy,
         "coverage_options": coverage_options,
+        "mentor_pool_governance": mentor_pool_governance,
         "allocation_channels": allocation_channels,
         "mentor_pool_governance": mentor_pool_governance,
     }
@@ -1203,6 +1205,9 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         mentor_school_binding=_to_mentor_school_binding(
             data.get("mentor_school_binding", {})
         ),
+        mentor_pool_governance=_to_mentor_pool_governance(
+            data.get("mentor_pool_governance", {})
+        ),
         allocation_channels=allocation_channels_obj,
     )
 
@@ -1377,6 +1382,11 @@ def _apply_schema_defaults(data: Dict[str, object]) -> Dict[str, object]:
     coverage_section = matrix_section.get("coverage", {})
     if not isinstance(coverage_section, Mapping):
         coverage_section = {}
+
+    if "mentor_pool_governance" not in data or not isinstance(
+        data.get("mentor_pool_governance"), Mapping
+    ):
+        data["mentor_pool_governance"] = {}
 
     if "allocation_channels" not in data or not isinstance(
         data.get("allocation_channels"), Mapping

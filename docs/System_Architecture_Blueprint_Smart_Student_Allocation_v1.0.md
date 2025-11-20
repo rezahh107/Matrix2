@@ -108,6 +108,7 @@
 - **Component:** `QaViolation`, `QaRuleResult`, `QaReport` و تابع `run_all_invariants(...)` در لایهٔ Core پیاده‌سازی شده‌اند و از I/O/Qt یا وابستگی به Infra/UI مبرا هستند.
 - **Flow:** خروجی‌های ماتریس و تخصیص قبل از معتبر شدن، از طریق `run_all_invariants` عبور می‌کنند؛ قوانین فعلی شامل `STU_01`, `STU_02`, `JOIN_01`, `SCHOOL_01`, `ALLOC_01` هستند و هر تخطی را به QA سطح «خطا» تبدیل می‌کنند.
 - **Determinism & Callers:** منطق کاملاً دترمینیستیک است و تنها از داده‌های ورودی و PolicyConfig تغذیه می‌شود؛ فراخوانی‌ها از مرزهای CLI/UI/Infra انجام می‌شود تا Core پاک بماند و QA نتیجهٔ هر اجرا را به‌صورت قابل تکرار تولید کند.
+- **Infra Export:** لایهٔ Infra پس از اجرای QA موظف است ورک‌بوک Excel اعتبارسنجی را با شیت‌های summary و breakdown (students_per_mentor، school_binding_issues، allocation_capacity، join_keys، student_counts، meta) تولید کند تا اپراتورها بتوانند تخطی‌ها را بدون تغییر منطق Core بررسی کنند.
 
 ## 6. Dependency Graph (ASCII)
 ```
@@ -182,6 +183,7 @@ External (WP, Excel, FS) --> Infra --> Core
 
 ## 16. Future Evolutions (Non-breaking unless re-approved)
 - Additional exporters/importers via Infra plugins; UI enhancements for dashboards; automated WordPress-to-allocator pipelines with human approval; multi-repo AGENTS.md federation.
+- UI Mentor Pool Governance dialog (PySide6) enables per-run enable/disable of mentors/managers and forwards overrides through Infra into Core mentor pool filtering without changing policy semantics.
 - Breaking changes require Policy/SSoT updates and version bumps; Join Keys/ranking/trace steps are immutable unless Policy changes.
 
 ## 17. Glossary

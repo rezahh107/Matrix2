@@ -72,6 +72,8 @@ from app.ui.helpers.counter_helpers import detect_year_candidates
 from app.ui.helpers.manager_helpers import extract_manager_names
 from app.ui.history_metrics import HistoryMetricsDialog
 from app.ui.loaders import ExcelLoader
+from app.ui.mentor_pool_dialog import MentorPoolDialog
+from app.ui.models import MentorPoolEntry, build_mentor_entries_from_dataframe
 from app.ui.policy_cache import get_cached_policy
 from app.ui.fonts import get_app_font
 from .task_runner import ProgressFn, Worker
@@ -295,6 +297,7 @@ class MainWindow(QMainWindow):
         self._worker: Worker | None = None
         self._success_hook: Callable[[], None] | None = None
         self._btn_open_output_folder: QPushButton | None = None
+        self._btn_mentor_pool: QPushButton | None = None
         self._center_manager_combos: Dict[int, QComboBox] = {}
         self._manager_names_cache: list[str] = []
         self._btn_reset_managers: QPushButton | None = None
@@ -303,6 +306,11 @@ class MainWindow(QMainWindow):
         self._log_line = 0
         self._history_metrics_df = pd.DataFrame(columns=METRIC_COLUMNS)
         self._history_metrics_dialog: HistoryMetricsDialog | None = None
+        self._mentor_pool_entries: list[MentorPoolEntry] = []
+        self._mentor_pool_overrides: dict[str, bool] = {}
+        self._mentor_pool_source: str = ""
+        self._mentor_pool_dialog: MentorPoolDialog | None = None
+        self._mentor_pool_dialog_class = MentorPoolDialog
         self._toolbar_actions: Dict[str, QAction] = {}
         self._toolbar_theme_label: QLabel | None = None
         self._stage_badge: QLabel | None = None
@@ -927,10 +935,21 @@ class MainWindow(QMainWindow):
         self._picker_pool.setToolTip("فهرست منتورها یا پشتیبان‌ها برای تخصیص")
         self._picker_pool.set_button_text(browse_text)
         self._picker_pool.line_edit().textChanged.connect(
-            lambda *_: self._refresh_all_manager_combos()
+            lambda *_: (self._refresh_all_manager_combos(), self._reset_mentor_pool_cache())
         )
         self._set_picker_button_text(self._picker_pool)
-        inputs_layout.addRow("استخر منتورها", self._picker_pool)
+
+        pool_row = QWidget(page)
+        pool_row_layout = QHBoxLayout(pool_row)
+        pool_row_layout.setContentsMargins(0, 0, 0, 0)
+        pool_row_layout.setSpacing(8)
+        pool_row_layout.addWidget(self._picker_pool, 1)
+        self._btn_mentor_pool = QPushButton("حاکمیت استخر", pool_row)
+        self._btn_mentor_pool.setToolTip("فعال/غیرفعال کردن منتورها و مدیران برای این اجرا")
+        self._btn_mentor_pool.clicked.connect(self._open_mentor_pool_governance)
+        pool_row_layout.addWidget(self._btn_mentor_pool)
+
+        inputs_layout.addRow("استخر منتورها", pool_row)
 
         outer.addWidget(inputs_group)
 
@@ -1714,6 +1733,9 @@ class MainWindow(QMainWindow):
         if center_overrides:
             overrides["center_managers"] = center_overrides
 
+        if self._mentor_pool_overrides:
+            overrides["mentor_pool_overrides"] = dict(self._mentor_pool_overrides)
+
         return overrides
 
     def _build_rule_engine_overrides(self) -> dict[str, object]:
@@ -1936,6 +1958,88 @@ class MainWindow(QMainWindow):
         for center_id, combo in self._center_manager_combos.items():
             self._refresh_manager_combo(center_id, combo, list(names))
         self._append_log("✅ لیست مدیران به‌روزرسانی شد")
+
+    def _reset_mentor_pool_cache(self) -> None:
+        """پاک‌سازی کش استخر منتورها هنگام تغییر مسیر فایل."""
+
+        self._mentor_pool_entries = []
+        self._mentor_pool_overrides = {}
+        self._mentor_pool_source = ""
+        if self._mentor_pool_dialog is not None:
+            self._mentor_pool_dialog.close()
+            self._mentor_pool_dialog = None
+
+    def _open_mentor_pool_governance(self) -> None:
+        """بارگذاری استخر و نمایش دیالوگ حاکمیت بدون مسدود کردن UI."""
+
+        path_text = self._picker_pool.text().strip()
+        if not path_text:
+            QMessageBox.warning(self, "استخر منتورها", "لطفاً ابتدا فایل استخر را انتخاب کنید.")
+            return
+
+        pool_path = Path(path_text)
+        if pool_path.is_dir():
+            QMessageBox.warning(self, "مسیر نامعتبر", "مسیر انتخاب‌شده یک پوشه است.")
+            return
+
+        if self._mentor_pool_entries and self._mentor_pool_source == str(pool_path):
+            self._show_mentor_pool_dialog(self._mentor_pool_entries)
+            return
+
+        self._run_excel_loader(
+            pool_path,
+            description="بارگذاری استخر منتورها",
+            on_loaded=lambda df: self._process_mentor_pool_dataframe(df, str(pool_path)),
+        )
+
+    def _process_mentor_pool_dataframe(self, dataframe: pd.DataFrame, source: str) -> None:
+        """تبدیل دیتافریم استخر به ورودی UI و نمایش دیالوگ."""
+
+        try:
+            entries = build_mentor_entries_from_dataframe(
+                dataframe, existing_overrides=self._mentor_pool_overrides
+            )
+        except Exception as exc:
+            self._append_log(f"❌ خطا در خواندن استخر منتورها: {exc}")
+            QMessageBox.warning(
+                self,
+                "بارگذاری استخر",
+                "امکان استخراج منتورها از فایل نبود؛ لطفاً فایل را بررسی کنید.",
+            )
+            return
+
+        if not entries:
+            QMessageBox.warning(
+                self,
+                "استخر خالی",
+                "هیچ منتوری در فایل یافت نشد؛ لطفاً فایل را بررسی کنید.",
+            )
+            return
+
+        self._mentor_pool_entries = entries
+        self._mentor_pool_source = source
+        self._show_mentor_pool_dialog(entries)
+
+    def _show_mentor_pool_dialog(self, entries: list[MentorPoolEntry]) -> None:
+        """نمایش/به‌روزرسانی دیالوگ حاکمیت استخر."""
+
+        if self._mentor_pool_dialog is None:
+            dialog = self._mentor_pool_dialog_class(entries, self)
+            dialog.finished.connect(
+                lambda result, dlg=dialog: self._handle_mentor_pool_finished(result, dlg)
+            )
+            self._mentor_pool_dialog = dialog
+        else:
+            self._mentor_pool_dialog.set_entries(entries)
+        self._mentor_pool_dialog.show()
+        self._mentor_pool_dialog.raise_()
+
+    def _handle_mentor_pool_finished(self, result: int, dialog: MentorPoolDialog) -> None:
+        """ذخیرهٔ overrideها در صورت پذیرش دیالوگ."""
+
+        if result == QDialog.Accepted:
+            overrides = dialog.get_overrides()
+            self._mentor_pool_overrides = {str(k): bool(v) for k, v in overrides.items()}
 
     def _reset_center_managers_to_default(self) -> None:
         """بازنشانی تمام مدیران به مقادیر پیش‌فرض Policy."""

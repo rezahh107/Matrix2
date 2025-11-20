@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+"""توابع حاکمیت استخر منتورها (POOL_01) با ورودی Override ساده.
+
+این ماژول هیچ I/O یا وابستگی به Qt ندارد و صرفاً روی DataFrame
+کار می‌کند تا بر اساس پیکربندی Policy یا overrideهای UI/CLI منتورها
+را فعال/غیرفعال کند.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Mapping
 
 import pandas as pd

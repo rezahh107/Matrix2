@@ -78,6 +78,64 @@ class QaReport:
 
         return all(result.passed for result in self.results)
 
+    def violations_by_rule(self, rule_id: RuleId) -> list[QaViolation]:
+        """لیست تخطی‌های مربوط به یک قانون مشخص را برمی‌گرداند."""
+
+        return [
+            violation
+            for result in self.results
+            if result.rule_id == rule_id
+            for violation in result.violations
+        ]
+
+    def to_summary_frame(self, *, descriptions: Mapping[str, str] | None = None) -> pd.DataFrame:
+        """خلاصهٔ قوانین را به‌صورت DataFrame برمی‌گرداند.
+
+        Parameters
+        ----------
+        descriptions:
+            نقشهٔ اختیاری ``rule_id`` به توضیح خوانا برای نمایش در گزارش.
+        """
+
+        descriptions = descriptions or {}
+        rows = []
+        for result in sorted(self.results, key=lambda item: item.rule_id):
+            rows.append(
+                {
+                    "rule_id": result.rule_id,
+                    "description": descriptions.get(result.rule_id, ""),
+                    "status": "PASS" if result.passed else "FAIL",
+                    "violations_count": len(result.violations),
+                }
+            )
+        return pd.DataFrame(rows)
+
+    def to_details_frame(self, rule_id: RuleId) -> pd.DataFrame:
+        """تبدیل تخطی‌های یک قانون به DataFrame ساخت‌یافته."""
+
+        violations = self.violations_by_rule(rule_id)
+        base_columns = ["rule_id", "level", "message"]
+        rows: list[dict[str, object]] = []
+        detail_keys: set[str] = set()
+        for violation in violations:
+            detail_map = violation.details or {}
+            detail_keys.update(detail_map.keys())
+            row = {
+                "rule_id": violation.rule_id,
+                "level": violation.level,
+                "message": violation.message,
+            }
+            row.update(detail_map)
+            rows.append(row)
+
+        ordered_columns = base_columns + sorted(detail_keys)
+        frame = pd.DataFrame(rows, columns=ordered_columns)
+        if not frame.empty:
+            sort_keys = [col for col in ordered_columns if col in frame.columns and col not in {"message"}]
+            if sort_keys:
+                frame = frame.sort_values(by=sort_keys, kind="stable").reset_index(drop=True)
+        return frame
+
 
 def run_all_invariants(
     *,
