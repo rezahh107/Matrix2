@@ -182,6 +182,7 @@ External (WP, Excel, FS) --> Infra --> Core
 
 ## 16. Future Evolutions (Non-breaking unless re-approved)
 - Additional exporters/importers via Infra plugins; UI enhancements for dashboards; automated WordPress-to-allocator pipelines with human approval; multi-repo AGENTS.md federation.
+- UI Mentor Pool Governance dialog (PySide6) enables per-run enable/disable of mentors/managers and forwards overrides through Infra into Core mentor pool filtering without changing policy semantics.
 - Breaking changes require Policy/SSoT updates and version bumps; Join Keys/ranking/trace steps are immutable unless Policy changes.
 
 ## 17. Glossary

@@ -31,6 +31,10 @@ from pandas.api import types as pd_types
 from app.core.allocate_students import allocate_batch, build_selection_reason_rows
 from app.core.allocation.engine import enrich_summary_with_history
 from app.core.allocation.history_metrics import METRIC_COLUMNS, compute_history_metrics
+from app.core.allocation.mentor_pool import (
+    MentorPoolGovernanceConfig,
+    apply_mentor_pool_governance,
+)
 from app.core.canonical_frames import (
     canonicalize_allocation_frames,
     sanitize_pool_for_allocation as _sanitize_pool_for_allocation,
@@ -199,6 +203,44 @@ def _export_qa_validation_workbook(
     output_path = _qa_validation_output_path(base_output, stem_override=stem_override)
     export_qa_validation(report, output=output_path, context=context)
     return output_path
+def _normalize_override_mapping(data: Mapping[object, object] | None) -> dict[str, bool]:
+    if not data:
+        return {}
+    normalized: dict[str, bool] = {}
+    for key, value in data.items():
+        try:
+            enabled = bool(value)
+        except Exception:
+            continue
+        text_key = str(key).strip()
+        if text_key:
+            normalized[text_key] = enabled
+    return normalized
+
+
+def _resolve_mentor_pool_overrides(args: argparse.Namespace) -> dict[str, bool]:
+    overrides: dict[str, bool] = {}
+    ui_overrides = getattr(args, "_ui_overrides", {}) or {}
+    ui_mapping = ui_overrides.get("mentor_pool_overrides")
+    overrides.update(_normalize_override_mapping(ui_mapping if isinstance(ui_mapping, Mapping) else {}))
+
+    raw = getattr(args, "mentor_overrides", None)
+    if raw:
+        payload = json.loads(raw)
+        if not isinstance(payload, Mapping):
+            raise ValueError("mentor-overrides must be a JSON object")
+        overrides.update(_normalize_override_mapping(payload))
+    return overrides
+
+
+def _apply_mentor_pool_overrides(
+    pool: pd.DataFrame, policy: PolicyConfig, args: argparse.Namespace
+) -> pd.DataFrame:
+    overrides = _resolve_mentor_pool_overrides(args)
+    config: MentorPoolGovernanceConfig = getattr(
+        policy, "mentor_pool_governance", MentorPoolGovernanceConfig.default()
+    )
+    return apply_mentor_pool_governance(pool, config, overrides=overrides)
 
 
 def _detect_reader(path: Path) -> Callable[[Path], pd.DataFrame]:
@@ -1529,6 +1571,8 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
         pool_source="inspactor",
     )
 
+    pool_base = _apply_mentor_pool_overrides(pool_base, policy, args)
+
     return _allocate_and_write(
         students_base,
         pool_base,
@@ -1563,6 +1607,8 @@ def _run_rule_engine(
         sanitize_pool=True,
         pool_source="matrix",
     )
+
+    pool_base = _apply_mentor_pool_overrides(pool_base, policy, args)
 
     return _allocate_and_write(
         students_base,
@@ -1655,6 +1701,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--center-managers",
         default=None,
         help="نگاشت JSON مرکز→لیست مدیران برای override گروهی",
+    )
+    alloc_cmd.add_argument(
+        "--mentor-overrides",
+        default=None,
+        help="JSON object نگاشت mentor_id→enabled برای اجرای جاری",
     )
     alloc_cmd.add_argument(
         "--audit",
@@ -1751,6 +1802,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--policy",
         default=str(_DEFAULT_POLICY_PATH),
         help="مسیر فایل policy.json",
+    )
+    rule_cmd.add_argument(
+        "--mentor-overrides",
+        default=None,
+        help="JSON object نگاشت mentor_id→enabled برای اجرای جاری",
     )
     rule_cmd.add_argument(
         "--audit",
