@@ -110,6 +110,6 @@ def filter_active_mentors(
     filtered = mentors_df.loc[active_mask].copy()
 
     if attach_status:
-        filtered[status_column] = statuses.loc[filtered.index].map(lambda s: s.value)
+        filtered.loc[:, status_column] = statuses.loc[filtered.index].map(lambda s: s.value)
 
     return filtered
