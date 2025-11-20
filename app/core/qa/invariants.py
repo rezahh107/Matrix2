@@ -80,12 +80,12 @@ class QaReport:
     def violations_by_rule(self, rule_id: RuleId) -> list[QaViolation]:
         """لیست تخطی‌های مربوط به یک قانون مشخص را برمی‌گرداند."""
 
-        filtered: list[QaViolation] = []
-        for result in self.results:
-            if result.rule_id != rule_id:
-                continue
-            filtered.extend(result.violations)
-        return filtered
+        return [
+            violation
+            for result in self.results
+            if result.rule_id == rule_id
+            for violation in result.violations
+        ]
 
     def to_summary_frame(self, *, descriptions: Mapping[str, str] | None = None) -> pd.DataFrame:
         """خلاصهٔ قوانین را به‌صورت DataFrame برمی‌گرداند.
