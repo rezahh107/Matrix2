@@ -19,7 +19,8 @@
   - Inputs: In-memory DataFrames, policy JSON, progress callback (function), pre-mapped reference data.
   - Outputs: In-memory DataFrames/records (eligibility matrix, allocation results, traces, error taxonomies).
 - **Infra Layer (I/O & Adapters)**
-  - Responsibilities: Excel read/write (atomic fallback), filesystem layout, WordPress intake fetch/normalize (Gravity Forms), ImportToSabt exporter, logging, configuration loading (`config/policy.json`), premap construction, schema validation، و نگهداری `HistoryStore` (بارگذاری/به‌روزرسانی تاریخچه تخصیص بر اساس کد ملی).
+  - Responsibilities: Excel read/write (atomic fallback), filesystem layout, WordPress intake fetch/normalize (Gravity Forms), ImportToSabt exporter, logging، Local SQLite (`app/infra/local_database.py`) for offline run metadata, configuration loading (`config/policy.json`), premap construction, schema validation، و نگهداری `HistoryStore` (بارگذاری/به‌روزرسانی تاریخچه تخصیص بر اساس کد ملی).
+  - Local SQLite logging قابل پیکربندی با پرچم‌های `--local-db` و `--disable-local-db` است و در صورت خطا نباید جریان Core را متوقف کند.
   - Prohibitions: Allocation logic, ranking changes, trace mutation beyond recording, UI widgets.
   - Inputs/Outputs: Filesystem paths, HTTP (WordPress), Excel sheets, JSON configs.
 - **UI Layer (PySide6 Shell + Optional CLI)**
