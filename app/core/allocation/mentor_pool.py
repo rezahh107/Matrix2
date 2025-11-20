@@ -17,7 +17,23 @@ from app.core.policy_loader import MentorPoolGovernanceConfig, MentorStatus
 __all__ = [
     "compute_effective_status",
     "filter_active_mentors",
+    "apply_mentor_pool_governance",
 ]
+
+
+def _normalize_overrides(
+    overrides: Mapping[int | str | float, bool] | None,
+) -> dict[int, bool]:
+    normalized: dict[int, bool] = {}
+    if not overrides:
+        return normalized
+    for raw_id, enabled in overrides.items():
+        try:
+            mentor_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        normalized[mentor_id] = bool(enabled)
+    return normalized
 
 
 def compute_effective_status(
@@ -119,4 +135,61 @@ def filter_active_mentors(
     if attach_status:
         filtered.loc[:, status_column] = statuses.loc[filtered.index].map(lambda s: s.value)
 
+    return filtered
+
+
+def apply_mentor_pool_governance(
+    mentors_df: pd.DataFrame | None,
+    governance: MentorPoolGovernanceConfig,
+    *,
+    overrides: Mapping[int | str | float, bool] | None = None,
+) -> pd.DataFrame:
+    """اعمال حاکمیت استخر منتورها بر اساس Policy و override نوبتی.
+
+    پارامترها
+    ----------
+    mentors_df:
+        دیتافریم ورودی استخر منتورها. در صورت تهی یا نبود ستون ``mentor_id``
+        بدون خطا بازگردانده می‌شود.
+    governance:
+        پیکربندی حاکمیت استخر از Policy (MentorPoolGovernanceConfig).
+    overrides:
+        نگاشت اختیاری ``mentor_id`` → ``enabled`` برای فعال/غیرفعال‌سازی
+        در اجرای جاری.
+
+    خروجی
+    ------
+    دیتافریم فیلترشده با حفظ شِما که ویژگی ``attrs['mentor_pool_governance']``
+    را شامل شمار کل، حذف‌شده و تعداد overrideها دارد. خروجی برای ورودی برابر
+    دترمینیستیک است و هیچ I/O یا وابستگی Qt در Core وارد نمی‌شود.
+    """
+
+    normalized_overrides = _normalize_overrides(overrides)
+
+    if mentors_df is None:
+        result = pd.DataFrame()
+        result.attrs["mentor_pool_governance"] = {
+            "total": 0,
+            "removed": 0,
+            "overrides_count": len(normalized_overrides),
+        }
+        return result
+
+    result = mentors_df.copy(deep=True)
+    if result.empty or "mentor_id" not in result.columns:
+        result.attrs["mentor_pool_governance"] = {
+            "total": len(result),
+            "removed": 0,
+            "overrides_count": len(normalized_overrides),
+        }
+        return result
+
+    statuses = compute_effective_status(result, governance, normalized_overrides)
+    active_mask = statuses == MentorStatus.ACTIVE
+    filtered = result.loc[active_mask].copy()
+    filtered.attrs["mentor_pool_governance"] = {
+        "total": len(result),
+        "removed": int((~active_mask).sum()),
+        "overrides_count": len(normalized_overrides),
+    }
     return filtered

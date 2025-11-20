@@ -4,6 +4,7 @@ import json
 import pandas as pd
 
 from app.core.allocation.mentor_pool import (
+    apply_mentor_pool_governance,
     compute_effective_status,
     filter_active_mentors,
 )
@@ -128,3 +129,51 @@ def test_default_inactive_requires_override():
         mentors, policy.mentor_pool_governance, overrides={41: True}
     )
     assert overridden["mentor_id"].tolist() == [41]
+
+
+def test_apply_mentor_pool_governance_delegates_to_effective_status():
+    policy = _policy_with_governance(
+        _base_policy_payload(),
+        {
+            "default_status": "active",
+            "allowed_statuses": ["active", "inactive"],
+            "mentors": [
+                {"mentor_id": 2, "status": "inactive"},
+            ],
+        },
+    )
+    mentors = pd.DataFrame({"mentor_id": [1, 2, 3]})
+
+    filtered = apply_mentor_pool_governance(
+        mentors,
+        policy.mentor_pool_governance,
+        overrides={2: True, 3: False},
+    )
+
+    assert filtered["mentor_id"].tolist() == [1, 2]
+    assert filtered.attrs["mentor_pool_governance"] == {
+        "total": 3,
+        "removed": 1,
+        "overrides_count": 2,
+    }
+
+
+def test_apply_mentor_pool_without_identifier_is_noop_with_attrs():
+    policy = _policy_with_governance(
+        _base_policy_payload(),
+        {
+            "default_status": "active",
+            "allowed_statuses": ["active", "inactive"],
+            "mentors": [],
+        },
+    )
+    mentors = pd.DataFrame({"name": ["a", "b"]})
+
+    filtered = apply_mentor_pool_governance(mentors, policy.mentor_pool_governance)
+
+    pd.testing.assert_frame_equal(filtered, mentors)
+    assert filtered.attrs["mentor_pool_governance"] == {
+        "total": 2,
+        "removed": 0,
+        "overrides_count": 0,
+    }

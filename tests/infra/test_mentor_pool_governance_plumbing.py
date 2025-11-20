@@ -4,13 +4,17 @@ import json
 import pandas as pd
 
 from app.core.allocation.mentor_pool import MentorPoolGovernanceConfig, apply_mentor_pool_governance
-from app.core.policy_loader import get_policy
+from app.core.policy_loader import MentorStatus, get_policy
 from app.infra import cli
 
 
 def test_apply_mentor_pool_governance_filters_overrides() -> None:
     pool = pd.DataFrame({"mentor_id": ["1", "2"], "mentor_status": ["ACTIVE", "ACTIVE"]})
-    config = MentorPoolGovernanceConfig(enabled=True)
+    config = MentorPoolGovernanceConfig(
+        default_status=MentorStatus.ACTIVE,
+        mentor_status_map={},
+        allowed_statuses=(MentorStatus.ACTIVE, MentorStatus.INACTIVE),
+    )
 
     filtered = apply_mentor_pool_governance(pool, config, overrides={"1": False})
 
