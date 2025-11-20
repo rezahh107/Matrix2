@@ -18,7 +18,6 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from typing import Literal, cast
 
 from app.core.policy.config import AllocationChannelConfig
-from app.core.allocation.mentor_pool import MentorPoolGovernanceConfig
 from app.core.policy.loader import compute_schema_hash, validate_policy_columns
 
 VersionMismatchMode = Literal["raise", "warn", "migrate"]
@@ -1204,9 +1203,6 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         ),
         mentor_school_binding=_to_mentor_school_binding(
             data.get("mentor_school_binding", {})
-        ),
-        mentor_pool_governance=_to_mentor_pool_governance(
-            data.get("mentor_pool_governance", {})
         ),
         allocation_channels=allocation_channels_obj,
     )

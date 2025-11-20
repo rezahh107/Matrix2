@@ -26,6 +26,7 @@ from typing import Any, Callable, Collection, Dict, Iterable, List, Mapping, Seq
 import numpy as np
 import pandas as pd
 
+from app.core.allocation.engine import build_mentor_pool
 from app.core.canonical_frames import (
     POOL_DUPLICATE_SUMMARY_ATTR,
     POOL_JOIN_KEY_DUPLICATES_ATTR,
@@ -254,6 +255,7 @@ class BuildConfig:
     finance_variants: tuple[int, ...] | None = None
     default_status: int = Status.STUDENT
     enable_capacity_gate: bool = True
+    mentor_pool_overrides: Mapping[int | str | float, bool] | None = None
     center_manager_map: dict[str, int] | None = None
     can_allocate_truthy: tuple[str, ...] = ("بلی", "بله", "Yes", "yes", "1", "true", "True")
     postal_valid_range: tuple[int, int] | None = None
@@ -303,6 +305,16 @@ class BuildConfig:
             self.center_manager_map = dict(policy.center_map)
         else:
             self.center_manager_map = {str(k): int(v) for k, v in self.center_manager_map.items()}
+
+        if self.mentor_pool_overrides is not None:
+            normalized_overrides: dict[int, bool] = {}
+            for raw_id, enabled in self.mentor_pool_overrides.items():
+                try:
+                    mentor_id = int(raw_id)
+                except (TypeError, ValueError):
+                    continue
+                normalized_overrides[mentor_id] = bool(enabled)
+            self.mentor_pool_overrides = normalized_overrides
 
         if self.postal_valid_range is None:
             self.postal_valid_range = tuple(policy.postal_valid_range)
@@ -1866,6 +1878,7 @@ def build_matrix(
     """
     progress_rows: list[dict[str, Any]] = []
     normalization_meta: dict[str, dict[str, Any]] = {}
+    governance_invalid = pd.DataFrame(columns=["row_index", "پشتیبان", "مدیر", "reason"])
 
     def _append_progress_row(row: dict[str, Any]) -> None:
         progress_rows.append(row)
@@ -1947,6 +1960,31 @@ def build_matrix(
     )
     if duplicate_progress_message:
         progress(4, f"⚠️ duplicate join keys detected: {duplicate_progress_message}")
+
+    governed_insp_df = build_mentor_pool(
+        insp_df,
+        policy=cfg.policy,
+        overrides=cfg.mentor_pool_overrides,
+        attach_status=True,
+    )
+    inactive_indices = insp_df.index.difference(governed_insp_df.index)
+    if len(inactive_indices):
+        governance_invalid = pd.DataFrame(
+            {
+                "row_index": (inactive_indices + 1),
+                "پشتیبان": insp_df.loc[inactive_indices, COL_MENTOR_NAME],
+                "مدیر": insp_df.loc[inactive_indices, COL_MANAGER_NAME],
+                "reason": "mentor inactive per policy/override",
+            }
+        )
+        progress(
+            5,
+            (
+                "mentor pool governance filtered inactive mentors: "
+                f"removed={len(inactive_indices)} kept={len(governed_insp_df)}"
+            ),
+        )
+    insp_df = governed_insp_df
     schools_df = resolve_aliases(schools_df, "school")
     schools_df = coerce_semantics(schools_df, "school")
     schools_df = ensure_required_columns(schools_df, REQUIRED_SCHOOL_COLUMNS, "school")
@@ -1956,7 +1994,7 @@ def build_matrix(
         collector=_collect_normalization("schools"),
     )
 
-    progress(5, "preparing crosswalk mappings")
+    progress(6, "preparing crosswalk mappings")
     crosswalk_groups_df, _ = normalize_input_columns(
         crosswalk_groups_df,
         kind="CrosswalkReport",
@@ -2026,6 +2064,10 @@ def build_matrix(
         included_col=included_col,
         group_cols=group_cols,
     )
+    if not governance_invalid.empty:
+        invalid_mentors_df = pd.concat(
+            [invalid_mentors_df, governance_invalid], ignore_index=True, sort=False
+        )
     invalid_school_indices: set[Any] = set()
     if school_lookup_issues.empty:
         school_lookup_invalid = pd.DataFrame(
