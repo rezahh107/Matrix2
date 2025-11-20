@@ -7,8 +7,6 @@ import re
 from typing import Collection, Dict, Iterable, List, Literal, Mapping, Sequence
 
 import pandas as pd
-
-from app.core.policy_loader import get_policy
 from .normalization import normalize_fa, strip_school_code_separators, to_numlike_str
 
 __all__ = [
@@ -466,6 +464,8 @@ def _normalized_header_tokens(value: object) -> tuple[str, ...]:
 
 
 def _policy_aliases(source: Source) -> Mapping[str, str]:
+    from app.core.policy_loader import get_policy  # import محلی برای جلوگیری از حلقهٔ وابستگی
+
     policy = get_policy()
     return policy.column_aliases.get(source, {})
 
