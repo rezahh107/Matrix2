@@ -10,7 +10,7 @@ This file captures the current implementation status (code vs. docs) for history
 | HIST_02 | Allocation channel + history flags in pipeline | implemented | `app/core/allocation/trace.py` (`attach_allocation_channel`, `attach_history_flags`, `attach_history_snapshot`, `attach_same_history_mentor`); `app/core/allocation/engine.py` (`enrich_summary_with_history`) | CLI: `app/infra/cli.py` (enrich + logging); Excel: `app/infra/excel/export_allocations.py` (`collect_trace_debug_sheets`) | Integrated button/dialog in `app/ui/main_window.py` + `app/ui/history_metrics.py` for viewing metrics | `tests/core/allocation/test_history_same_mentor.py`; `tests/core/allocation/test_allocation_channel.py` | Channels derived from policy; history flags carried into summary/trace. |
 | HIST_03 | History metrics (Core/CLI/Excel/UI) | implemented | `app/core/allocation/history_metrics.py` (`compute_history_metrics`) | CLI logger `_log_history_metrics` and Excel sheet via `collect_trace_debug_sheets` | History metrics model/panel/dialog wired in main window | `tests/core/allocation/test_history_metrics.py`; `tests/infra/test_history_metrics_logging.py`; `tests/infra/excel/test_history_metrics_export.py`; `tests/ui/test_history_metrics.py` | Metrics include counts and same-history-mentor ratio per allocation_channel. |
 | POOL_01 | Mentor pool governance (status-driven filtering) | missing | — | — | — | — | Docs describe MentorProfile/mentor_status, but no build/pool filtering exists in code. |
-| POOL_02 | Mentor pool governance UI (enable/disable mentors/managers) | missing | — | — | — | — | No PySide6 panel/dialog or CLI switches to toggle pool membership after import. |
+| POOL_02 | Mentor pool governance UI (enable/disable mentors/managers) | implemented | — | CLI: `_ui_overrides` → `mentor_pool_overrides` in `app/infra/cli.py` | `app/ui/main_window.py` (toolbar + allocate form), `app/ui/mentor_pool_dialog.py` | `tests/ui/test_mentor_pool_dialog.py`, `tests/ui/test_main_window_mentor_pool_integration.py` | Button/action opens governance dialog; overrides flow into CLI without changing Policy/SSoT. |
 | BIND_01 | MentorSchoolBindingPolicy (global vs restricted) | implemented | `app/core/policy_loader.py` (`MentorSchoolBindingPolicy`); `app/core/build_matrix.py` (`collect_school_codes_from_row`, binding defaults); `app/core/common/filters.py` (`filter_by_school`) | — | — | `tests/unit/test_school_binding.py`; QA coverage in `tests/core/qa/test_invariants_join_and_school.py` | Empty/zero tokens → global; restricted rows require valid school code. |
 | QA_01 | QA invariants engine | implemented | `app/core/qa/invariants.py` (`QaViolation`, `QaRuleResult`, `QaReport`, `run_all_invariants`, rules STU_01/STU_02/JOIN_01/SCHOOL_01/ALLOC_01`) | CLI invokes QA in `app/infra/cli.py` | — | `tests/core/qa/test_invariants_students.py`; `tests/core/qa/test_invariants_join_and_school.py` | QA enforced post-build/allocation with deterministic rule set. |
 | QA_02 | QA Excel export (matrix_vs_students_validation.xlsx) | missing | — | — | — | — | Docs mention QA export, but no Infra exporter or tests exist. |
@@ -44,9 +44,9 @@ This file captures the current implementation status (code vs. docs) for history
 - **Docs gap:** Vision/Scope and AGENTS describe MentorProfile and `mentor_status`, but code/tests lack implementation and persistence paths.
 
 ### POOL_02 — Mentor Pool Governance UI
-- **Status:** missing.
-- **Findings:** No PySide6 panel/dialog or CLI options to include/exclude mentors/managers from the allocation pool after import. UI focuses on allocation/history metrics without governance controls.
-- **Docs gap:** Blueprint and requirements call for a pool management panel; absent in code/tests.
+- **Status:** implemented.
+- **Findings:** `app/ui/main_window.py` exposes a toolbar action and inline button that open `MentorPoolDialog`; selections populate `mentor_pool_overrides` passed to CLI through `_ui_overrides` for `apply_mentor_pool_governance` without altering Policy/SSoT.
+- **Docs gap:** Keep UX copy aligned with Blueprint; no changes to Policy required.
 
 ### BIND_01 — MentorSchoolBindingPolicy (global vs restricted)
 - **Status:** implemented.

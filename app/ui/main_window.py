@@ -509,6 +509,13 @@ class MainWindow(QMainWindow):
         toolbar.addAction(allocate_action)
         self._toolbar_actions["allocate"] = allocate_action
 
+        mentor_pool_action = QAction("حاکمیت استخر", self)
+        mentor_pool_action.setShortcut(QKeySequence("Ctrl+M"))
+        mentor_pool_action.setShortcutVisibleInContextMenu(True)
+        mentor_pool_action.triggered.connect(self._open_mentor_pool_governance)
+        toolbar.addAction(mentor_pool_action)
+        self._toolbar_actions["mentor_pool"] = mentor_pool_action
+
         rule_action = QAction(self._t("action.rule_engine", "اجرای Rule Engine"), self)
         rule_action.setShortcut(QKeySequence("Ctrl+R"))
         rule_action.setShortcutVisibleInContextMenu(True)
@@ -1448,6 +1455,7 @@ class MainWindow(QMainWindow):
             self._picker_rule_prior_roster,
             self._picker_rule_current_roster,
             self._btn_rule_autodetect,
+            self._btn_mentor_pool,
         ]
         self._interactive.extend(self._center_manager_combos.values())
         if self._btn_reset_managers is not None:
