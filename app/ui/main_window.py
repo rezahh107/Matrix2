@@ -61,6 +61,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
+from app.core.allocation.history_metrics import METRIC_COLUMNS
 from app.core.common.columns import CANON_EN_TO_FA, canonicalize_headers, ensure_series
 from app.core.counter import find_max_sequence_by_prefix, year_to_yy
 from app.core.policy_loader import get_policy
@@ -69,6 +70,7 @@ from app.utils.path_utils import resource_path
 
 from app.ui.helpers.counter_helpers import detect_year_candidates
 from app.ui.helpers.manager_helpers import extract_manager_names
+from app.ui.history_metrics import HistoryMetricsDialog
 from app.ui.loaders import ExcelLoader
 from app.ui.policy_cache import get_cached_policy
 from app.ui.fonts import get_app_font
@@ -299,6 +301,8 @@ class MainWindow(QMainWindow):
         self._log: QTextEdit | None = None
         self._log_buffer: list[str] = []
         self._log_line = 0
+        self._history_metrics_df = pd.DataFrame(columns=METRIC_COLUMNS)
+        self._history_metrics_dialog: HistoryMetricsDialog | None = None
         self._toolbar_actions: Dict[str, QAction] = {}
         self._toolbar_theme_label: QLabel | None = None
         self._stage_badge: QLabel | None = None
@@ -416,6 +420,10 @@ class MainWindow(QMainWindow):
         controls_layout.setContentsMargins(0, 0, 0, 0)
         controls_layout.setSpacing(12)
         controls_layout.addStretch(1)
+        self._btn_history_metrics = QPushButton("History Metrics", self)
+        self._btn_history_metrics.setObjectName("btnHistoryMetrics")
+        self._btn_history_metrics.clicked.connect(self._show_history_metrics)
+        controls_layout.addWidget(self._btn_history_metrics)
         self._btn_demo = QPushButton(self._t("action.demo", "اجرای تست (دمو Progress)"))
         self._btn_demo.setObjectName("btnDemo")
         self._btn_demo.setToolTip(self._t("log.demo.tooltip", "اجرای تست کوتاه برای نمایش انیمیشن پیشرفت"))
@@ -1391,6 +1399,7 @@ class MainWindow(QMainWindow):
             self._btn_allocate,
             self._btn_rule_engine,
             self._btn_demo,
+            self._btn_history_metrics,
             self._picker_inspactor,
             self._picker_schools,
             self._picker_crosswalk,
@@ -1477,12 +1486,43 @@ class MainWindow(QMainWindow):
 
         self._launch_cli(argv, "ساخت ماتریس", on_success=_remember_build_output)
 
+    def _reset_history_metrics(self) -> None:
+        """پاک‌سازی خروجی KPI تاریخچه برای اجرای جدید."""
+
+        self._history_metrics_df = pd.DataFrame(columns=METRIC_COLUMNS)
+        if self._history_metrics_dialog is not None:
+            self._history_metrics_dialog.update_metrics(self._history_metrics_df)
+
+    def _capture_history_metrics(self, metrics_df: pd.DataFrame | None) -> None:
+        """ذخیرهٔ KPI تاریخچه محاسبه‌شده در نخ Worker."""
+
+        if isinstance(metrics_df, pd.DataFrame):
+            self._history_metrics_df = metrics_df.copy()
+        else:
+            self._reset_history_metrics()
+        if self._history_metrics_dialog is not None:
+            self._history_metrics_dialog.update_metrics(self._history_metrics_df)
+
+    def _show_history_metrics(self) -> None:
+        """نمایش دیالوگ History Metrics با داده‌های آخرین اجرا."""
+
+        if self._history_metrics_dialog is None:
+            self._history_metrics_dialog = HistoryMetricsDialog(
+                self._history_metrics_df, self
+            )
+        else:
+            self._history_metrics_dialog.update_metrics(self._history_metrics_df)
+        self._history_metrics_dialog.show()
+        self._history_metrics_dialog.raise_()
+
     def _start_allocate(self) -> None:
         """اجرای سناریوی تخصیص با فراخوانی CLI."""
 
         if self._worker is not None and self._worker.isRunning():
             QMessageBox.warning(self, "تسک در حال اجرا", "لطفاً تا پایان عملیات جاری صبر کنید.")
             return
+
+        self._reset_history_metrics()
 
         required = [
             (self._picker_students, "فایل دانش‌آموزان"),
@@ -1501,6 +1541,7 @@ class MainWindow(QMainWindow):
         )
 
         overrides = self._build_allocate_overrides()
+        overrides["history_metrics_callback"] = self._capture_history_metrics
         academic_year = overrides.get("academic_year")
         if academic_year is None:
             QMessageBox.warning(
