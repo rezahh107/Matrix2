@@ -327,13 +327,13 @@ class MentorPoolGovernanceConfig:
     def status_for(self, mentor_id: int | float | str | None) -> MentorStatus:
         """وضعیت مؤثر منتور بر اساس Policy را برمی‌گرداند."""
 
-        try:
-            normalized = int(mentor_id) if mentor_id is not None else None
-        except (TypeError, ValueError):
-            normalized = None
-        if normalized is None:
+        if mentor_id is None:
             return self.default_status
-        return self.mentor_status_map.get(normalized, self.default_status)
+        try:
+            normalized_id = int(mentor_id)
+        except (TypeError, ValueError):
+            return self.default_status
+        return self.mentor_status_map.get(normalized_id, self.default_status)
 
 
 @dataclass(frozen=True)
