@@ -21,6 +21,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Literal, Mapping, Sequence
+from uuid import uuid4
 
 from dataclasses import asdict
 
@@ -69,6 +70,8 @@ from app.infra.io_utils import (
     read_excel_first_sheet,
     write_xlsx_atomic,
 )
+from app.infra.local_database import LocalDatabase
+from app.infra import history_store
 from app.infra.audit_allocations import audit_allocations, summarize_report
 # --- واردات اصلاح شده از app.core ---
 from app.core.common.columns import (
@@ -95,6 +98,7 @@ _DEFAULT_POLICY_PATH = Path("config/policy.json")
 _DEFAULT_EXPORTER_CONFIG_PATH = Path("config/SmartAlloc_Exporter_Config_v1.json")
 _DEFAULT_SABT_TEMPLATE_PATH = Path("templates/ImportToSabt (1404) - Copy.xlsx")
 _DEFAULT_ALLOC_PROFILE_PATH = DEFAULT_SABT_PROFILE_PATH
+_DEFAULT_LOCAL_DB_PATH = Path("smart_alloc.db")
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +106,40 @@ logger = logging.getLogger(__name__)
 def _default_progress(pct: int, message: str) -> None:
     """چاپ سادهٔ وضعیت پیشرفت در حالت headless."""
     print(f"{pct:3d}% | {message}")
+
+
+def _add_local_db_args(parser: argparse.ArgumentParser) -> None:
+    """افزودن آرگومان‌های پایگاه دادهٔ محلی برای لاگ اجرا."""
+
+    parser.add_argument(
+        "--local-db",
+        dest="local_db_path",
+        default=str(_DEFAULT_LOCAL_DB_PATH),
+        help="مسیر فایل SQLite جهت ثبت تاریخچهٔ اجرا",
+    )
+    parser.add_argument(
+        "--disable-local-db",
+        action="store_true",
+        help="غیرفعال‌سازی ثبت تاریخچه در SQLite",
+    )
+
+
+def _resolve_local_db(args: argparse.Namespace) -> LocalDatabase | None:
+    """تولید LocalDatabase از آرگومان‌ها یا بازگشت None در صورت غیرفعال بودن."""
+
+    overrides = getattr(args, "_ui_overrides", {}) or {}
+    if bool(overrides.get("disable_local_db")) or getattr(args, "disable_local_db", False):
+        return None
+    path_text = (
+        overrides.get("local_db_path")
+        or getattr(args, "local_db_path", None)
+        or str(_DEFAULT_LOCAL_DB_PATH)
+    )
+    try:
+        return LocalDatabase(Path(path_text))
+    except Exception:  # pragma: no cover - خطاهای غیرمنتظرهٔ مسیر
+        logger.exception("Failed to prepare local DB at %s", path_text)
+        return None
 
 
 def _print_audit_summary(report: Dict[str, Dict[str, Any]]) -> None:
@@ -1307,8 +1345,20 @@ def _allocate_and_write(
     progress: ProgressFn,
     output: Path,
     capacity_column: str,
+    db: LocalDatabase | None,
+    command_name: str,
+    input_students_path: Path | None,
+    input_pool_path: Path | None,
+    policy_path: Path,
 ) -> int:
     """اجرای تخصیص، الصاق شناسه‌ها و نوشتن خروجی‌های Excel."""
+    run_uuid = uuid4().hex
+    started_at = datetime.now(timezone.utc)
+    cli_args_text = " ".join(getattr(args, "_raw_argv", [])).strip() or None
+    qa_report: object | None = None
+    history_metrics_df: pd.DataFrame | None = None
+    success = False
+    status_message = "success"
 
     student_ids, counter_summary, students_base = _inject_student_ids(
         students_base, args, policy
@@ -1319,210 +1369,18 @@ def _allocate_and_write(
         args, policy
     )
 
-    allocations_df, updated_pool_df, logs_df, trace_df = allocate_batch(
-        students_base.copy(deep=True),
-        pool_base.copy(deep=True),
-        policy=policy,
-        progress=progress,
-        capacity_column=capacity_column,
-        frames_already_canonical=True,
-        center_manager_map=cli_center_map,
-        ui_center_manager_map=ui_center_map,
-        center_priority=center_priority,
-        strict_center_validation=strict_validation,
-    )
-
-    header_internal: HeaderMode = policy.excel.header_mode_internal  # type: ignore[assignment]
-
-    def _attach_student_id(frame: pd.DataFrame, ensure_existing: bool = False) -> pd.DataFrame:
-        en_frame = canonicalize_headers(frame, header_mode="en")
-        aligned = student_ids.reindex(en_frame.index)
-        aligned_string = aligned.astype("string")
-        if ensure_existing and "student_id" in en_frame.columns:
-            existing = en_frame["student_id"].astype("string")
-            en_frame["student_id"] = existing.fillna(aligned_string)
-        else:
-            en_frame["student_id"] = aligned_string
-        return canonicalize_headers(en_frame, header_mode=header_internal)
-
-    allocations_df = _attach_student_id(allocations_df)
-    logs_df = _attach_student_id(logs_df, ensure_existing=True)
-    trace_df = _attach_student_id(trace_df, ensure_existing=True)
-
-    export_profile_choice = _resolve_optional_override(args, "export_profile", "sabt") or "sabt"
-    export_profile_path = _resolve_optional_override(
-        args, "export_profile_path", str(_DEFAULT_ALLOC_PROFILE_PATH)
-    ) or str(_DEFAULT_ALLOC_PROFILE_PATH)
-    students_for_export = canonicalize_headers(students_base, header_mode=header_internal)
-    students_for_export["student_id"] = (
-        student_ids.reindex(students_for_export.index).astype("string")
-    )
+    allocations_df: pd.DataFrame | None = None
+    updated_pool_df: pd.DataFrame | None = None
+    logs_df: pd.DataFrame | None = None
+    trace_df: pd.DataFrame | None = None
     sabt_allocations_df: pd.DataFrame | None = None
-    if export_profile_choice == "sabt":
-        sabt_profile = load_sabt_export_profile(Path(export_profile_path))
-        sabt_allocations_df = build_sabt_export_frame(
-            allocations_df,
-            students_for_export,
-            profile=sabt_profile,
-            summary_df=trace_df.attrs.get("summary_df"),
-        )
 
-    # --- پاک‌سازی جامع خروجی قبل از نوشتن ---
-    # اطمینان از معتبر بودن همه دیتافریم‌ها
-    allocations_df = _ensure_valid_dataframe(allocations_df, "allocations")
-    updated_pool_df = _ensure_valid_dataframe(updated_pool_df, "updated_pool")
-    logs_df = _ensure_valid_dataframe(logs_df, "logs")
-    trace_df = _ensure_valid_dataframe(trace_df, "trace")
-    selection_reasons_df = build_selection_reason_rows(
-        allocations_df,
-        students_base,
-        pool_base,
-        policy=policy,
-        logs=logs_df,
-        trace=trace_df,
-    )
-    selection_reasons_df = _ensure_valid_dataframe(selection_reasons_df, "selection_reasons")
-    sheet_name, selection_reasons_df = write_selection_reasons_sheet(
-        selection_reasons_df,
-        writer=None,
-        policy=policy,
-    )
-
-    _maybe_export_import_to_sabt(
-        args=args,
-        allocations_df=allocations_df,
-        students_df=students_base,
-        mentors_df=pool_base,
-        logs_df=logs_df,
-        student_ids=student_ids,
-    )
-
-    if sabt_allocations_df is not None:
-        sabt_allocations_df = _ensure_valid_dataframe(sabt_allocations_df, "allocations_sabt")
-
-    qa_report = run_all_invariants(
-        policy=policy,
-        allocation=allocations_df,
-        allocation_summary=updated_pool_df,
-        student_report=None,
-    )
-    qa_context = QaValidationContext(
-        allocation=allocations_df,
-        allocation_summary=updated_pool_df,
-        meta={
-            "policy_version": policy.version,
-            "ssot_version": "1.0.2",
-            "source_output": str(output),
-        },
-    )
-    _export_qa_validation_workbook(
-        report=qa_report,
-        base_output=output,
-        context=qa_context,
-    )
-    if not qa_report.passed:
-        failed_rules = {violation.rule_id for violation in qa_report.violations}
-        detail = "; ".join(f"{v.rule_id}: {v.message}" for v in qa_report.violations)
-        raise ValueError(
-            "QA invariants failed: "
-            f"rules={sorted(failed_rules)} details={detail or 'n/a'}"
-        )
-
-    # تبدیل نهایی به فرمت‌های قابل نوشتن در Excel
-    allocations_df = _make_excel_safe(allocations_df)
-    updated_pool_df = _make_excel_safe(updated_pool_df)
-    logs_df = _make_excel_safe(logs_df)
-    trace_df = _make_excel_safe(trace_df)
-    selection_reasons_df = _make_excel_safe(selection_reasons_df)
-    # sabt_allocations_df با هدر اصلی حفظ می‌شود اما از مسیر آماده‌سازی پیش‌فرض
-    # عبور می‌کند تا ستون‌های موبایل/رهگیری به‌صورت متن و با صفر پیشتاز ذخیره شوند.
-    # --- پایان پاک‌سازی ---
-
-    progress(90, "writing outputs")
-    sheets: dict[str, pd.DataFrame] = {}
-    header_overrides: dict[str, HeaderMode | None] = {}
-    prepare_overrides: dict[str, Literal["default", "raw"]] = {}
-    if sabt_allocations_df is not None:
-        sheets["allocations"] = allocations_df
-        sheets["allocations_sabt"] = sabt_allocations_df
-        header_overrides["allocations_sabt"] = None
-    else:
-        sheets["allocations"] = allocations_df
-    sheets["updated_pool"] = updated_pool_df
-    sheets["logs"] = logs_df
-    sheets["trace"] = trace_df
-    sheets[sheet_name] = selection_reasons_df
-
-    summary_df_attr = trace_df.attrs.get("summary_df")
-    history_info_df = trace_df.attrs.get("history_info_df")
-    ui_overrides = getattr(args, "_ui_overrides", {}) or {}
-    history_metrics_df = _empty_history_metrics_df()
-    if (
-        isinstance(summary_df_attr, pd.DataFrame)
-        and not summary_df_attr.empty
-        and history_info_df is not None
-    ):
-        try:
-            enriched_summary = enrich_summary_with_history(
-                summary_df_attr,
-                students_df=students_base,
-                history_info_df=history_info_df,
-                policy=policy,
-            )
-            history_metrics_df = compute_history_metrics(enriched_summary)
-        except KeyError:
-            history_metrics_df = _empty_history_metrics_df()
-
-    history_metrics_df = _log_history_metrics(
-        summary_df_attr,
-        students_df=students_base,
-        history_info_df=history_info_df,
-        policy=policy,
-        history_metrics_df=history_metrics_df,
-    )
-
-    metrics_callback = ui_overrides.get("history_metrics_callback")
-    if callable(metrics_callback):
-        try:
-            metrics_callback(history_metrics_df.copy())
-        except Exception:  # pragma: no cover - UI callback safety
-            logger.exception("Failed to deliver history metrics to UI")
-
-    debug_sheets = collect_trace_debug_sheets(
-        trace_df,
-        students_df=students_base,
-        history_info_df=history_info_df,
-        policy=policy,
-    )
-    for name, df in debug_sheets.items():
-        sheets[name] = _make_excel_safe(df)
-        header_overrides[name] = None
-
-    header_internal = policy.excel.header_mode_internal
-    prepared_sheets: dict[str, pd.DataFrame] = {}
-    for name, df in sheets.items():
-        if header_overrides.get(name) is None:
-            prepared_sheets[name] = df
-        else:
-            prepared_sheets[name] = canonicalize_headers(df, header_mode=header_internal)
-    write_xlsx_atomic(
-        prepared_sheets,
-        output,
-        rtl=policy.excel.rtl,
-        font_name=policy.excel.font_name,
-        font_size=policy.excel.font_size,
-        header_mode=policy.excel.header_mode_write,
-        sheet_header_modes=header_overrides,
-        sheet_prepare_modes=prepare_overrides,
-    )
-
-    if getattr(args, "determinism_check", False):
-        progress(92, "determinism check")
-        allocations_check, pool_check, logs_check, trace_check = allocate_batch(
+    try:
+        allocations_df, updated_pool_df, logs_df, trace_df = allocate_batch(
             students_base.copy(deep=True),
             pool_base.copy(deep=True),
             policy=policy,
-            progress=lambda *_: None,
+            progress=progress,
             capacity_column=capacity_column,
             frames_already_canonical=True,
             center_manager_map=cli_center_map,
@@ -1531,29 +1389,267 @@ def _allocate_and_write(
             strict_center_validation=strict_validation,
         )
 
+        header_internal: HeaderMode = policy.excel.header_mode_internal  # type: ignore[assignment]
+
+        def _attach_student_id(frame: pd.DataFrame, ensure_existing: bool = False) -> pd.DataFrame:
+            en_frame = canonicalize_headers(frame, header_mode="en")
+            aligned = student_ids.reindex(en_frame.index)
+            aligned_string = aligned.astype("string")
+            if ensure_existing and "student_id" in en_frame.columns:
+                existing = en_frame["student_id"].astype("string")
+                en_frame["student_id"] = existing.fillna(aligned_string)
+            else:
+                en_frame["student_id"] = aligned_string
+            return canonicalize_headers(en_frame, header_mode=header_internal)
+
+        allocations_df = _attach_student_id(allocations_df)
+        logs_df = _attach_student_id(logs_df, ensure_existing=True)
+        trace_df = _attach_student_id(trace_df, ensure_existing=True)
+
+        export_profile_choice = _resolve_optional_override(args, "export_profile", "sabt") or "sabt"
+        export_profile_path = _resolve_optional_override(
+            args, "export_profile_path", str(_DEFAULT_ALLOC_PROFILE_PATH)
+        ) or str(_DEFAULT_ALLOC_PROFILE_PATH)
+        students_for_export = canonicalize_headers(students_base, header_mode=header_internal)
+        students_for_export["student_id"] = (
+            student_ids.reindex(students_for_export.index).astype("string")
+        )
+        if export_profile_choice == "sabt":
+            sabt_profile = load_sabt_export_profile(Path(export_profile_path))
+            sabt_allocations_df = build_sabt_export_frame(
+                allocations_df,
+                students_for_export,
+                profile=sabt_profile,
+                summary_df=trace_df.attrs.get("summary_df"),
+            )
+
+        # --- پاک‌سازی جامع خروجی قبل از نوشتن ---
+        # اطمینان از معتبر بودن همه دیتافریم‌ها
+        allocations_df = _ensure_valid_dataframe(allocations_df, "allocations")
+        updated_pool_df = _ensure_valid_dataframe(updated_pool_df, "updated_pool")
+        logs_df = _ensure_valid_dataframe(logs_df, "logs")
+        trace_df = _ensure_valid_dataframe(trace_df, "trace")
+        selection_reasons_df = build_selection_reason_rows(
+            allocations_df,
+            students_base,
+            pool_base,
+            policy=policy,
+            logs=logs_df,
+            trace=trace_df,
+        )
+        selection_reasons_df = _ensure_valid_dataframe(selection_reasons_df, "selection_reasons")
+        sheet_name, selection_reasons_df = write_selection_reasons_sheet(
+            selection_reasons_df,
+            writer=None,
+            policy=policy,
+        )
+
+        _maybe_export_import_to_sabt(
+            args=args,
+            allocations_df=allocations_df,
+            students_df=students_base,
+            mentors_df=pool_base,
+            logs_df=logs_df,
+            student_ids=student_ids,
+        )
+
+        if sabt_allocations_df is not None:
+            sabt_allocations_df = _ensure_valid_dataframe(sabt_allocations_df, "allocations_sabt")
+
+        qa_report = run_all_invariants(
+            policy=policy,
+            allocation=allocations_df,
+            allocation_summary=updated_pool_df,
+            student_report=None,
+        )
+        qa_context = QaValidationContext(
+            allocation=allocations_df,
+            allocation_summary=updated_pool_df,
+            meta={
+                "policy_version": policy.version,
+                "ssot_version": "1.0.2",
+                "source_output": str(output),
+            },
+        )
+        _export_qa_validation_workbook(
+            report=qa_report,
+            base_output=output,
+            context=qa_context,
+        )
+        if not qa_report.passed:
+            failed_rules = {violation.rule_id for violation in qa_report.violations}
+            detail = "; ".join(f"{v.rule_id}: {v.message}" for v in qa_report.violations)
+            raise ValueError(
+                "QA invariants failed: "
+                f"rules={sorted(failed_rules)} details={detail or 'n/a'}"
+            )
+
+        # تبدیل نهایی به فرمت‌های قابل نوشتن در Excel
+        allocations_df = _make_excel_safe(allocations_df)
+        updated_pool_df = _make_excel_safe(updated_pool_df)
+        logs_df = _make_excel_safe(logs_df)
+        trace_df = _make_excel_safe(trace_df)
+        selection_reasons_df = _make_excel_safe(selection_reasons_df)
+        # sabt_allocations_df با هدر اصلی حفظ می‌شود اما از مسیر آماده‌سازی پیش‌فرض
+        # عبور می‌کند تا ستون‌های موبایل/رهگیری به‌صورت متن و با صفر پیشتاز ذخیره شوند.
+        # --- پایان پاک‌سازی ---
+
+        progress(90, "writing outputs")
+        sheets: dict[str, pd.DataFrame] = {}
+        header_overrides: dict[str, HeaderMode | None] = {}
+        prepare_overrides: dict[str, Literal["default", "raw"]] = {}
+        if sabt_allocations_df is not None:
+            sheets["allocations"] = allocations_df
+            sheets["allocations_sabt"] = sabt_allocations_df
+            header_overrides["allocations_sabt"] = None
+        else:
+            sheets["allocations"] = allocations_df
+        sheets["updated_pool"] = updated_pool_df
+        sheets["logs"] = logs_df
+        sheets["trace"] = trace_df
+        sheets[sheet_name] = selection_reasons_df
+
+        summary_df_attr = trace_df.attrs.get("summary_df")
+        history_info_df = trace_df.attrs.get("history_info_df")
+        ui_overrides = getattr(args, "_ui_overrides", {}) or {}
+        history_metrics_df = _empty_history_metrics_df()
+        if (
+            isinstance(summary_df_attr, pd.DataFrame)
+            and not summary_df_attr.empty
+            and history_info_df is not None
+        ):
+            try:
+                enriched_summary = enrich_summary_with_history(
+                    summary_df_attr,
+                    students_df=students_base,
+                    history_info_df=history_info_df,
+                    policy=policy,
+                )
+                history_metrics_df = compute_history_metrics(enriched_summary)
+            except KeyError:
+                history_metrics_df = _empty_history_metrics_df()
+
+        history_metrics_df = _log_history_metrics(
+            summary_df_attr,
+            students_df=students_base,
+            history_info_df=history_info_df,
+            policy=policy,
+            history_metrics_df=history_metrics_df,
+        )
+
+        metrics_callback = ui_overrides.get("history_metrics_callback")
+        if callable(metrics_callback):
+            try:
+                metrics_callback(history_metrics_df.copy())
+            except Exception:  # pragma: no cover - UI callback safety
+                logger.exception("Failed to deliver history metrics to UI")
+
+        debug_sheets = collect_trace_debug_sheets(
+            trace_df,
+            students_df=students_base,
+            history_info_df=history_info_df,
+            policy=policy,
+        )
+        for name, df in debug_sheets.items():
+            sheets[name] = _make_excel_safe(df)
+            header_overrides[name] = None
+
         header_internal = policy.excel.header_mode_internal
+        prepared_sheets: dict[str, pd.DataFrame] = {}
+        for name, df in sheets.items():
+            if header_overrides.get(name) is None:
+                prepared_sheets[name] = df
+            else:
+                prepared_sheets[name] = canonicalize_headers(df, header_mode=header_internal)
+        write_xlsx_atomic(
+            prepared_sheets,
+            output,
+            rtl=policy.excel.rtl,
+            font_name=policy.excel.font_name,
+            font_size=policy.excel.font_size,
+            header_mode=policy.excel.header_mode_write,
+            sheet_header_modes=header_overrides,
+            sheet_prepare_modes=prepare_overrides,
+        )
 
-        def _canon(df: pd.DataFrame) -> pd.DataFrame:
-            return canonicalize_headers(df, header_mode=header_internal).reset_index(drop=True)
+        if getattr(args, "determinism_check", False):
+            progress(92, "determinism check")
+            allocations_check, pool_check, logs_check, trace_check = allocate_batch(
+                students_base.copy(deep=True),
+                pool_base.copy(deep=True),
+                policy=policy,
+                progress=lambda *_: None,
+                capacity_column=capacity_column,
+                frames_already_canonical=True,
+                center_manager_map=cli_center_map,
+                ui_center_manager_map=ui_center_map,
+                center_priority=center_priority,
+                strict_center_validation=strict_validation,
+            )
 
-        try:
-            pd_testing.assert_frame_equal(_canon(allocations_df), _canon(allocations_check))
-            pd_testing.assert_frame_equal(_canon(updated_pool_df), _canon(pool_check))
-            pd_testing.assert_frame_equal(_canon(logs_df), _canon(logs_check))
-            pd_testing.assert_frame_equal(_canon(trace_df), _canon(trace_check))
-        except AssertionError as exc:  # pragma: no cover - determinism failure path
-            raise RuntimeError("Determinism check failed: outputs differ between runs") from exc
+            header_internal = policy.excel.header_mode_internal
 
-    if getattr(args, "audit", False) or getattr(args, "metrics", False):
-        progress(95, "auditing allocations")
-        report = audit_allocations(output)
-        if getattr(args, "audit", False):
-            _print_audit_summary(report)
-        if getattr(args, "metrics", False):
-            _print_metrics(report)
+            def _canon(df: pd.DataFrame) -> pd.DataFrame:
+                return canonicalize_headers(df, header_mode=header_internal).reset_index(drop=True)
 
-    progress(100, "done")
-    return 0
+            try:
+                pd_testing.assert_frame_equal(_canon(allocations_df), _canon(allocations_check))
+                pd_testing.assert_frame_equal(_canon(updated_pool_df), _canon(pool_check))
+                pd_testing.assert_frame_equal(_canon(logs_df), _canon(logs_check))
+                pd_testing.assert_frame_equal(_canon(trace_df), _canon(trace_check))
+            except AssertionError as exc:  # pragma: no cover - determinism failure path
+                raise RuntimeError("Determinism check failed: outputs differ between runs") from exc
+
+        if getattr(args, "audit", False) or getattr(args, "metrics", False):
+            progress(95, "auditing allocations")
+            report = audit_allocations(output)
+            if getattr(args, "audit", False):
+                _print_audit_summary(report)
+            if getattr(args, "metrics", False):
+                _print_metrics(report)
+
+        progress(100, "done")
+        success = True
+        return 0
+    except Exception as exc:
+        status_message = str(exc)
+        raise
+    finally:
+        completed_at = datetime.now(timezone.utc)
+        total_students = len(students_base)
+        allocated_students = (
+            allocations_df.shape[0] if isinstance(allocations_df, pd.DataFrame) else None
+        )
+        unallocated_students = (
+            total_students - allocated_students
+            if allocated_students is not None
+            else None
+        )
+        qa_outcome = history_store.summarize_qa(qa_report)
+        run_ctx = history_store.build_run_context(
+            command=command_name,
+            cli_args=cli_args_text,
+            policy_version=policy.version,
+            ssot_version="1.0.2",
+            started_at=started_at,
+            completed_at=completed_at,
+            success=success,
+            message=status_message,
+            input_students=input_students_path,
+            input_pool=input_pool_path,
+            output=output,
+            policy_path=policy_path,
+            total_students=total_students,
+            allocated_students=allocated_students,
+            unallocated_students=unallocated_students,
+        )
+        history_store.log_allocation_run(
+            run_uuid=run_uuid,
+            ctx=run_ctx,
+            history_metrics=history_metrics_df if success else None,
+            qa_outcome=qa_outcome,
+            db=db,
+        )
 
 
 def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn) -> int:
@@ -1562,6 +1658,7 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
     students_path = Path(args.students)
     pool_path = Path(args.pool)
     output = Path(args.output)
+    policy_path = Path(args.policy)
     capacity_column = args.capacity_column or policy.columns.remaining_capacity
 
     reader_students = _detect_reader(students_path)
@@ -1581,6 +1678,7 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
 
     pool_base = _apply_mentor_pool_overrides(pool_base, policy, args)
 
+    db = _resolve_local_db(args)
     return _allocate_and_write(
         students_base,
         pool_base,
@@ -1589,6 +1687,11 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
         progress=progress,
         output=output,
         capacity_column=capacity_column,
+        db=db,
+        command_name="allocate",
+        input_students_path=students_path,
+        input_pool_path=pool_path,
+        policy_path=policy_path,
     )
 
 
@@ -1600,6 +1703,7 @@ def _run_rule_engine(
     students_path = Path(args.students)
     matrix_path = Path(args.matrix)
     output = Path(args.output)
+    policy_path = Path(args.policy)
     capacity_column = args.capacity_column or policy.columns.remaining_capacity
 
     reader_students = _detect_reader(students_path)
@@ -1618,6 +1722,7 @@ def _run_rule_engine(
 
     pool_base = _apply_mentor_pool_overrides(pool_base, policy, args)
 
+    db = _resolve_local_db(args)
     return _allocate_and_write(
         students_base,
         pool_base,
@@ -1626,6 +1731,11 @@ def _run_rule_engine(
         progress=progress,
         output=output,
         capacity_column=capacity_column,
+        db=db,
+        command_name="rule-engine",
+        input_students_path=students_path,
+        input_pool_path=matrix_path,
+        policy_path=policy_path,
     )
 
 
@@ -1762,6 +1872,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="prompt",
         help="نحوهٔ مدیریت student_id تکراری: prompt=سوال تعاملی، drop=حذف، assign-new=شمارندهٔ جدید",
     )
+    _add_local_db_args(alloc_cmd)
 
     rule_cmd = sub.add_parser(
         "rule-engine",
@@ -1863,6 +1974,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="prompt",
         help="نحوهٔ مدیریت student_id تکراری هنگام تولید شمارنده",
     )
+    _add_local_db_args(rule_cmd)
     return parser
 
 
@@ -1879,6 +1991,8 @@ def main(
     """نقطهٔ ورود CLI؛ خروجی ۰ به معنای موفقیت است."""
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    args._raw_argv = list(argv) if argv is not None else sys.argv[1:]
 
     args._ui_overrides = ui_overrides or {}
     args._ui_mode = ui_overrides is not None
