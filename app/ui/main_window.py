@@ -468,6 +468,7 @@ class MainWindow(QMainWindow):
         self._interactive: List[QWidget] = []
         self._is_busy_cursor = False
         self._register_interactive_controls()
+        self._update_mentor_pool_controls_state()
         self._update_output_folder_button_state()
         self._apply_theme()
         self._refresh_last_run_badge()
@@ -517,6 +518,13 @@ class MainWindow(QMainWindow):
         self._toolbar_actions["rule_engine"] = rule_action
 
         toolbar.addSeparator()
+
+        mentor_pool_action = QAction(self._t("action.mentor_pool_governance", "حاکمیت استخر"), self)
+        mentor_pool_action.setShortcut(QKeySequence("Ctrl+G"))
+        mentor_pool_action.setShortcutVisibleInContextMenu(True)
+        mentor_pool_action.triggered.connect(self._open_mentor_pool_governance)
+        toolbar.addAction(mentor_pool_action)
+        self._toolbar_actions["mentor_pool_governance"] = mentor_pool_action
 
         output_action = QAction(
             self._t("dashboard.button.output", "پوشه خروجی"),
@@ -935,7 +943,11 @@ class MainWindow(QMainWindow):
         self._picker_pool.setToolTip("فهرست منتورها یا پشتیبان‌ها برای تخصیص")
         self._picker_pool.set_button_text(browse_text)
         self._picker_pool.line_edit().textChanged.connect(
-            lambda *_: (self._refresh_all_manager_combos(), self._reset_mentor_pool_cache())
+            lambda *_: (
+                self._refresh_all_manager_combos(),
+                self._reset_mentor_pool_cache(),
+                self._update_mentor_pool_controls_state(),
+            )
         )
         self._set_picker_button_text(self._picker_pool)
 
@@ -948,6 +960,8 @@ class MainWindow(QMainWindow):
         self._btn_mentor_pool.setToolTip("فعال/غیرفعال کردن منتورها و مدیران برای این اجرا")
         self._btn_mentor_pool.clicked.connect(self._open_mentor_pool_governance)
         pool_row_layout.addWidget(self._btn_mentor_pool)
+
+        self._update_mentor_pool_controls_state()
 
         inputs_layout.addRow("استخر منتورها", pool_row)
 
@@ -1426,6 +1440,7 @@ class MainWindow(QMainWindow):
             self._picker_output_matrix,
             self._picker_students,
             self._picker_pool,
+            self._btn_mentor_pool,
             self._picker_policy_allocate,
             self._picker_alloc_out,
             self._picker_sabt_output_alloc,
@@ -1968,6 +1983,17 @@ class MainWindow(QMainWindow):
         if self._mentor_pool_dialog is not None:
             self._mentor_pool_dialog.close()
             self._mentor_pool_dialog = None
+        self._update_mentor_pool_controls_state()
+
+    def _update_mentor_pool_controls_state(self) -> None:
+        """فعالسازی کنترل‌های حاکمیت استخر بر اساس انتخاب مسیر."""
+
+        has_pool_path = bool(self._picker_pool.text().strip()) if hasattr(self, "_picker_pool") else False
+        if self._btn_mentor_pool is not None:
+            self._btn_mentor_pool.setEnabled(has_pool_path)
+        action = self._toolbar_actions.get("mentor_pool_governance")
+        if action is not None:
+            action.setEnabled(has_pool_path)
 
     def _open_mentor_pool_governance(self) -> None:
         """بارگذاری استخر و نمایش دیالوگ حاکمیت بدون مسدود کردن UI."""

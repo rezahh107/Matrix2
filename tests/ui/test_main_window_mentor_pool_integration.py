@@ -53,3 +53,17 @@ def test_reset_cache_clears_overrides(qapp: QApplication) -> None:
     window._reset_mentor_pool_cache()
 
     assert window._mentor_pool_overrides == {}
+
+
+def test_toolbar_action_visible_and_enables_on_pool_path(qapp: QApplication) -> None:
+    window = MainWindow()
+
+    action = window._toolbar_actions.get("mentor_pool_governance")
+
+    assert action is not None
+    assert action.isEnabled() is False
+
+    window._picker_pool.setText("/tmp/pool.xlsx")
+    window._update_mentor_pool_controls_state()
+
+    assert action.isEnabled() is True
