@@ -117,15 +117,14 @@ class QaReport:
         rows: list[dict[str, object]] = []
         detail_keys: set[str] = set()
         for violation in violations:
-            detail_map: Mapping[str, object] = violation.details or {}
-            for key in detail_map:
-                detail_keys.add(str(key))
+            detail_map = violation.details or {}
+            detail_keys.update(detail_map.keys())
             row = {
                 "rule_id": violation.rule_id,
                 "level": violation.level,
                 "message": violation.message,
             }
-            row.update({str(k): v for k, v in detail_map.items()})
+            row.update(detail_map)
             rows.append(row)
 
         ordered_columns = base_columns + sorted(detail_keys)
