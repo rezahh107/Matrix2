@@ -49,7 +49,7 @@
                                               (Infra passes policy + data + history)
                                                            |
                                                        [Core]
-  Normalize → Validate → Build Eligibility Matrix → Load history → `dedupe_by_national_id` → derive `allocation_channel` → Allocate → Trace → QA Checks
+  Normalize → Validate → Build Eligibility Matrix → Load history → `dedupe_by_national_id` → derive `allocation_channel` → Allocate → Trace → QA Checks (`run_all_invariants`)
                                                            |
                                             results/traces DataFrames (pure)
                                                            |
@@ -102,6 +102,11 @@
   - یک پنل PySide6/CLI برای «مدیریت استخر پشتیبان‌ها» نمایش می‌دهد که در آن اپراتور می‌تواند وضعیت mentor_status را مشاهده و میان `ACTIVE`/`FROZEN` (و حالت‌های محدود) جابه‌جا کند.
   - این پنل همچنین پیشنهادهای HistoryStore (مثلاً «این پشتیبان در سال جاری سهم خود را پر کرده است») را نشان می‌دهد؛ تصمیم نهایی و اعمال‌شدن فقط زمانی معتبر است که تغییر در SSoT ذخیره شود و در خروجی trace/گزارش عملیات یک رویداد «status_changed» ثبت شود.
 - **HistoryStore & AllocationChannel Interaction (Planned):** HistoryStore صرفاً ورودی تحلیلی/پیشنهادی است و خودکار کسی را فریز نمی‌کند؛ AllocationChannel جریان دانش‌آموز را تعیین می‌کند و هیچ‌گاه mentor_status را override نمی‌کند. Core تنها به MentorProfile/Policy برای تصمیم ورود یا خروج از استخر تکیه دارد و در نتیجه رفتار سیستم قابل بازتولید باقی می‌ماند. این رفتارها هنوز در کد مستقر نشده‌اند و به‌عنوان الزام آینده مستند شده‌اند تا از سردرگمی QA/توسعه جلوگیری شود.
+
+### 5.3 Core QA Engine (`app/core/qa`)
+- **Component:** `QaViolation`, `QaRuleResult`, `QaReport` و تابع `run_all_invariants(...)` در لایهٔ Core پیاده‌سازی شده‌اند و از I/O/Qt یا وابستگی به Infra/UI مبرا هستند.
+- **Flow:** خروجی‌های ماتریس و تخصیص قبل از معتبر شدن، از طریق `run_all_invariants` عبور می‌کنند؛ قوانین فعلی شامل `STU_01`, `STU_02`, `JOIN_01`, `SCHOOL_01`, `ALLOC_01` هستند و هر تخطی را به QA سطح «خطا» تبدیل می‌کنند.
+- **Determinism & Callers:** منطق کاملاً دترمینیستیک است و تنها از داده‌های ورودی و PolicyConfig تغذیه می‌شود؛ فراخوانی‌ها از مرزهای CLI/UI/Infra انجام می‌شود تا Core پاک بماند و QA نتیجهٔ هر اجرا را به‌صورت قابل تکرار تولید کند.
 
 ## 6. Dependency Graph (ASCII)
 ```
