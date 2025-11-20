@@ -17,6 +17,7 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from typing import Literal, cast
 
 from app.core.policy.config import AllocationChannelConfig
+from app.core.allocation.mentor_pool import MentorPoolGovernanceConfig
 from app.core.policy.loader import compute_schema_hash, validate_policy_columns
 
 VersionMismatchMode = Literal["raise", "warn", "migrate"]
@@ -329,6 +330,9 @@ class PolicyConfig:
     mentor_school_binding: MentorSchoolBindingPolicy = field(
         default_factory=MentorSchoolBindingPolicy
     )
+    mentor_pool_governance: MentorPoolGovernanceConfig = field(
+        default_factory=MentorPoolGovernanceConfig.default
+    )
 
     @property
     def ranking(self) -> List[str]:
@@ -465,6 +469,9 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     coverage_options = _normalize_coverage_options(
         (data.get("matrix") or {}).get("coverage", {})
     )
+    mentor_pool_governance = _normalize_mentor_pool_governance(
+        data.get("mentor_pool_governance", {})
+    )
     allocation_channels = _normalize_allocation_channels(
         data.get("allocation_channels"), normal_statuses=normal_statuses
     )
@@ -497,6 +504,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "emission": data.get("emission", {}),
         "fairness_strategy": fairness_strategy,
         "coverage_options": coverage_options,
+        "mentor_pool_governance": mentor_pool_governance,
         "allocation_channels": allocation_channels,
     }
 
@@ -1139,6 +1147,9 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
         mentor_school_binding=_to_mentor_school_binding(
             data.get("mentor_school_binding", {})
         ),
+        mentor_pool_governance=_to_mentor_pool_governance(
+            data.get("mentor_pool_governance", {})
+        ),
         allocation_channels=allocation_channels_obj,
     )
 
@@ -1190,6 +1201,19 @@ def _to_mentor_school_binding(data: Mapping[str, object]) -> MentorSchoolBinding
         global_mode=str(data.get("global_mode", "global")),
         restricted_mode=str(data.get("restricted_mode", "restricted")),
         empty_tokens=tuple(str(item) for item in tokens),
+    )
+
+
+def _to_mentor_pool_governance(
+    data: Mapping[str, object]
+) -> MentorPoolGovernanceConfig:
+    default_cfg = MentorPoolGovernanceConfig.default()
+    return MentorPoolGovernanceConfig(
+        enabled=bool(data.get("enabled", default_cfg.enabled)),
+        status_column=str(data.get("status_column", default_cfg.status_column)),
+        active_values=tuple(data.get("active_values", default_cfg.active_values)),
+        inactive_values=tuple(data.get("inactive_values", default_cfg.inactive_values)),
+        default_active=bool(data.get("default_active", default_cfg.default_active)),
     )
 
 
@@ -1279,6 +1303,11 @@ def _apply_schema_defaults(data: Dict[str, object]) -> Dict[str, object]:
     if not isinstance(coverage_section, Mapping):
         coverage_section = {}
 
+    if "mentor_pool_governance" not in data or not isinstance(
+        data.get("mentor_pool_governance"), Mapping
+    ):
+        data["mentor_pool_governance"] = {}
+
     if "allocation_channels" not in data or not isinstance(
         data.get("allocation_channels"), Mapping
     ):
@@ -1343,6 +1372,34 @@ def _normalize_coverage_options(payload: Mapping[str, object]) -> Dict[str, obje
         "denominator_mode": denominator_mode,
         "require_student_presence": require_student_presence,
         "include_blocked_candidates_in_denominator": include_blocked,
+    }
+
+
+def _normalize_mentor_pool_governance(payload: Mapping[str, object]) -> Dict[str, object]:
+    """نرمال‌سازی تنظیمات حاکمیت استخر منتورها برای POOL_01."""
+
+    if not isinstance(payload, Mapping):
+        return {}
+    enabled = bool(payload.get("enabled", False))
+    status_column = str(payload.get("status_column", "mentor_status"))
+
+    def _normalize_sequence(key: str, default: tuple[str | int | bool, ...]) -> tuple[str | int | bool, ...]:
+        value = payload.get(key, default)
+        if isinstance(value, (list, tuple)):
+            return tuple(value)
+        return default
+
+    active_values = _normalize_sequence("active_values", MentorPoolGovernanceConfig.default().active_values)
+    inactive_values = _normalize_sequence(
+        "inactive_values", MentorPoolGovernanceConfig.default().inactive_values
+    )
+    default_active = bool(payload.get("default_active", True))
+    return {
+        "enabled": enabled,
+        "status_column": status_column,
+        "active_values": active_values,
+        "inactive_values": inactive_values,
+        "default_active": default_active,
     }
 
 
