@@ -37,7 +37,7 @@ def test_stu_02_detects_per_mentor_delta() -> None:
 
     assert not result.passed
     assert any(
-        v.details == {"mentor_id": "2", "expected": 2, "assigned": 1}
+        v.details == {"mentor_id": 2, "expected": 2, "assigned": 1}
         for v in result.violations
     )
 
