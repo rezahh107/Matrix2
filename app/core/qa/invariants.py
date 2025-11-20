@@ -255,18 +255,20 @@ def check_STU_02(
         return QaRuleResult("QA_RULE_STU_02", True, [])
 
     expected_counts = (
-        pd.to_numeric(inspactor[mentor_col], errors="coerce")
-        .to_frame("mentor_id")
-        .assign(expected=inspactor[expected_col])
-        .dropna()
+        inspactor[[mentor_col, expected_col]]
+        .rename(columns={mentor_col: "mentor_id", expected_col: "expected"})
+        .dropna(subset=["mentor_id"])
+        .assign(mentor_id=lambda df: df["mentor_id"].astype(str))
     )
     expected_counts["expected"] = pd.to_numeric(expected_counts["expected"], errors="coerce")
+    expected_counts = expected_counts.dropna(subset=["expected"])
     expected_counts = expected_counts.groupby("mentor_id", as_index=False)["expected"].sum()
 
     alloc_counts = (
-        pd.to_numeric(allocation[mentor_col], errors="coerce")
-        .to_frame("mentor_id")
-        .dropna()
+        allocation[[mentor_col]]
+        .rename(columns={mentor_col: "mentor_id"})
+        .dropna(subset=["mentor_id"])
+        .assign(mentor_id=lambda df: df["mentor_id"].astype(str))
         .groupby("mentor_id", as_index=False)
         .size()
         .rename(columns={"size": "assigned"})
@@ -278,17 +280,17 @@ def check_STU_02(
     violations: list[QaViolation] = []
     for _, row in mismatches.iterrows():
         violations.append(
-            QaViolation(
-                rule_id="QA_RULE_STU_02",
-                level="error",
-                message="اختلاف شمارش دانش‌آموز برای منتور",
-                details={
-                    "mentor_id": int(row["mentor_id"]),
-                    "expected": int(row["expected"]),
-                    "assigned": int(row["assigned"]),
-                },
+                QaViolation(
+                    rule_id="QA_RULE_STU_02",
+                    level="error",
+                    message="اختلاف شمارش دانش‌آموز برای منتور",
+                    details={
+                        "mentor_id": row["mentor_id"],
+                        "expected": int(row["expected"]),
+                        "assigned": int(row["assigned"]),
+                    },
+                )
             )
-        )
 
     return QaRuleResult(
         rule_id="QA_RULE_STU_02",
