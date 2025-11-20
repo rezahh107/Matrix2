@@ -291,6 +291,7 @@ def test_run_build_matrix_raises_on_duplicate_threshold_exceeded(
     )
 
     monkeypatch.setattr(cli, "read_excel_first_sheet", lambda _: pd.DataFrame())
+    monkeypatch.setattr(cli, "read_inspactor_workbook", lambda *_: pd.DataFrame())
     monkeypatch.setattr(
         cli,
         "read_crosswalk_workbook",
@@ -345,6 +346,7 @@ def test_run_build_matrix_verifies_policy_version(
     )
 
     monkeypatch.setattr(cli, "read_excel_first_sheet", lambda *_: pd.DataFrame())
+    monkeypatch.setattr(cli, "read_inspactor_workbook", lambda *_: pd.DataFrame())
     monkeypatch.setattr(
         cli,
         "read_crosswalk_workbook",

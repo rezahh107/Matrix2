@@ -10,6 +10,17 @@ import pytest
 
 import app.infra.io_utils as io_utils  # noqa: E402
 from app.infra.io_utils import ALT_CODE_COLUMN, write_xlsx_atomic  # noqa: E402
+from app.core.build_matrix import (
+    CAPACITY_CURRENT_COL,
+    CAPACITY_SPECIAL_COL,
+    COL_GROUP,
+    COL_MANAGER_NAME,
+    COL_MENTOR_ID,
+    COL_MENTOR_NAME,
+    COL_POSTAL,
+    COL_SCHOOL_COUNT,
+    REQUIRED_INSPACTOR_COLUMNS,
+)
 
 _HAS_OPENPYXL = importlib.util.find_spec("openpyxl") is not None
 _HAS_XLSXWRITER = importlib.util.find_spec("xlsxwriter") is not None
@@ -177,6 +188,71 @@ def test_read_excel_first_sheet_preserves_alt_code_as_text(tmp_path: Path) -> No
     assert ALT_CODE_COLUMN in loaded.columns
     assert loaded[ALT_CODE_COLUMN].dtype == object
     assert loaded.loc[0, ALT_CODE_COLUMN] == "123456"
+
+
+@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای خواندن .xlsx")
+def test_read_inspactor_workbook_prefers_complete_sheet(tmp_path: Path) -> None:
+    partial = pd.DataFrame(
+        {
+            COL_POSTAL: ["12345"],
+            COL_MENTOR_ID: ["2001"],
+            COL_SCHOOL_COUNT: [1],
+            CAPACITY_CURRENT_COL: [5],
+            CAPACITY_SPECIAL_COL: [0],
+        }
+    )
+    complete = pd.DataFrame(
+        {
+            COL_MENTOR_NAME: ["الف"],
+            COL_MANAGER_NAME: ["ب"],
+            COL_MENTOR_ID: ["2001"],
+            COL_POSTAL: ["54321"],
+            COL_SCHOOL_COUNT: [2],
+            CAPACITY_CURRENT_COL: [7],
+            CAPACITY_SPECIAL_COL: [1],
+            COL_GROUP: ["ریاضی"],
+        }
+    )
+    sample = tmp_path / "inspactor_multi.xlsx"
+
+    with pd.ExcelWriter(sample) as writer:
+        partial.to_excel(writer, sheet_name="Sheet1", index=False)
+        complete.to_excel(writer, sheet_name="Mentors", index=False)
+
+    loaded = io_utils.read_inspactor_workbook(sample)
+
+    assert set(REQUIRED_INSPACTOR_COLUMNS).issubset(set(map(str, loaded.columns)))
+    assert loaded.loc[0, COL_MENTOR_NAME] == "الف"
+
+
+@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای خواندن .xlsx")
+def test_read_inspactor_workbook_handles_missing_alt_code_column(tmp_path: Path) -> None:
+    partial = pd.DataFrame({COL_MENTOR_ID: ["3001"], COL_MENTOR_NAME: ["ج"]})
+    complete = pd.DataFrame(
+        {
+            COL_MENTOR_NAME: ["الف"],
+            COL_MANAGER_NAME: ["ب"],
+            COL_MENTOR_ID: ["2001"],
+            COL_POSTAL: ["54321"],
+            COL_SCHOOL_COUNT: [2],
+            CAPACITY_CURRENT_COL: [7],
+            CAPACITY_SPECIAL_COL: [1],
+            COL_GROUP: ["ریاضی"],
+            ALT_CODE_COLUMN: [12345],
+        }
+    )
+    sample = tmp_path / "inspactor_alt.xlsx"
+
+    with pd.ExcelWriter(sample) as writer:
+        partial.to_excel(writer, sheet_name="Sheet1", index=False)
+        complete.to_excel(writer, sheet_name="Mentors", index=False)
+
+    loaded = io_utils.read_inspactor_workbook(sample)
+
+    assert ALT_CODE_COLUMN in loaded.columns
+    assert loaded[ALT_CODE_COLUMN].dtype == object
+    assert loaded.loc[0, ALT_CODE_COLUMN] == "12345"
+    assert loaded.loc[0, COL_MANAGER_NAME] == "ب"
 
 
 @pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl لازم است برای خواندن .xlsx")
