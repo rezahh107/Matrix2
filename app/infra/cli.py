@@ -30,7 +30,7 @@ from pandas.api import types as pd_types
 
 from app.core.allocate_students import allocate_batch, build_selection_reason_rows
 from app.core.allocation.engine import enrich_summary_with_history
-from app.core.allocation.history_metrics import compute_history_metrics
+from app.core.allocation.history_metrics import METRIC_COLUMNS, compute_history_metrics
 from app.core.canonical_frames import (
     canonicalize_allocation_frames,
     sanitize_pool_for_allocation as _sanitize_pool_for_allocation,
@@ -115,42 +115,50 @@ def _print_metrics(report: Dict[str, Dict[str, Any]]) -> None:
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
+def _empty_history_metrics_df() -> pd.DataFrame:
+    """دیتافریم خالی با ستون‌های KPI تاریخچه."""
+
+    return pd.DataFrame(columns=METRIC_COLUMNS)
+
+
 def _log_history_metrics(
     summary_df: pd.DataFrame | None,
     *,
     students_df: pd.DataFrame,
     history_info_df: pd.DataFrame | None,
     policy: PolicyConfig,
-) -> None:
+    history_metrics_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     """ثبت خلاصهٔ KPI تاریخچه به‌صورت لاگ برای هر کانال تخصیص.
 
     در صورت نبود دادهٔ تاریخچه یا ستون‌های لازم، پیام واضحی چاپ می‌شود و از
-    شکست جلوگیری می‌شود.
+    شکست جلوگیری می‌شود. دیتافریم محاسبه‌شده برای استفاده مجدد بازگردانده می‌شود.
     """
 
-    if summary_df is None or summary_df.empty:
-        logger.info("History metrics unavailable (no summary rows).")
-        return
+    if history_metrics_df is None:
+        if summary_df is None or summary_df.empty:
+            logger.info("History metrics unavailable (no summary rows).")
+            return _empty_history_metrics_df()
 
-    if history_info_df is None:
-        logger.info("History metrics unavailable (no history info).")
-        return
+        if history_info_df is None:
+            logger.info("History metrics unavailable (no history info).")
+            return _empty_history_metrics_df()
 
-    try:
-        enriched_summary = enrich_summary_with_history(
-            summary_df,
-            students_df=students_df,
-            history_info_df=history_info_df,
-            policy=policy,
-        )
-        history_metrics_df = compute_history_metrics(enriched_summary)
-    except KeyError:
-        logger.info("History metrics unavailable (missing columns).")
-        return
+        try:
+            enriched_summary = enrich_summary_with_history(
+                summary_df,
+                students_df=students_df,
+                history_info_df=history_info_df,
+                policy=policy,
+            )
+            history_metrics_df = compute_history_metrics(enriched_summary)
+        except KeyError:
+            logger.info("History metrics unavailable (missing columns).")
+            return _empty_history_metrics_df()
 
     if history_metrics_df.empty:
         logger.info("History metrics unavailable (empty metrics).")
-        return
+        return _empty_history_metrics_df()
 
     for _, row in history_metrics_df.iterrows():
         logger.info(
@@ -163,6 +171,8 @@ def _log_history_metrics(
             int(row["same_history_mentor_true"]),
             float(row["same_history_mentor_ratio"]),
         )
+
+    return history_metrics_df
 
 
 def _detect_reader(path: Path) -> Callable[[Path], pd.DataFrame]:
@@ -1314,12 +1324,38 @@ def _allocate_and_write(
 
     summary_df_attr = trace_df.attrs.get("summary_df")
     history_info_df = trace_df.attrs.get("history_info_df")
-    _log_history_metrics(
+    ui_overrides = getattr(args, "_ui_overrides", {}) or {}
+    history_metrics_df = _empty_history_metrics_df()
+    if (
+        isinstance(summary_df_attr, pd.DataFrame)
+        and not summary_df_attr.empty
+        and history_info_df is not None
+    ):
+        try:
+            enriched_summary = enrich_summary_with_history(
+                summary_df_attr,
+                students_df=students_base,
+                history_info_df=history_info_df,
+                policy=policy,
+            )
+            history_metrics_df = compute_history_metrics(enriched_summary)
+        except KeyError:
+            history_metrics_df = _empty_history_metrics_df()
+
+    history_metrics_df = _log_history_metrics(
         summary_df_attr,
         students_df=students_base,
         history_info_df=history_info_df,
         policy=policy,
+        history_metrics_df=history_metrics_df,
     )
+
+    metrics_callback = ui_overrides.get("history_metrics_callback")
+    if callable(metrics_callback):
+        try:
+            metrics_callback(history_metrics_df.copy())
+        except Exception:  # pragma: no cover - UI callback safety
+            logger.exception("Failed to deliver history metrics to UI")
 
     debug_sheets = collect_trace_debug_sheets(
         trace_df,
