@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Smart Student Allocation Policy Schema",
+  "type": "object",
+  "required": ["version", "normal_statuses", "school_statuses", "join_keys", "ranking_rules"],
+  "properties": {
+    "version": {"type": "string"},
+    "normal_statuses": {
+      "type": "array",
+      "items": {"type": "integer"}
+    },
+    "school_statuses": {
+      "type": "array",
+      "items": {"type": "integer"}
+    },
+    "join_keys": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 6,
+      "maxItems": 6
+    },
+    "ranking_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "column"],
+        "properties": {
+          "name": {"type": "string"},
+          "column": {"type": "string"},
+          "ascending": {"type": "boolean"}
+        }
+      }
+    },
+    "mentor_pool_governance": {
+      "type": "object",
+      "properties": {
+        "default_status": {"type": "string", "enum": ["active", "inactive"]},
+        "allowed_statuses": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "mentors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["mentor_id", "status"],
+            "properties": {
+              "mentor_id": {"type": ["integer", "string"]},
+              "status": {"type": "string", "enum": ["active", "inactive"]}
+            }
+          }
+        }
+      },
+      "required": ["default_status", "allowed_statuses", "mentors"]
+    }
+  }
+}

@@ -8,7 +8,7 @@ from typing import Iterable, Mapping, Sequence
 import pandas as pd
 from pandas.api import types as ptypes
 
-from app.core.policy_loader import PolicyConfig
+from app.core.policy_loader import MentorStatus, PolicyConfig
 
 RuleId = str
 
@@ -21,6 +21,7 @@ __all__ = [
     "check_STU_02",
     "check_JOIN_01",
     "check_SCHOOL_01",
+    "check_GOV_01",
     "check_ALLOC_01",
 ]
 
@@ -145,6 +146,7 @@ def run_all_invariants(
     inspactor: pd.DataFrame | None = None,
     invalid_mentors: pd.DataFrame | None = None,
     allocation_summary: pd.DataFrame | None = None,
+    governance_overrides: Mapping[int | str | float, bool] | None = None,
 ) -> QaReport:
     """اجرای همهٔ قوانین QA و تولید گزارش تجمیعی.
 
@@ -170,6 +172,12 @@ def run_all_invariants(
         check_STU_02(allocation=allocation, inspactor=inspactor),
         check_JOIN_01(matrix=matrix, policy=policy),
         check_SCHOOL_01(matrix=matrix, invalid_mentors=invalid_mentors, policy=policy),
+        check_GOV_01(
+            allocation=allocation,
+            allocation_summary=allocation_summary,
+            policy=policy,
+            overrides=governance_overrides,
+        ),
         check_ALLOC_01(
             allocation=allocation,
             allocation_summary=allocation_summary,
@@ -428,6 +436,67 @@ def check_SCHOOL_01(
         rule_id="QA_RULE_SCHOOL_01",
         passed=not violations,
         violations=violations,
+    )
+
+
+def check_GOV_01(
+    *,
+    allocation: pd.DataFrame | None,
+    allocation_summary: pd.DataFrame | None,
+    policy: PolicyConfig,
+    overrides: Mapping[int | str | float, bool] | None = None,
+) -> QaRuleResult:
+    """QA_RULE_GOV_01 — حذف منتورهای غیرفعال از تخصیص."""
+
+    violations: list[QaViolation] = []
+    if allocation is None:
+        return QaRuleResult("QA_RULE_GOV_01", True, violations)
+
+    mentor_col = _resolve_mentor_column(allocation) or _resolve_mentor_column(
+        allocation_summary
+    )
+    if mentor_col is None:
+        return QaRuleResult("QA_RULE_GOV_01", True, violations)
+
+    governance = policy.mentor_pool_governance
+    override_map: dict[int, bool] = {}
+    if overrides:
+        for key, flag in overrides.items():
+            try:
+                mentor_id = int(key)
+            except (TypeError, ValueError):
+                continue
+            override_map[mentor_id] = bool(flag)
+
+    allocated_ids = (
+        pd.to_numeric(allocation[mentor_col], errors="coerce")
+        .dropna()
+        .astype(int)
+        .unique()
+    )
+    if allocated_ids.size == 0:
+        return QaRuleResult("QA_RULE_GOV_01", True, violations)
+
+    for mentor_id in allocated_ids:
+        status = governance.status_for(mentor_id)
+        override_flag = override_map.get(int(mentor_id))
+        if override_flag is not None:
+            status = MentorStatus.ACTIVE if override_flag else MentorStatus.INACTIVE
+        if status != MentorStatus.ACTIVE:
+            violations.append(
+                QaViolation(
+                    rule_id="QA_RULE_GOV_01",
+                    level="error",
+                    message="منتور غیرفعال در تخصیص دیده شد",
+                    details={
+                        "mentor_id": int(mentor_id),
+                        "status": status.value,
+                    },
+                )
+            )
+
+    return QaRuleResult(
+        rule_id="QA_RULE_GOV_01", passed=not violations, violations=violations
     )
 
 

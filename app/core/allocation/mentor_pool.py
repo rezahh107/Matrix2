@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """توابع حاکمیت استخر منتورها (POOL_01) با ورودی Override ساده.
 
 این ماژول هیچ I/O یا وابستگی به Qt ندارد و صرفاً روی DataFrame
@@ -12,137 +14,111 @@ from typing import Mapping
 
 import pandas as pd
 
+from app.core.policy_loader import MentorPoolGovernanceConfig, MentorStatus
 
-@dataclass(frozen=True)
-class MentorPoolGovernanceConfig:
-    """پیکربندی حاکمیت استخر منتورها.
+__all__ = [
+    "compute_effective_status",
+    "filter_active_mentors",
+]
 
-    مثال::
 
-        >>> import pandas as pd
-        >>> from app.core.allocation.mentor_pool import (
-        ...     MentorPoolGovernanceConfig, apply_mentor_pool_governance,
-        ... )
-        >>> pool = pd.DataFrame({"mentor_id": [1, 2], "mentor_status": ["ACTIVE", "FROZEN"]})
-        >>> cfg = MentorPoolGovernanceConfig(enabled=True)
-        >>> filtered = apply_mentor_pool_governance(pool, cfg)
-        >>> list(filtered["mentor_id"])
-        [1]
+def compute_effective_status(
+    mentors_df: pd.DataFrame,
+    governance: MentorPoolGovernanceConfig,
+    overrides: Mapping[int | str | float, bool] | None = None,
+) -> pd.Series:
+    """محاسبهٔ وضعیت مؤثر هر پشتیبان بر اساس Policy و overrideهای نوبت جاری.
 
+    پارامترها
+    ----------
+    mentors_df:
+        دیتافریم اولیهٔ پشتیبان‌ها که باید ستون ``mentor_id`` داشته باشد.
+    governance:
+        تنظیمات حاکمیت استخر از Policy.
+    overrides:
+        نگاشت اختیاری ``mentor_id`` → ``enabled`` برای فعال/غیرفعال‌سازی نوبتی.
+
+    مثال
+    -----
+    >>> import pandas as pd
+    >>> from app.core.policy_loader import MentorPoolGovernanceConfig, MentorStatus
+    >>> df = pd.DataFrame({"mentor_id": [1, 2]})
+    >>> config = MentorPoolGovernanceConfig(
+    ...     default_status=MentorStatus.ACTIVE,
+    ...     mentor_status_map={2: MentorStatus.INACTIVE},
+    ...     allowed_statuses=(MentorStatus.ACTIVE, MentorStatus.INACTIVE),
+    ... )
+    >>> compute_effective_status(df, config).tolist()
+    [<MentorStatus.ACTIVE: 'active'>, <MentorStatus.INACTIVE: 'inactive'>]
+    >>> compute_effective_status(df, config, overrides={2: True}).tolist()
+    [<MentorStatus.ACTIVE: 'active'>, <MentorStatus.ACTIVE: 'active'>]
     """
 
-    enabled: bool = False
-    status_column: str = "mentor_status"
-    active_values: tuple[str | int | bool, ...] = (
-        "ACTIVE",
-        "ENABLED",
-        "true",
-        1,
-        "1",
-        True,
+    if "mentor_id" not in mentors_df.columns:
+        raise KeyError("mentors_df must contain 'mentor_id' column")
+
+    mentor_ids = pd.to_numeric(mentors_df["mentor_id"], errors="coerce")
+    statuses = pd.Series(
+        governance.default_status, index=mentors_df.index, dtype=object
     )
-    inactive_values: tuple[str | int | bool, ...] = (
-        "FROZEN",
-        "INACTIVE",
-        "DISABLED",
-        "false",
-        0,
-        "0",
-        False,
-    )
-    default_active: bool = True
 
-    @classmethod
-    def default(cls) -> "MentorPoolGovernanceConfig":
-        """برگشت پیکربندی پیش‌فرض بدون تغییر رفتار موجود."""
+    policy_status = mentor_ids.map(governance.mentor_status_map)
+    statuses = statuses.where(policy_status.isna(), policy_status)
 
-        return cls()
+    override_map: dict[int, MentorStatus] = {}
+    if overrides:
+        for raw_id, enabled in overrides.items():
+            try:
+                mentor_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            override_map[mentor_id] = MentorStatus.ACTIVE if bool(enabled) else MentorStatus.INACTIVE
 
+    if override_map:
+        override_status = mentor_ids.map(override_map)
+        statuses = statuses.where(override_status.isna(), override_status)
 
-def _normalize_mentor_id(value: object) -> str:
-    text = str(value).strip()
-    return text
+    return statuses
 
 
-def _normalize_override_map(overrides: Mapping[object, bool] | None) -> dict[str, bool]:
-    if not overrides:
-        return {}
-    normalized: dict[str, bool] = {}
-    for key, enabled in overrides.items():
-        mentor_id = _normalize_mentor_id(key)
-        if mentor_id:
-            normalized[mentor_id] = bool(enabled)
-    return normalized
-
-
-def _coerce_status(value: object, *, config: MentorPoolGovernanceConfig) -> bool | None:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return None
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip()
-    if not text:
-        return None
-    if text in map(str, config.active_values) or text.upper() in {
-        str(v).upper() for v in config.active_values
-    }:
-        return True
-    if text in map(str, config.inactive_values) or text.upper() in {
-        str(v).upper() for v in config.inactive_values
-    }:
-        return False
-    if text.isdigit():
-        return bool(int(text))
-    return None
-
-
-def apply_mentor_pool_governance(
-    pool: pd.DataFrame,
-    config: MentorPoolGovernanceConfig,
+def filter_active_mentors(
+    mentors_df: pd.DataFrame,
+    governance: MentorPoolGovernanceConfig,
+    overrides: Mapping[int | str | float, bool] | None = None,
     *,
-    overrides: Mapping[object, bool] | None = None,
+    attach_status: bool = False,
+    status_column: str = "mentor_status",
 ) -> pd.DataFrame:
-    """اعمال حاکمیت استخر روی DataFrame منتورها.
+    """اعمال حاکمیت استخر و بازگرداندن استخر فعال.
 
-    Args:
-        pool: دیتافریم canonical منتورها.
-        config: پیکربندی فعال/غیرفعال کردن پیش‌فرض از Policy.
-        overrides: نگاشت اختیاری ``mentor_id → enabled`` از UI/CLI.
+    این تابع تغییری در ورودی ایجاد نمی‌کند و دیتافریم جدیدی می‌سازد که
+    تنها پشتیبان‌های با وضعیت ``active`` را نگه می‌دارد. در صورت نیاز می‌توان
+    وضعیت مؤثر را به‌صورت ستونی جداگانه نیز ضمیمه کرد.
 
-    Returns:
-        DataFrame فیلترشده. در attrs اطلاعات تعداد حذف شده درج می‌شود.
+    مثال
+    -----
+    >>> import pandas as pd
+    >>> from app.core.policy_loader import MentorPoolGovernanceConfig, MentorStatus
+    >>> df = pd.DataFrame({"mentor_id": [10, 20], "نام": ["الف", "ب"]})
+    >>> config = MentorPoolGovernanceConfig(
+    ...     default_status=MentorStatus.ACTIVE,
+    ...     mentor_status_map={20: MentorStatus.INACTIVE},
+    ...     allowed_statuses=(MentorStatus.ACTIVE, MentorStatus.INACTIVE),
+    ... )
+    >>> filter_active_mentors(df, config)
+       mentor_id نام
+    0        10  الف
+    >>> filter_active_mentors(df, config, overrides={20: True}, attach_status=True)
+       mentor_id نام mentor_status
+    0        10  الف         active
+    1        20   ب         active
     """
 
-    if pool is None or pool.empty:
-        return pool.copy() if pool is not None else pd.DataFrame()
+    statuses = compute_effective_status(mentors_df, governance, overrides)
+    active_mask = statuses == MentorStatus.ACTIVE
+    filtered = mentors_df.loc[active_mask].copy()
 
-    normalized_overrides = _normalize_override_map(overrides)
-    frame = pool.copy()
-    if "mentor_id" not in frame.columns:
-        frame.attrs["mentor_pool_governance"] = {"removed": 0}
-        return frame
+    if attach_status:
+        filtered.loc[:, status_column] = statuses.loc[filtered.index].map(lambda s: s.value)
 
-    enabled_mask = pd.Series(True, index=frame.index)
-    disabled_by_status = 0
-
-    if config.enabled and config.status_column in frame.columns:
-        status_series = frame[config.status_column]
-        derived = status_series.map(lambda value: _coerce_status(value, config=config))
-        defaults = derived.fillna(config.default_active)
-        enabled_mask &= defaults.astype(bool)
-        disabled_by_status = int((~defaults.astype(bool)).sum())
-
-    if normalized_overrides:
-        mentor_ids = frame["mentor_id"].map(_normalize_mentor_id)
-        override_mask = mentor_ids.map(lambda mid: normalized_overrides.get(mid, True))
-        enabled_mask &= override_mask.astype(bool)
-
-    filtered = frame.loc[enabled_mask].copy()
-    removed_count = int((~enabled_mask).sum())
-    filtered.attrs["mentor_pool_governance"] = {
-        "removed": removed_count,
-        "removed_by_status": disabled_by_status,
-        "overrides_count": len(normalized_overrides),
-    }
     return filtered
-
