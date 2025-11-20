@@ -24,6 +24,13 @@
 2. استفاده از ماتریس برای **تخصیص خودکار پشتیبان** به دانش‌آموزان با **انتخاب بهینه** (بر اساس ظرفیت خالی/نسبت اشغال).
 3. ارائهٔ **خروجی استاندارد** برای سامانه‌های بالادست/پایین‌دست (ImportToSabt، داشبوردها و …).
 
+### 1.2) MentorSchoolBindingPolicy (Policy/SSoT, stable IDs)
+- **Empty/Zero tokens → Global mentor:** اگر توکن مدرسه در Policy خالی/0 باشد، منتور «آزاد» است (`has_school_constraint=False`) و در diagnostics `unmatched_schools` یا `invalid_mentors` ظاهر نمی‌شود.
+- **Non-empty, mapped tokens → Restricted mentor:** توکن مدرسه‌ای که به کد معتبر نگاشت می‌شود، منتور را به همان مدرسه مقید می‌کند (`has_school_constraint=True`, `کد مدرسه>0`).
+- **Non-empty, unmapped tokens → Drop + Diagnostics:** توکن نامعتبر/نگاشت‌نشده باعث حذف منتور مقید از ماتریس/تخصیص می‌شود و در `unmatched_schools`/`invalid_mentors` برای اپراتور و QA گزارش می‌گردد.
+- **QA ارتباطی:** `QA_RULE_SCHOOL_01` این سیاست را می‌سنجد و هر نشت منتور آزاد به diagnostics یا نبود `کد مدرسه` برای منتور مقید را خطا می‌داند. `QA_RULE_ALLOC_01` به اجرای دقیق سیاست ظرفیت/ظرفیت باقی‌مانده وابسته است.
+- **Stability:** شناسه‌های QA_RULE_* در Policy/SSoT/Docs/کد مشترک هستند (مثلاً QA_RULE_STU_01، QA_RULE_SCHOOL_01) و برای QA گزارش‌ها باید ثابت بمانند.
+
 ### 1.1) لایهٔ QA و قوانین ثابت (QA_RULE)
 - **QA_RULE_STU_01 — شمارش جهانی دانش‌آموز:** تعداد دانش‌آموز فعال در StudentReport، ماتریس و فایل تخصیص باید یکسان باشد؛ هر اختلافی خطای قطعی است.
 - **QA_RULE_STU_02 — شمارش منتور به منتور:** برای هر منتور، تعداد دانش‌آموز تخصیص‌یافته باید با شمار انتظار (Inspactor یا ظرفیت اعلامی) برابر باشد.
