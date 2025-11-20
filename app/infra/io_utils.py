@@ -19,6 +19,7 @@ from typing import Dict, Iterator, List, Literal, Mapping, Sequence
 
 import pandas as pd
 
+from app.core.build_matrix import REQUIRED_INSPACTOR_COLUMNS
 from app.core.common.columns import (
     CANON_EN_TO_FA,
     HeaderMode,
@@ -32,12 +33,14 @@ from app.core.common.contact_columns import (
     is_mobile_header,
     normalize_mobile_series_for_export,
 )
+from app.core.inspactor_schema_helper import missing_inspactor_columns
 from app.core.policy_loader import get_policy
-from app.infra.excel import apply_workbook_formatting
+from app.infra.excel.exporter import apply_workbook_formatting
 
 __all__ = [
     "ALT_CODE_COLUMN",
     "write_xlsx_atomic",
+    "read_inspactor_workbook",
     "read_excel_first_sheet",
     "read_crosswalk_workbook",
 ]
@@ -383,6 +386,60 @@ def read_excel_first_sheet(path: Path | str | PathLike[str]) -> pd.DataFrame:
             if not workbook.sheet_names:
                 raise ValueError(f"هیچ شیتی در فایل {source} یافت نشد.")
             return workbook.parse(workbook.sheet_names[0], dtype={ALT_CODE_COLUMN: str})
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"فایل یافت نشد: {source}") from exc
+    except Exception as exc:  # pragma: no cover - سناریوهای پیش‌بینی‌نشده
+        raise ValueError(f"خطا در خواندن فایل {source}: {exc}") from exc
+
+
+def read_inspactor_workbook(path: Path | str | PathLike[str]) -> pd.DataFrame:
+    """خواندن شیت مناسب Inspactor با تطبیق ستون‌های اجباری Policy.
+
+    این تابع همهٔ شیت‌های موجود را بررسی می‌کند، هدرها را به حالت فارسی
+    استاندارد تبدیل می‌کند و شیتی را برمی‌گرداند که کمترین ستون مفقود را
+    دارد. اگر شیتی بدون ستون مفقود یافت شود، همان نسخهٔ کاننیکال‌شده برمی‌گردد؛
+    در غیر این صورت کامل‌ترین شیت برگردانده می‌شود و کنترل نهایی اسکیمه به
+    Core سپرده می‌شود.
+
+    Args:
+        path: مسیر فایل Inspactor.
+
+    Returns:
+        pd.DataFrame: داده‌های کاننیکال‌شده با اولویت شیت‌های کامل.
+
+    Raises:
+        FileNotFoundError: در صورت نبودن فایل.
+        ValueError: اگر هیچ شیتی وجود نداشته باشد یا همهٔ شیت‌ها خالی باشند.
+    """
+
+    source = Path(path)
+    try:
+        with pd.ExcelFile(source) as workbook:
+            if not workbook.sheet_names:
+                raise ValueError(f"هیچ شیتی در فایل {source} یافت نشد.")
+
+            best_frame: pd.DataFrame | None = None
+            best_missing: list[str] | None = None
+
+            for sheet_name in workbook.sheet_names:
+                candidate = workbook.parse(sheet_name)
+                canonical = canonicalize_headers(candidate, header_mode="fa")
+                if ALT_CODE_COLUMN in canonical.columns:
+                    canonical = canonical.copy()
+                    canonical[ALT_CODE_COLUMN] = canonical[ALT_CODE_COLUMN].astype(str)
+
+                missing = missing_inspactor_columns(canonical, REQUIRED_INSPACTOR_COLUMNS)
+
+                if best_missing is None or len(missing) < len(best_missing):
+                    best_frame = canonical
+                    best_missing = list(missing)
+
+                if not missing:
+                    return canonical
+
+            if best_frame is None:
+                raise ValueError(f"خطا در خواندن فایل {source}: تمامی شیت‌ها خالی هستند")
+            return best_frame
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"فایل یافت نشد: {source}") from exc
     except Exception as exc:  # pragma: no cover - سناریوهای پیش‌بینی‌نشده

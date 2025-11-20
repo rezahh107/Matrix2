@@ -68,6 +68,7 @@ from app.infra.io_utils import (
     ALT_CODE_COLUMN,
     read_crosswalk_workbook,
     read_excel_first_sheet,
+    read_inspactor_workbook,
     write_xlsx_atomic,
 )
 from app.infra.local_database import LocalDatabase
@@ -1107,7 +1108,7 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
     output = Path(args.output)
 
     progress(0, f"policy {policy.version} loaded")
-    insp_df = read_excel_first_sheet(inspactor)
+    insp_df = read_inspactor_workbook(inspactor)
     schools_df = read_excel_first_sheet(schools)
     crosswalk_groups_df, crosswalk_synonyms_df = read_crosswalk_workbook(crosswalk)
 
