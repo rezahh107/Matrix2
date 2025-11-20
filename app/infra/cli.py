@@ -34,6 +34,7 @@ from app.core.allocation.engine import enrich_summary_with_history
 from app.core.allocation.history_metrics import METRIC_COLUMNS, compute_history_metrics
 from app.core.allocation.mentor_pool import (
     MentorPoolGovernanceConfig,
+    apply_manager_mentor_governance,
     apply_mentor_pool_governance,
 )
 from app.core.canonical_frames import (
@@ -268,6 +269,21 @@ def _resolve_mentor_pool_overrides(args: argparse.Namespace) -> dict[str, bool]:
         payload = json.loads(raw)
         if not isinstance(payload, Mapping):
             raise ValueError("mentor-overrides must be a JSON object")
+        overrides.update(_normalize_override_mapping(payload))
+    return overrides
+
+
+def _resolve_manager_overrides(args: argparse.Namespace) -> dict[str, bool]:
+    overrides: dict[str, bool] = {}
+    ui_overrides = getattr(args, "_ui_overrides", {}) or {}
+    ui_mapping = ui_overrides.get("mentor_pool_manager_overrides")
+    overrides.update(_normalize_override_mapping(ui_mapping if isinstance(ui_mapping, Mapping) else {}))
+
+    raw = getattr(args, "manager_overrides", None)
+    if raw:
+        payload = json.loads(raw)
+        if not isinstance(payload, Mapping):
+            raise ValueError("manager-overrides must be a JSON object")
         overrides.update(_normalize_override_mapping(payload))
     return overrides
 
@@ -1112,6 +1128,19 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
     schools_df = read_excel_first_sheet(schools)
     crosswalk_groups_df, crosswalk_synonyms_df = read_crosswalk_workbook(crosswalk)
 
+    governance_cfg: MentorPoolGovernanceConfig = getattr(
+        policy, "mentor_pool_governance", _default_governance_config()
+    )
+    mentor_overrides = _resolve_mentor_pool_overrides(args)
+    manager_overrides = _resolve_manager_overrides(args)
+    if mentor_overrides or manager_overrides:
+        insp_df = apply_manager_mentor_governance(
+            insp_df,
+            governance_cfg,
+            mentor_overrides=mentor_overrides,
+            manager_overrides=manager_overrides,
+        )
+
     inputs = {
         "inspactor": str(inspactor),
         "schools": str(schools),
@@ -1773,6 +1802,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--policy-version",
         default=None,
         help="نسخه یا هش policy مورد انتظار برای تطبیق قبل از ساخت",
+    )
+    build_cmd.add_argument(
+        "--manager-overrides",
+        default=None,
+        help="JSON object نگاشت manager→enabled برای اجرای جاری ماتریس",
+    )
+    build_cmd.add_argument(
+        "--mentor-overrides",
+        default=None,
+        help="JSON object نگاشت mentor_id→enabled برای اجرای جاری ماتریس",
     )
 
     alloc_cmd = sub.add_parser("allocate", help="تخصیص دانش‌آموزان به منتورها")

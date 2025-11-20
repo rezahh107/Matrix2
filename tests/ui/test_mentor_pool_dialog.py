@@ -20,32 +20,47 @@ def qapp() -> QApplication:
 
 def _sample_entries() -> list[MentorPoolEntry]:
     return [
-        MentorPoolEntry(mentor_id="101", mentor_name="Alpha", manager="M1", center="1", capacity=2),
-        MentorPoolEntry(mentor_id="102", mentor_name="Beta", manager="M2", center="2", capacity=3),
+        MentorPoolEntry(
+            mentor_id="101", mentor_name="Alpha", manager="M1", center="1", capacity=2
+        ),
+        MentorPoolEntry(
+            mentor_id="102", mentor_name="Beta", manager="M1", center="1", capacity=3
+        ),
+        MentorPoolEntry(
+            mentor_id="201", mentor_name="Gamma", manager="M2", center="2", capacity=1
+        ),
     ]
 
 
-def test_dialog_toggles_overrides(qapp: QApplication) -> None:
+def test_dialog_cascade_and_overrides(qapp: QApplication) -> None:
     dialog = MentorPoolDialog(_sample_entries())
     model = dialog.model
 
-    assert model.rowCount() == 2
-    assert model.columnCount() >= 5
-
-    index = model.index(1, 0)
-    model.setData(index, Qt.Unchecked, Qt.CheckStateRole)
-
+    # manager M1 should control two mentors
+    manager_item = model.item(0, 0)
+    assert manager_item.text() == "M1"
+    manager_item.setCheckState(Qt.Unchecked)
     overrides = dialog.get_overrides()
-    assert overrides["101"] is True
+    assert overrides["101"] is False
     assert overrides["102"] is False
 
-
-def test_dialog_reset_enables_all(qapp: QApplication) -> None:
-    dialog = MentorPoolDialog(_sample_entries())
-    model = dialog.model
-    model.setData(model.index(0, 0), Qt.Unchecked, Qt.CheckStateRole)
-
-    dialog._reset_all()
-
+    manager_item.setCheckState(Qt.Checked)
     overrides = dialog.get_overrides()
-    assert all(overrides.values())
+    assert overrides["101"] is True
+    assert overrides["102"] is True
+
+
+def test_dialog_search_and_manager_overrides(qapp: QApplication) -> None:
+    dialog = MentorPoolDialog(_sample_entries())
+    dialog._search.setText("Gamma")
+    # Even after filtering, overrides should reflect all mentors
+    overrides = dialog.get_overrides()
+    assert set(overrides.keys()) == {"101", "102", "201"}
+
+    manager_overrides = dialog.get_manager_overrides()
+    assert manager_overrides["M1"] is True
+    assert manager_overrides["M2"] is True
+
+    dialog._model.set_all(False)
+    manager_overrides = dialog.get_manager_overrides()
+    assert all(value is False for value in manager_overrides.values())
