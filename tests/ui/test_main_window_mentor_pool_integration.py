@@ -66,3 +66,15 @@ def test_toolbar_has_mentor_pool_action(qapp: QApplication, monkeypatch: pytest.
     action.trigger()
 
     assert triggered, "mentor pool governance action should invoke dialog handler"
+
+
+def test_matrix_governance_button_and_overrides(qapp: QApplication) -> None:
+    window = MainWindow()
+    assert window._btn_matrix_mentor_pool is not None
+    window._matrix_mentor_pool_overrides = {"401": False}
+    window._matrix_manager_overrides = {"Mgr": True}
+
+    overrides = window._build_matrix_overrides()
+
+    assert overrides["mentor_pool_overrides"] == {"401": False}
+    assert overrides["mentor_pool_manager_overrides"] == {"Mgr": True}

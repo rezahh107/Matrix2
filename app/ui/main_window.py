@@ -298,6 +298,7 @@ class MainWindow(QMainWindow):
         self._success_hook: Callable[[], None] | None = None
         self._btn_open_output_folder: QPushButton | None = None
         self._btn_mentor_pool: QPushButton | None = None
+        self._btn_matrix_mentor_pool: QPushButton | None = None
         self._center_manager_combos: Dict[int, QComboBox] = {}
         self._manager_names_cache: list[str] = []
         self._btn_reset_managers: QPushButton | None = None
@@ -310,6 +311,11 @@ class MainWindow(QMainWindow):
         self._mentor_pool_overrides: dict[str, bool] = {}
         self._mentor_pool_source: str = ""
         self._mentor_pool_dialog: MentorPoolDialog | None = None
+        self._matrix_mentor_pool_entries: list[MentorPoolEntry] = []
+        self._matrix_mentor_pool_overrides: dict[str, bool] = {}
+        self._matrix_manager_overrides: dict[str, bool] = {}
+        self._matrix_mentor_pool_source: str = ""
+        self._matrix_mentor_pool_dialog: MentorPoolDialog | None = None
         self._mentor_pool_dialog_class = MentorPoolDialog
         self._toolbar_actions: Dict[str, QAction] = {}
         self._toolbar_theme_label: QLabel | None = None
@@ -849,8 +855,22 @@ class MainWindow(QMainWindow):
         self._picker_inspactor = FilePicker(page, placeholder=self._t("files.inspactor", "فایل Inspactor"))
         self._picker_inspactor.setObjectName("editInspactor")
         self._picker_inspactor.setToolTip(self._t("files.inspactor", "خروجی گزارش Inspactor که فهرست پشتیبان‌ها را دارد"))
+        self._picker_inspactor.line_edit().textChanged.connect(
+            lambda *_: self._reset_matrix_mentor_pool_cache()
+        )
         self._set_picker_button_text(self._picker_inspactor)
-        inputs_layout.addRow(self._t("files.inspactor", "گزارش Inspactor"), self._picker_inspactor)
+        insp_row = QWidget(page)
+        insp_row_layout = QHBoxLayout(insp_row)
+        insp_row_layout.setContentsMargins(0, 0, 0, 0)
+        insp_row_layout.setSpacing(8)
+        insp_row_layout.addWidget(self._picker_inspactor, 1)
+        self._btn_matrix_mentor_pool = QPushButton("حاکمیت استخر", insp_row)
+        self._btn_matrix_mentor_pool.setToolTip(
+            "فعال/غیرفعال کردن مدیران و منتورها قبل از ساخت ماتریس"
+        )
+        self._btn_matrix_mentor_pool.clicked.connect(self._open_matrix_mentor_pool_governance)
+        insp_row_layout.addWidget(self._btn_matrix_mentor_pool)
+        inputs_layout.addRow(self._t("files.inspactor", "گزارش Inspactor"), insp_row)
 
         self._picker_schools = FilePicker(page, placeholder=self._t("files.schools", "فایل مدارس"))
         self._picker_schools.setObjectName("editSchools")
@@ -1456,6 +1476,7 @@ class MainWindow(QMainWindow):
             self._picker_rule_current_roster,
             self._btn_rule_autodetect,
             self._btn_mentor_pool,
+            self._btn_matrix_mentor_pool,
         ]
         self._interactive.extend(self._center_manager_combos.values())
         if self._btn_reset_managers is not None:
@@ -1511,7 +1532,23 @@ class MainWindow(QMainWindow):
             self._prefs.record_last_run("build")
             self._refresh_last_run_badge()
 
-        self._launch_cli(argv, "ساخت ماتریس", on_success=_remember_build_output)
+        overrides = self._build_matrix_overrides()
+
+        self._launch_cli(
+            argv, "ساخت ماتریس", overrides=overrides, on_success=_remember_build_output
+        )
+
+    def _build_matrix_overrides(self) -> dict[str, object]:
+        """تنظیم پارامترهای حاکمیت برای تب ساخت ماتریس."""
+
+        overrides: dict[str, object] = {}
+        if self._matrix_mentor_pool_overrides:
+            overrides["mentor_pool_overrides"] = dict(self._matrix_mentor_pool_overrides)
+        if self._matrix_manager_overrides:
+            overrides["mentor_pool_manager_overrides"] = dict(
+                self._matrix_manager_overrides
+            )
+        return overrides
 
     def _reset_history_metrics(self) -> None:
         """پاک‌سازی خروجی KPI تاریخچه برای اجرای جدید."""
@@ -1977,6 +2014,17 @@ class MainWindow(QMainWindow):
             self._mentor_pool_dialog.close()
             self._mentor_pool_dialog = None
 
+    def _reset_matrix_mentor_pool_cache(self) -> None:
+        """پاک‌سازی کش حاکمیت استخر در تب ساخت ماتریس."""
+
+        self._matrix_mentor_pool_entries = []
+        self._matrix_mentor_pool_overrides = {}
+        self._matrix_manager_overrides = {}
+        self._matrix_mentor_pool_source = ""
+        if self._matrix_mentor_pool_dialog is not None:
+            self._matrix_mentor_pool_dialog.close()
+            self._matrix_mentor_pool_dialog = None
+
     def _open_mentor_pool_governance(self) -> None:
         """بارگذاری استخر و نمایش دیالوگ حاکمیت بدون مسدود کردن UI."""
 
@@ -1998,6 +2046,27 @@ class MainWindow(QMainWindow):
             pool_path,
             description="بارگذاری استخر منتورها",
             on_loaded=lambda df: self._process_mentor_pool_dataframe(df, str(pool_path)),
+        )
+
+    def _open_matrix_mentor_pool_governance(self) -> None:
+        """باز کردن دیالوگ حاکمیت برای گزارش Inspactor (تب ساخت ماتریس)."""
+
+        path_text = self._picker_inspactor.text().strip()
+        if not path_text:
+            QMessageBox.warning(self, "استخر منتورها", "لطفاً ابتدا فایل Inspactor را انتخاب کنید.")
+            return
+        insp_path = Path(path_text)
+        if insp_path.is_dir():
+            QMessageBox.warning(self, "مسیر نامعتبر", "مسیر انتخاب‌شده یک پوشه است.")
+            return
+        if self._matrix_mentor_pool_entries and self._matrix_mentor_pool_source == str(insp_path):
+            self._show_matrix_mentor_pool_dialog(self._matrix_mentor_pool_entries)
+            return
+
+        self._run_excel_loader(
+            insp_path,
+            description="بارگذاری Inspactor برای حاکمیت",
+            on_loaded=lambda df: self._process_matrix_mentor_pool_dataframe(df, str(insp_path)),
         )
 
     def _process_mentor_pool_dataframe(self, dataframe: pd.DataFrame, source: str) -> None:
@@ -2028,6 +2097,34 @@ class MainWindow(QMainWindow):
         self._mentor_pool_source = source
         self._show_mentor_pool_dialog(entries)
 
+    def _process_matrix_mentor_pool_dataframe(self, dataframe: pd.DataFrame, source: str) -> None:
+        """آماده‌سازی داده‌های Inspactor برای دیالوگ حاکمیت تب ساخت ماتریس."""
+
+        try:
+            entries = build_mentor_entries_from_dataframe(
+                dataframe, existing_overrides=self._matrix_mentor_pool_overrides
+            )
+        except Exception as exc:
+            self._append_log(f"❌ خطا در خواندن Inspactor: {exc}")
+            QMessageBox.warning(
+                self,
+                "بارگذاری Inspactor",
+                "امکان استخراج منتورها از فایل نبود؛ لطفاً فایل را بررسی کنید.",
+            )
+            return
+
+        if not entries:
+            QMessageBox.warning(
+                self,
+                "استخر خالی",
+                "هیچ منتوری در فایل Inspactor یافت نشد؛ لطفاً فایل را بررسی کنید.",
+            )
+            return
+
+        self._matrix_mentor_pool_entries = entries
+        self._matrix_mentor_pool_source = source
+        self._show_matrix_mentor_pool_dialog(entries)
+
     def _show_mentor_pool_dialog(self, entries: list[MentorPoolEntry]) -> None:
         """نمایش/به‌روزرسانی دیالوگ حاکمیت استخر."""
 
@@ -2042,12 +2139,37 @@ class MainWindow(QMainWindow):
         self._mentor_pool_dialog.show()
         self._mentor_pool_dialog.raise_()
 
+    def _show_matrix_mentor_pool_dialog(self, entries: list[MentorPoolEntry]) -> None:
+        """نمایش دیالوگ حاکمیت برای تب ساخت ماتریس."""
+
+        dialog = self._mentor_pool_dialog_class(entries, self)
+        dialog.finished.connect(
+            lambda result, dlg=dialog: self._handle_matrix_mentor_pool_finished(result, dlg)
+        )
+        self._matrix_mentor_pool_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+
     def _handle_mentor_pool_finished(self, result: int, dialog: MentorPoolDialog) -> None:
         """ذخیرهٔ overrideها در صورت پذیرش دیالوگ."""
 
         if result == QDialog.Accepted:
             overrides = dialog.get_overrides()
             self._mentor_pool_overrides = {str(k): bool(v) for k, v in overrides.items()}
+
+    def _handle_matrix_mentor_pool_finished(
+        self, result: int, dialog: MentorPoolDialog
+    ) -> None:
+        """ذخیرهٔ overrideهای مدیر/منتور برای تب ساخت ماتریس."""
+
+        if result == QDialog.Accepted:
+            overrides = dialog.get_overrides()
+            manager_overrides = dialog.get_manager_overrides()
+            self._matrix_mentor_pool_overrides = {
+                str(k): bool(v) for k, v in overrides.items()
+            }
+            self._matrix_manager_overrides = {str(k): bool(v) for k, v in manager_overrides.items()}
+        self._matrix_mentor_pool_dialog = None
 
     def _reset_center_managers_to_default(self) -> None:
         """بازنشانی تمام مدیران به مقادیر پیش‌فرض Policy."""

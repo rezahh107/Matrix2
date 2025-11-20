@@ -1,123 +1,53 @@
 from __future__ import annotations
 
-"""دیالوگ حاکمیت استخر منتورها با جدول قابل ویرایش."""
+"""دیالوگ حاکمیت استخر منتورها با گروه‌بندی مدیر→منتور."""
 
 from typing import Iterable, Mapping
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
-    QTableView,
+    QTreeView,
     QVBoxLayout,
 )
 
+from app.ui.mentor_pool_model import ManagerMentorFilterProxy, ManagerMentorModel
 from app.ui.models import MentorPoolEntry
 
 
-class MentorPoolTableModel(QAbstractTableModel):
-    """مدل ساده برای نمایش لیست منتورها با ستون فعال/غیرفعال."""
-
-    _COLUMNS = (
-        ("enabled", "فعال"),
-        ("mentor_id", "شناسه"),
-        ("mentor_name", "نام منتور"),
-        ("manager", "مدیر"),
-        ("center", "مرکز"),
-        ("school", "مدرسه"),
-        ("capacity", "ظرفیت"),
-    )
-
-    def __init__(self, entries: Iterable[MentorPoolEntry] | None = None, parent=None) -> None:
-        super().__init__(parent)
-        self._entries: list[MentorPoolEntry] = list(entries or [])
-
-    def set_entries(self, entries: Iterable[MentorPoolEntry]) -> None:
-        self.beginResetModel()
-        self._entries = list(entries)
-        self.endResetModel()
-
-    # Qt model API -----------------------------------------------------
-    def rowCount(self, parent: QModelIndex | None = None) -> int:  # type: ignore[override]
-        if parent and parent.isValid():
-            return 0
-        return len(self._entries)
-
-    def columnCount(self, parent: QModelIndex | None = None) -> int:  # type: ignore[override]
-        if parent and parent.isValid():
-            return 0
-        return len(self._COLUMNS)
-
-    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):  # type: ignore[override]
-        if not index.isValid():
-            return None
-        entry = self._entries[index.row()]
-        column_key, _ = self._COLUMNS[index.column()]
-
-        if role == Qt.DisplayRole:
-            if column_key == "enabled":
-                return "✅" if entry.enabled else "⏸"
-            return str(getattr(entry, column_key, "") or "")
-        if role == Qt.CheckStateRole and column_key == "enabled":
-            return Qt.Checked if entry.enabled else Qt.Unchecked
-        return None
-
-    def setData(self, index: QModelIndex, value, role: int = Qt.EditRole):  # type: ignore[override]
-        if not index.isValid():
-            return False
-        column_key, _ = self._COLUMNS[index.column()]
-        if column_key != "enabled" or role not in {Qt.EditRole, Qt.CheckStateRole}:
-            return False
-        current = self._entries[index.row()]
-        toggled = bool(value == Qt.Checked or value is True)
-        if current.enabled == toggled:
-            return False
-        self._entries[index.row()] = MentorPoolEntry(
-            mentor_id=current.mentor_id,
-            mentor_name=current.mentor_name,
-            manager=current.manager,
-            center=current.center,
-            school=current.school,
-            capacity=current.capacity,
-            enabled=toggled,
-        )
-        self.dataChanged.emit(index, index, [Qt.CheckStateRole, Qt.DisplayRole])
-        return True
-
-    def flags(self, index: QModelIndex):  # type: ignore[override]
-        base = Qt.ItemIsEnabled | Qt.ItemIsSelectable
-        if index.isValid() and self._COLUMNS[index.column()][0] == "enabled":
-            return base | Qt.ItemIsUserCheckable
-        return base
-
-    def headerData(self, section: int, orientation, role=Qt.DisplayRole):  # type: ignore[override]
-        if role != Qt.DisplayRole:
-            return None
-        if orientation == Qt.Horizontal and 0 <= section < len(self._COLUMNS):
-            return self._COLUMNS[section][1]
-        if orientation == Qt.Vertical:
-            return str(section + 1)
-        return None
-
-    def overrides(self) -> dict[str, bool]:
-        return {entry.mentor_id: entry.enabled for entry in self._entries}
-
-
 class MentorPoolDialog(QDialog):
-    """دیالوگ حاکمیت استخر منتورها (غیربلاک‌کننده)."""
+    """دیالوگ حاکمیت استخر منتورها (غیربلاک‌کننده).
+
+    قابلیت‌ها:
+        - گروه‌بندی منتورها زیر مدیر مربوطه.
+        - تیک گروهی مدیر برای فعال/غیرفعال کردن همهٔ منتورها.
+        - فیلتر ساده بر اساس نام/شناسه.
+    """
 
     def __init__(self, entries: Iterable[MentorPoolEntry], parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("حاکمیت استخر منتورها")
-        self._model = MentorPoolTableModel(entries, self)
-        self._table = QTableView(self)
-        self._table.setModel(self._model)
-        self._table.setSelectionMode(QTableView.NoSelection)
-        self._table.horizontalHeader().setStretchLastSection(True)
-        self._table.verticalHeader().setVisible(False)
+        self._model = ManagerMentorModel(entries, self)
+        self._proxy = ManagerMentorFilterProxy()
+        self._proxy.setSourceModel(self._model)
+
+        self._tree = QTreeView(self)
+        self._tree.setModel(self._proxy)
+        self._tree.setRootIsDecorated(True)
+        self._tree.setUniformRowHeights(True)
+        self._tree.setHeaderHidden(False)
+        self._tree.setColumnWidth(0, 80)
+        self._tree.setAllColumnsShowFocus(True)
+        self._tree.expandAll()
+
+        self._search = QLineEdit(self)
+        self._search.setPlaceholderText("جستجو بر اساس مدیر یا منتور…")
+        self._search.textChanged.connect(self._proxy.set_query)
 
         hint = QLabel("منتورها را برای اجرای جاری فعال/غیرفعال کنید.", self)
         hint.setWordWrap(True)
@@ -128,39 +58,39 @@ class MentorPoolDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(hint)
-        layout.addWidget(self._table)
+        layout.addWidget(self._search)
+        layout.addWidget(self._tree)
 
         footer = QHBoxLayout()
         footer.addStretch(1)
+        select_all = QPushButton("✔️ فعال‌سازی همه", self)
+        select_all.clicked.connect(lambda: self._model.set_all(True))
+        select_none = QPushButton("⏸ غیرفعالسازی همه", self)
+        select_none.clicked.connect(lambda: self._model.set_all(False))
         refresh_button = QPushButton("بازنشانی", self)
         refresh_button.clicked.connect(self._reset_all)
+        footer.addWidget(select_all)
+        footer.addWidget(select_none)
         footer.addWidget(refresh_button)
         footer.addWidget(buttons)
         layout.addLayout(footer)
-        self.resize(800, 420)
+        self.resize(920, 540)
 
     def set_entries(self, entries: Iterable[MentorPoolEntry]) -> None:
         self._model.set_entries(entries)
+        self._tree.expandAll()
 
     def _reset_all(self) -> None:
-        entries = [
-            MentorPoolEntry(
-                mentor_id=item.mentor_id,
-                mentor_name=item.mentor_name,
-                manager=item.manager,
-                center=item.center,
-                school=item.school,
-                capacity=item.capacity,
-                enabled=True,
-            )
-            for item in self._model._entries
-        ]
-        self._model.set_entries(entries)
+        self._model.set_all(True)
+        self._tree.expandAll()
 
     def get_overrides(self) -> Mapping[str, bool]:
         return self._model.overrides()
 
+    def get_manager_overrides(self) -> Mapping[str, bool]:
+        return self._model.manager_overrides()
+
     @property
-    def model(self) -> MentorPoolTableModel:
+    def model(self) -> ManagerMentorModel:
         return self._model
 

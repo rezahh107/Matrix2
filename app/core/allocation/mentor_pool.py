@@ -12,12 +12,14 @@ from typing import Mapping
 
 import pandas as pd
 
+from app.core.common.columns import canonicalize_headers
 from app.core.policy_loader import MentorPoolGovernanceConfig, MentorStatus
 
 __all__ = [
     "compute_effective_status",
     "filter_active_mentors",
     "apply_mentor_pool_governance",
+    "apply_manager_mentor_governance",
 ]
 
 
@@ -193,3 +195,92 @@ def apply_mentor_pool_governance(
         "overrides_count": len(normalized_overrides),
     }
     return filtered
+
+
+def _normalize_manager_overrides(
+    overrides: Mapping[int | str | float, bool] | None,
+) -> dict[str, bool]:
+    normalized: dict[str, bool] = {}
+    if not overrides:
+        return normalized
+    for raw_id, enabled in overrides.items():
+        key = str(raw_id).strip()
+        if not key:
+            continue
+        normalized[key] = bool(enabled)
+    return normalized
+
+
+def apply_manager_mentor_governance(
+    mentors_df: pd.DataFrame | None,
+    governance: MentorPoolGovernanceConfig,
+    *,
+    mentor_overrides: Mapping[int | str | float, bool] | None = None,
+    manager_overrides: Mapping[int | str | float, bool] | None = None,
+) -> pd.DataFrame:
+    """اعمال حاکمیت مدیر→منتور به‌صورت دترمینیستیک و بدون I/O.
+
+    ابتدا مدیران غیرفعال حذف می‌شوند و سپس وضعیت مؤثر منتورها بر اساس Policy
+    و overrideهای mentor اعمال می‌گردد. خروجی شِما را حفظ می‌کند و متادیتای
+    `mentor_pool_governance` را با شمارش‌های حذف تکمیل می‌کند.
+    """
+
+    normalized_managers = _normalize_manager_overrides(manager_overrides)
+    if mentors_df is None:
+        empty = pd.DataFrame()
+        empty.attrs["mentor_pool_governance"] = {
+            "total": 0,
+            "removed": 0,
+            "manager_removed": 0,
+            "overrides_count": len(_normalize_overrides(mentor_overrides)),
+            "manager_overrides_count": len(normalized_managers),
+        }
+        return empty
+
+    source = mentors_df.copy(deep=True)
+    if source.empty:
+        source.attrs["mentor_pool_governance"] = {
+            "total": 0,
+            "removed": 0,
+            "manager_removed": 0,
+            "overrides_count": len(_normalize_overrides(mentor_overrides)),
+            "manager_overrides_count": len(normalized_managers),
+        }
+        return source
+
+    canonical = canonicalize_headers(source, header_mode="en")
+    manager_col = "manager" if "manager" in canonical.columns else None
+    if manager_col and normalized_managers:
+        manager_series = canonical[manager_col].fillna("").map(str).str.strip()
+        manager_mask = manager_series.map(lambda name: normalized_managers.get(name, True))
+    else:
+        manager_mask = pd.Series(True, index=canonical.index)
+
+    filtered_managers = source.loc[manager_mask].copy()
+    manager_removed = int((~manager_mask).sum())
+    if filtered_managers.empty:
+        filtered_managers.attrs["mentor_pool_governance"] = {
+            "total": len(source),
+            "removed": manager_removed,
+            "manager_removed": manager_removed,
+            "overrides_count": len(_normalize_overrides(mentor_overrides)),
+            "manager_overrides_count": len(normalized_managers),
+        }
+        return filtered_managers
+
+    governed = apply_mentor_pool_governance(
+        filtered_managers,
+        governance,
+        overrides=mentor_overrides,
+    )
+    governed_attrs = governed.attrs.get("mentor_pool_governance", {})
+    governed.attrs["mentor_pool_governance"] = {
+        "total": len(source),
+        "removed": manager_removed + int(governed_attrs.get("removed", 0)),
+        "manager_removed": manager_removed,
+        "overrides_count": governed_attrs.get(
+            "overrides_count", len(_normalize_overrides(mentor_overrides))
+        ),
+        "manager_overrides_count": len(normalized_managers),
+    }
+    return governed
