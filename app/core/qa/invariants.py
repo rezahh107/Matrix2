@@ -8,6 +8,7 @@ from typing import Iterable, Mapping, Sequence
 import pandas as pd
 from pandas.api import types as ptypes
 
+from app.core.allocation.mentor_pool import compute_effective_status
 from app.core.policy_loader import MentorStatus, PolicyConfig
 
 RuleId = str
@@ -459,14 +460,6 @@ def check_GOV_01(
         return QaRuleResult("QA_RULE_GOV_01", True, violations)
 
     governance = policy.mentor_pool_governance
-    override_map: dict[int, bool] = {}
-    if overrides:
-        for key, flag in overrides.items():
-            try:
-                mentor_id = int(key)
-            except (TypeError, ValueError):
-                continue
-            override_map[mentor_id] = bool(flag)
 
     allocated_ids = (
         pd.to_numeric(allocation[mentor_col], errors="coerce")
@@ -477,21 +470,17 @@ def check_GOV_01(
     if allocated_ids.size == 0:
         return QaRuleResult("QA_RULE_GOV_01", True, violations)
 
-    for mentor_id in allocated_ids:
-        status = governance.status_for(mentor_id)
-        override_flag = override_map.get(int(mentor_id))
-        if override_flag is not None:
-            status = MentorStatus.ACTIVE if override_flag else MentorStatus.INACTIVE
+    mentors_df = pd.DataFrame({"mentor_id": allocated_ids})
+    statuses = compute_effective_status(mentors_df, governance, overrides)
+
+    for mentor_id, status in zip(allocated_ids, statuses):
         if status != MentorStatus.ACTIVE:
             violations.append(
                 QaViolation(
                     rule_id="QA_RULE_GOV_01",
                     level="error",
                     message="منتور غیرفعال در تخصیص دیده شد",
-                    details={
-                        "mentor_id": int(mentor_id),
-                        "status": status.value,
-                    },
+                    details={"mentor_id": int(mentor_id), "status": status.value},
                 )
             )
 
