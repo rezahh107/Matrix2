@@ -201,6 +201,32 @@ def _resolve_mentor_column(frame: pd.DataFrame | None) -> str | None:
     return None
 
 
+def _normalize_mentor_id(series: pd.Series) -> pd.Series:
+    """نرمال‌سازی ایمن شناسهٔ پشتیبان بدون تبدیل عددی.
+
+    این تابع برای پشتیبانی از شناسه‌های غیرعدد، صفر-پد شده یا ترکیبی طراحی شده است
+    و فقط فضای خالی را حذف می‌کند. نمونه::
+
+        >>> import pandas as pd
+        >>> _normalize_mentor_id(pd.Series([" EMP-1 ", 1001, None])).tolist()
+        ['EMP-1', '1001', <NA>]
+
+    """
+
+    def _clean(value: object) -> object:
+        if value is None:
+            return pd.NA
+        try:
+            if pd.isna(value):  # type: ignore[arg-type]
+                return pd.NA
+        except TypeError:
+            pass
+        text = str(value).strip()
+        return text if text else pd.NA
+
+    return series.map(_clean).astype("string")
+
+
 def check_STU_01(
     *,
     matrix: pd.DataFrame | None,
@@ -239,7 +265,13 @@ def check_STU_02(
     allocation: pd.DataFrame | None,
     inspactor: pd.DataFrame | None,
 ) -> QaRuleResult:
-    """QA_RULE_STU_02 — شمار دانش‌آموز به ازای هر منتور مطابق Inspactor/Allocation."""
+    """QA_RULE_STU_02 — شمار دانش‌آموز به ازای هر منتور مطابق Inspactor/Allocation.
+
+    این قانون، جمع مورد انتظار دانش‌آموزان در گزارش Inspactor را با شمار واقعی
+    تخصیص‌یافته در خروجی «allocation» بر حسب شناسهٔ پشتیبان مقایسه می‌کند. شناسه‌های
+    غیرعدد (مانند «EMP-1» یا شناسه‌های صفر-پد شده) بدون تبدیل عددی حفظ می‌شوند تا
+    پوشش منتورها به‌درستی سنجیده شود.
+    """
 
     mentor_col = _resolve_mentor_column(inspactor) or _resolve_mentor_column(allocation)
     if mentor_col is None or allocation is None or inspactor is None:
@@ -254,21 +286,25 @@ def check_STU_02(
     if expected_col is None:
         return QaRuleResult("QA_RULE_STU_02", True, [])
 
-    expected_counts = (
-        inspactor[[mentor_col, expected_col]]
-        .rename(columns={mentor_col: "mentor_id", expected_col: "expected"})
-        .dropna(subset=["mentor_id"])
-        .assign(mentor_id=lambda df: df["mentor_id"].astype(str))
+    expected_counts_raw = inspactor[[mentor_col, expected_col]].rename(
+        columns={mentor_col: "mentor_id", expected_col: "expected"}
     )
-    expected_counts["expected"] = pd.to_numeric(expected_counts["expected"], errors="coerce")
-    expected_counts = expected_counts.dropna(subset=["expected"])
-    expected_counts = expected_counts.groupby("mentor_id", as_index=False)["expected"].sum()
+    expected_counts_raw["mentor_id"] = _normalize_mentor_id(
+        expected_counts_raw["mentor_id"]
+    )
+    expected_counts_raw["expected"] = pd.to_numeric(
+        expected_counts_raw["expected"], errors="coerce"
+    )
+    expected_counts = (
+        expected_counts_raw.dropna(subset=["mentor_id", "expected"])
+        .groupby("mentor_id", as_index=False)["expected"]
+        .sum()
+    )
 
+    alloc_counts_raw = allocation[[mentor_col]].rename(columns={mentor_col: "mentor_id"})
+    alloc_counts_raw["mentor_id"] = _normalize_mentor_id(alloc_counts_raw["mentor_id"])
     alloc_counts = (
-        allocation[[mentor_col]]
-        .rename(columns={mentor_col: "mentor_id"})
-        .dropna(subset=["mentor_id"])
-        .assign(mentor_id=lambda df: df["mentor_id"].astype(str))
+        alloc_counts_raw.dropna(subset=["mentor_id"])
         .groupby("mentor_id", as_index=False)
         .size()
         .rename(columns={"size": "assigned"})
