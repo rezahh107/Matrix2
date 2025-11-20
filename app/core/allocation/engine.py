@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import pandas as pd
 
+from typing import Mapping
+
 from app.core.policy_loader import PolicyConfig
 
 from .channels import AllocationChannel, derive_channels_for_students
+from .mentor_pool import filter_active_mentors
 
 
 def annotate_students_with_channel(
@@ -41,8 +44,34 @@ __all__ = [
     "AllocationChannel",
     "annotate_students_with_channel",
     "derive_channel_map",
+    "build_mentor_pool",
     "enrich_summary_with_history",
 ]
+
+
+def build_mentor_pool(
+    mentors_df: pd.DataFrame,
+    *,
+    policy: PolicyConfig,
+    overrides: Mapping[int | str | float, bool] | None = None,
+    attach_status: bool = False,
+    status_column: str = "mentor_status",
+) -> pd.DataFrame:
+    """اعمال حاکمیت استخر پشتیبان‌ها و بازگرداندن دیتافریم فعال.
+
+    این تابع هیچ تغییری در ۶ کلید join یا سیاست رتبه‌بندی ایجاد نمی‌کند و تنها
+    براساس تنظیمات Policy و overrideهای نوبتی، منتورهای غیرفعال را حذف می‌کند.
+    خروجی برای ورودی برابر، دترمینیستیک است و در صورت نیاز ستون وضعیت نیز
+    به خروجی افزوده می‌شود.
+    """
+
+    return filter_active_mentors(
+        mentors_df,
+        policy.mentor_pool_governance,
+        overrides=overrides,
+        attach_status=attach_status,
+        status_column=status_column,
+    )
 
 
 def enrich_summary_with_history(

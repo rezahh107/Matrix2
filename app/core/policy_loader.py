@@ -11,6 +11,7 @@ import json
 import re
 import warnings
 from dataclasses import dataclass, field
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
@@ -286,6 +287,55 @@ class MentorSchoolBindingPolicy:
         return text in self.empty_tokens
 
 
+class MentorStatus(str, Enum):
+    """وضعیت پشتیبان برای حاکمیت استخر."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+
+    @classmethod
+    def from_value(cls, value: object) -> "MentorStatus":
+        """تبدیل مقدار متنی به Enum؛ در صورت مقدار ناشناخته خطا می‌دهد."""
+
+        text = str(value).strip().lower()
+        for item in cls:
+            if item.value == text:
+                return item
+        raise ValueError(f"Unknown mentor status '{value}'")
+
+
+@dataclass(frozen=True)
+class MentorPoolGovernanceConfig:
+    """تنظیمات حاکمیت استخر پشتیبان‌ها بر اساس Policy."""
+
+    default_status: MentorStatus
+    mentor_status_map: Mapping[int, MentorStatus]
+    allowed_statuses: tuple[MentorStatus, ...]
+
+    @property
+    def disabled_mentors(self) -> tuple[int, ...]:
+        """شناسهٔ منتورهایی که در Policy غیرفعال هستند."""
+
+        return tuple(
+            sorted(
+                mentor_id
+                for mentor_id, status in self.mentor_status_map.items()
+                if status != MentorStatus.ACTIVE
+            )
+        )
+
+    def status_for(self, mentor_id: int | float | str | None) -> MentorStatus:
+        """وضعیت مؤثر منتور بر اساس Policy را برمی‌گرداند."""
+
+        try:
+            normalized = int(mentor_id) if mentor_id is not None else None
+        except (TypeError, ValueError):
+            normalized = None
+        if normalized is None:
+            return self.default_status
+        return self.mentor_status_map.get(normalized, self.default_status)
+
+
 @dataclass(frozen=True)
 class PolicyConfig:
     """ساختار دادهٔ فقط‌خواندنی برای نگهداری سیاست بارگذاری‌شده."""
@@ -328,6 +378,13 @@ class PolicyConfig:
     )
     mentor_school_binding: MentorSchoolBindingPolicy = field(
         default_factory=MentorSchoolBindingPolicy
+    )
+    mentor_pool_governance: MentorPoolGovernanceConfig = field(
+        default_factory=lambda: MentorPoolGovernanceConfig(
+            default_status=MentorStatus.ACTIVE,
+            mentor_status_map={},
+            allowed_statuses=(MentorStatus.ACTIVE, MentorStatus.INACTIVE),
+        )
     )
 
     @property
@@ -465,6 +522,9 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
     coverage_options = _normalize_coverage_options(
         (data.get("matrix") or {}).get("coverage", {})
     )
+    mentor_pool_governance = _normalize_mentor_pool_governance(
+        data.get("mentor_pool_governance")
+    )
     allocation_channels = _normalize_allocation_channels(
         data.get("allocation_channels"), normal_statuses=normal_statuses
     )
@@ -498,6 +558,7 @@ def _normalize_policy_payload(data: Mapping[str, object]) -> Mapping[str, object
         "fairness_strategy": fairness_strategy,
         "coverage_options": coverage_options,
         "allocation_channels": allocation_channels,
+        "mentor_pool_governance": mentor_pool_governance,
     }
 
 
@@ -1136,6 +1197,9 @@ def _to_config(data: Mapping[str, object]) -> PolicyConfig:
                 data["coverage_options"]["include_blocked_candidates_in_denominator"]
             ),
         ),
+        mentor_pool_governance=_to_mentor_pool_governance(
+            data.get("mentor_pool_governance", {})
+        ),
         mentor_school_binding=_to_mentor_school_binding(
             data.get("mentor_school_binding", {})
         ),
@@ -1190,6 +1254,41 @@ def _to_mentor_school_binding(data: Mapping[str, object]) -> MentorSchoolBinding
         global_mode=str(data.get("global_mode", "global")),
         restricted_mode=str(data.get("restricted_mode", "restricted")),
         empty_tokens=tuple(str(item) for item in tokens),
+    )
+
+
+def _to_mentor_pool_governance(
+    data: Mapping[str, object]
+) -> MentorPoolGovernanceConfig:
+    allowed_raw = data.get("allowed_statuses") or (
+        MentorStatus.ACTIVE.value,
+        MentorStatus.INACTIVE.value,
+    )
+    allowed = tuple(MentorStatus.from_value(item) for item in allowed_raw)
+    default_status = MentorStatus.from_value(
+        data.get("default_status", MentorStatus.ACTIVE.value)
+    )
+    if default_status not in allowed:
+        raise ValueError("default_status must be included in allowed_statuses")
+
+    status_map_raw = data.get("mentor_status_map") or {}
+    if not isinstance(status_map_raw, Mapping):
+        raise TypeError("mentor_status_map must be a mapping of mentor_id to status")
+    mentor_status_map: dict[int, MentorStatus] = {}
+    for key, raw_status in status_map_raw.items():
+        try:
+            mentor_id = int(key)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("mentor_status_map keys must be convertible to int") from exc
+        status = MentorStatus.from_value(raw_status)
+        if status not in allowed:
+            raise ValueError("mentor_status_map contains status outside allowed_statuses")
+        mentor_status_map[mentor_id] = status
+
+    return MentorPoolGovernanceConfig(
+        default_status=default_status,
+        mentor_status_map=mentor_status_map,
+        allowed_statuses=allowed,
     )
 
 
@@ -1343,6 +1442,62 @@ def _normalize_coverage_options(payload: Mapping[str, object]) -> Dict[str, obje
         "denominator_mode": denominator_mode,
         "require_student_presence": require_student_presence,
         "include_blocked_candidates_in_denominator": include_blocked,
+    }
+
+
+def _parse_status_value(value: object) -> str:
+    status = MentorStatus.from_value(value)
+    return status.value
+
+
+def _normalize_mentor_pool_governance(raw: object | None) -> Mapping[str, object]:
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, Mapping):
+        raise TypeError("mentor_pool_governance must be a mapping of options")
+
+    allowed_raw = raw.get("allowed_statuses") or (
+        MentorStatus.ACTIVE.value,
+        MentorStatus.INACTIVE.value,
+    )
+    if not isinstance(allowed_raw, Sequence) or isinstance(allowed_raw, (str, bytes)):
+        raise TypeError("allowed_statuses must be a sequence of strings")
+    allowed_statuses: list[str] = []
+    seen: set[str] = set()
+    for item in allowed_raw:
+        status_value = _parse_status_value(item)
+        if status_value not in seen:
+            allowed_statuses.append(status_value)
+            seen.add(status_value)
+
+    default_status = _parse_status_value(
+        raw.get("default_status", MentorStatus.ACTIVE.value)
+    )
+    if default_status not in seen:
+        raise ValueError("default_status must be part of allowed_statuses")
+
+    mentors_raw = raw.get("mentors") or []
+    if not isinstance(mentors_raw, Sequence) or isinstance(mentors_raw, (str, bytes)):
+        raise TypeError("mentor_pool_governance.mentors must be a sequence of objects")
+    mentor_status_map: dict[int, str] = {}
+    for entry in mentors_raw:
+        if not isinstance(entry, Mapping):
+            raise TypeError("each mentor entry must be a mapping")
+        if "mentor_id" not in entry or "status" not in entry:
+            raise ValueError("mentor entry must include mentor_id and status")
+        try:
+            mentor_id = int(entry["mentor_id"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("mentor_id must be convertible to integer") from exc
+        status_value = _parse_status_value(entry["status"])
+        if status_value not in seen:
+            raise ValueError("mentor status must be listed in allowed_statuses")
+        mentor_status_map[mentor_id] = status_value
+
+    return {
+        "default_status": default_status,
+        "allowed_statuses": tuple(allowed_statuses),
+        "mentor_status_map": mentor_status_map,
     }
 
 
