@@ -40,7 +40,7 @@ from app.core.canonical_frames import (
     sanitize_pool_for_allocation as _sanitize_pool_for_allocation,
 )
 from app.core.build_matrix import BuildConfig, build_matrix
-from app.core.policy_loader import PolicyConfig, load_policy
+from app.core.policy_loader import MentorStatus, PolicyConfig, load_policy
 from app.core.qa.invariants import run_all_invariants
 from app.infra.excel_writer import write_selection_reasons_sheet
 from app.infra.excel.export_allocations import (
@@ -233,12 +233,20 @@ def _resolve_mentor_pool_overrides(args: argparse.Namespace) -> dict[str, bool]:
     return overrides
 
 
+def _default_governance_config() -> MentorPoolGovernanceConfig:
+    return MentorPoolGovernanceConfig(
+        default_status=MentorStatus.ACTIVE,
+        mentor_status_map={},
+        allowed_statuses=(MentorStatus.ACTIVE, MentorStatus.INACTIVE),
+    )
+
+
 def _apply_mentor_pool_overrides(
     pool: pd.DataFrame, policy: PolicyConfig, args: argparse.Namespace
 ) -> pd.DataFrame:
     overrides = _resolve_mentor_pool_overrides(args)
     config: MentorPoolGovernanceConfig = getattr(
-        policy, "mentor_pool_governance", MentorPoolGovernanceConfig.default()
+        policy, "mentor_pool_governance", _default_governance_config()
     )
     return apply_mentor_pool_governance(pool, config, overrides=overrides)
 
