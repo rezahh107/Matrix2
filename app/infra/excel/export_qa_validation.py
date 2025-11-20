@@ -114,7 +114,7 @@ def _meta_sheet(context: QaValidationContext, report: QaReport) -> pd.DataFrame:
         meta.update(context.meta)
     meta.setdefault("generated_at", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
     meta.setdefault("rules_total", len(report.results))
-    meta.setdefault("rules_failed", len([r for r in report.results if not r.passed]))
+    meta.setdefault("rules_failed", sum(not r.passed for r in report.results))
     meta.setdefault("policy_version", meta.get("policy_version"))
     meta.setdefault("ssot_version", meta.get("ssot_version"))
     return pd.json_normalize([meta])
