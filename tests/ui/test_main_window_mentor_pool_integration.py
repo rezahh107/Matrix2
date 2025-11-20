@@ -53,3 +53,16 @@ def test_reset_cache_clears_overrides(qapp: QApplication) -> None:
     window._reset_mentor_pool_cache()
 
     assert window._mentor_pool_overrides == {}
+
+
+def test_toolbar_has_mentor_pool_action(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    window = MainWindow()
+    triggered: list[bool] = []
+    monkeypatch.setattr(window, "_open_mentor_pool_governance", lambda: triggered.append(True))
+
+    action = window._toolbar_actions.get("mentor_pool")
+
+    assert action is not None
+    action.trigger()
+
+    assert triggered, "mentor pool governance action should invoke dialog handler"
