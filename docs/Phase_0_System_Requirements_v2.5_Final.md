@@ -57,6 +57,9 @@
 - **NFR-RESILIENCE-01 — خطایابی:** اگر HistoryStore در دسترس نباشد یا ناسازگار باشد، Infra باید خطای واضح تولید کند و تخصیص متوقف شود؛ استفاده از تاریخچه ناقص یا حدسی مجاز نیست.
 - **NFR-UX-01 — هماهنگی UI/CLI:** UI/CLI باید پیام‌های مرتبط با تاریخچه/کانال را از Core دریافت و بدون تغییر معنی به کاربر نمایش دهند (مثلاً شمارش دانش‌آموزان خارج‌شده به‌دلیل تاریخچه یا کانال خاص).
 
+
+### QA Validation Workbook
+- **FR-QA-02 — ورک‌بوک اعتبارسنجی QA:** پس از اجرای `run_all_invariants`، Infra باید فایل Excel تکرارپذیری بسازد (مثلاً `matrix_validation.xlsx` یا `allocations_validation.xlsx`) که شامل شیت خلاصهٔ قوانین و شیت‌های تفکیکی `students_per_mentor`, `school_binding_issues`, `allocation_capacity`, `student_counts`, `join_keys`, `meta` باشد تا اپراتور بتواند بدون تغییر منطق Core، وضعیت QA را بررسی کند.
 ## 4. ردیابی الزامات به معماری و Vision
 - FR-HIST-01/02/03 توسط زیربخش «HistoryStore و `dedupe_by_national_id`» در Architecture Blueprint و بخش «حافظهٔ تخصیص» در Vision پشتیبانی می‌شوند.
 - FR-CHAN-01/02/03 و جدول کانال‌ها با زیربخش AllocationChannel در Architecture و بخش «کانال‌های جریان دانش‌آموز» در Vision هم‌راستا هستند.

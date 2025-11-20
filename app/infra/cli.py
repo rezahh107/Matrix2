@@ -49,6 +49,10 @@ from app.infra.excel.export_allocations import (
     collect_trace_debug_sheets,
     load_sabt_export_profile,
 )
+from app.infra.excel.export_qa_validation import (
+    QaValidationContext,
+    export_qa_validation,
+)
 from app.infra.excel.import_to_sabt import (
     apply_alias_rule,
     build_errors_frame,
@@ -180,6 +184,25 @@ def _log_history_metrics(
     return history_metrics_df
 
 
+def _qa_validation_output_path(base: Path, *, stem_override: str | None = None) -> Path:
+    suffix = stem_override or f"{base.stem}_validation.xlsx"
+    return base.with_name(suffix)
+
+
+def _export_qa_validation_workbook(
+    *,
+    report: "QaReport",
+    base_output: Path,
+    context: QaValidationContext,
+    stem_override: str | None = None,
+) -> Path:
+    from app.core.qa.invariants import QaReport as _QaReport  # محفاظت از چرخهٔ import
+
+    if not isinstance(report, _QaReport):
+        raise TypeError("report must be QaReport")
+    output_path = _qa_validation_output_path(base_output, stem_override=stem_override)
+    export_qa_validation(report, output=output_path, context=context)
+    return output_path
 def _normalize_override_mapping(data: Mapping[object, object] | None) -> dict[str, bool]:
     if not data:
         return {}
@@ -1142,6 +1165,18 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         inspactor=insp_df,
         invalid_mentors=invalid_mentors,
     )
+    qa_context = QaValidationContext(
+        matrix=matrix,
+        inspactor=insp_df,
+        invalid_mentors=invalid_mentors,
+        meta=meta,
+    )
+    _export_qa_validation_workbook(
+        report=qa_report,
+        base_output=output,
+        context=qa_context,
+        stem_override="matrix_vs_students_validation.xlsx",
+    )
     if not qa_report.passed:
         failed_rules = {violation.rule_id for violation in qa_report.violations}
         detail = "; ".join(f"{v.rule_id}: {v.message}" for v in qa_report.violations)
@@ -1362,6 +1397,20 @@ def _allocate_and_write(
         allocation=allocations_df,
         allocation_summary=updated_pool_df,
         student_report=None,
+    )
+    qa_context = QaValidationContext(
+        allocation=allocations_df,
+        allocation_summary=updated_pool_df,
+        meta={
+            "policy_version": policy.version,
+            "ssot_version": "1.0.2",
+            "source_output": str(output),
+        },
+    )
+    _export_qa_validation_workbook(
+        report=qa_report,
+        base_output=output,
+        context=qa_context,
     )
     if not qa_report.passed:
         failed_rules = {violation.rule_id for violation in qa_report.violations}
