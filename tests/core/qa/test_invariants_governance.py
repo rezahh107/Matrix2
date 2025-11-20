@@ -3,7 +3,7 @@ import json
 import pandas as pd
 
 from app.core.qa import invariants
-from app.core.policy_loader import parse_policy_dict
+from app.core.policy_loader import MentorStatus, parse_policy_dict
 
 
 def _policy_with_disabled(mentor_id: int):
@@ -66,3 +66,39 @@ def test_default_inactive_blocks_unknown():
 
     assert not result.passed
     assert result.violations[0].details["status"] == "inactive"
+
+
+def test_gov_01_matches_compute_effective_status():
+    with open("config/policy.json", "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    payload["mentor_pool_governance"] = {
+        "default_status": "active",
+        "allowed_statuses": ["active", "inactive"],
+        "mentors": [
+            {"mentor_id": 1, "status": "inactive"},
+            {"mentor_id": 2, "status": "inactive"},
+        ],
+    }
+    policy = parse_policy_dict(payload)
+    allocation = pd.DataFrame({"student_id": [1, 2, 3], "mentor_id": [1, 2, 3]})
+
+    overrides = {2: True}
+    report = invariants.check_GOV_01(
+        allocation=allocation,
+        allocation_summary=None,
+        policy=policy,
+        overrides=overrides,
+    )
+
+    effective_status = invariants.compute_effective_status(
+        pd.DataFrame({"mentor_id": [1, 2, 3]}), policy.mentor_pool_governance, overrides
+    )
+    inactive_ids = [
+        mid for mid, status in zip((1, 2, 3), effective_status) if status != MentorStatus.ACTIVE
+    ]
+
+    violation_ids = {violation.details["mentor_id"] for violation in report.violations}
+
+    assert not report.passed
+    assert violation_ids == {1}
+    assert set(inactive_ids) == violation_ids
