@@ -209,7 +209,7 @@ def _normalize_mentor_id(series: pd.Series) -> pd.Series:
 
         >>> import pandas as pd
         >>> _normalize_mentor_id(pd.Series([" EMP-1 ", 1001, None])).tolist()
-        ['EMP-1', '1001', <NA>]
+        ['EMP-1', 1001, <NA>]
 
     """
 
@@ -221,10 +221,12 @@ def _normalize_mentor_id(series: pd.Series) -> pd.Series:
                 return pd.NA
         except TypeError:
             pass
-        text = str(value).strip()
-        return text if text else pd.NA
+        if isinstance(value, str):
+            text = value.strip()
+            return text if text else pd.NA
+        return value
 
-    return series.map(_clean).astype("string")
+    return series.map(_clean)
 
 
 def check_STU_01(
