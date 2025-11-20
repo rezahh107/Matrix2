@@ -54,7 +54,6 @@ def compute_effective_status(
 
     policy_status = mentor_ids.map(governance.mentor_status_map)
     statuses = statuses.where(policy_status.isna(), policy_status)
-    statuses = statuses.fillna(governance.default_status)
 
     override_map: dict[int, MentorStatus] = {}
     if overrides:
@@ -69,7 +68,7 @@ def compute_effective_status(
         override_status = mentor_ids.map(override_map)
         statuses = statuses.where(override_status.isna(), override_status)
 
-    return statuses.fillna(governance.default_status)
+    return statuses
 
 
 def filter_active_mentors(
