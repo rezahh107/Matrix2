@@ -15,6 +15,7 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     QSettings,
     Qt,
+    Signal,
     Slot,
     QTimer,
     QUrl,
@@ -264,6 +265,8 @@ class AccentSplitter(QSplitter):
 class MainWindow(QMainWindow):
     """پنجرهٔ اصلی PySide6 برای اجرای سناریوهای Build و Allocate."""
 
+    history_metrics_ready = Signal(object)
+
     def __init__(self) -> None:
         super().__init__()
         self._prefs = AppPreferences()
@@ -303,6 +306,7 @@ class MainWindow(QMainWindow):
         self._log_line = 0
         self._history_metrics_df = pd.DataFrame(columns=METRIC_COLUMNS)
         self._history_metrics_dialog: HistoryMetricsDialog | None = None
+        self.history_metrics_ready.connect(self._on_history_metrics_ready)
         self._toolbar_actions: Dict[str, QAction] = {}
         self._toolbar_theme_label: QLabel | None = None
         self._stage_badge: QLabel | None = None
@@ -1496,12 +1500,12 @@ class MainWindow(QMainWindow):
     def _capture_history_metrics(self, metrics_df: pd.DataFrame | None) -> None:
         """ذخیرهٔ KPI تاریخچه محاسبه‌شده در نخ Worker."""
 
+        payload: pd.DataFrame | None
         if isinstance(metrics_df, pd.DataFrame):
-            self._history_metrics_df = metrics_df.copy()
+            payload = metrics_df.copy()
         else:
-            self._reset_history_metrics()
-        if self._history_metrics_dialog is not None:
-            self._history_metrics_dialog.update_metrics(self._history_metrics_df)
+            payload = None
+        self.history_metrics_ready.emit(payload)
 
     def _show_history_metrics(self) -> None:
         """نمایش دیالوگ History Metrics با داده‌های آخرین اجرا."""
@@ -2353,6 +2357,18 @@ class MainWindow(QMainWindow):
         return True
 
     # ----------------------------------------------------------------- Signals
+    @Slot(object)
+    def _on_history_metrics_ready(self, metrics_df: object) -> None:
+        """به‌روزرسانی متریک‌های تاریخچه در Thread اصلی."""
+
+        if isinstance(metrics_df, pd.DataFrame):
+            self._history_metrics_df = metrics_df
+        else:
+            self._history_metrics_df = pd.DataFrame(columns=METRIC_COLUMNS)
+
+        if self._history_metrics_dialog is not None:
+            self._history_metrics_dialog.update_metrics(self._history_metrics_df)
+
     @Slot(int, str)
     def _on_progress(self, pct: int, message: str) -> None:
         """به‌روزرسانی نوار پیشرفت و ثبت لاگ."""
