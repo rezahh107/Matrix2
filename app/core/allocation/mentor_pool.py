@@ -7,8 +7,6 @@ from __future__ import annotations
 را فعال/غیرفعال کند.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Mapping
 
