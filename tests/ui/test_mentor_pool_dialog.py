@@ -1,13 +1,14 @@
+import pandas as pd
 import pytest
 
-try:
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication
-except ImportError as exc:  # pragma: no cover
-    pytest.skip(f"PySide6 unavailable: {exc}", allow_module_level=True)
+pytest.importorskip("PySide6")
+pytest.importorskip("PySide6.QtCore", exc_type=ImportError)
+pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 
 from app.ui.mentor_pool_dialog import MentorPoolDialog
-from app.ui.models import MentorPoolEntry
+from app.ui.models import MentorPoolEntry, build_mentor_entries_from_dataframe
 
 
 @pytest.fixture()
@@ -64,3 +65,48 @@ def test_dialog_search_and_manager_overrides(qapp: QApplication) -> None:
     dialog._model.set_all(False)
     manager_overrides = dialog.get_manager_overrides()
     assert all(value is False for value in manager_overrides.values())
+
+
+def test_build_entries_resolves_manager_aliases() -> None:
+    df = pd.DataFrame(
+        {
+            "مدیر": ["مدیر الف"],
+            "پشتیبان": ["مریم"],
+            "کد کارمندی پشتیبان": ["501"],
+            "مرکز": ["مرکز بهمن"],
+            "کد مدرسه": ["301"],
+            "ظرفیت": [4],
+        }
+    )
+
+    entries = build_mentor_entries_from_dataframe(df)
+
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.mentor_id == "501"
+    assert entry.mentor_name == "مریم"
+    assert entry.manager == "مدیر الف"
+    assert entry.center == "مرکز بهمن"
+    assert entry.school == "301"
+
+
+def test_build_entries_missing_manager_uses_placeholder() -> None:
+    df = pd.DataFrame(
+        {
+            "پشتیبان": ["ناصر"],
+            "کد کارمندی پشتیبان": ["777"],
+            "مرکز": ["۲"],
+            "کد مدرسه": ["900"],
+            "ظرفیت": [1],
+        }
+    )
+
+    entries = build_mentor_entries_from_dataframe(df)
+
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.manager == "(بدون مدیر)"
+    assert entry.mentor_id == "777"
+    assert entry.mentor_name == "ناصر"
+    assert entry.center == "۲"
+    assert entry.school == "900"

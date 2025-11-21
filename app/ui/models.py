@@ -7,7 +7,7 @@ from typing import Iterable, Mapping
 
 import pandas as pd
 
-from app.core.common.columns import canonicalize_headers
+from app.core.common.columns import canonicalize_headers, resolve_aliases
 
 
 @dataclass
@@ -74,7 +74,11 @@ def build_mentor_entries_from_dataframe(
         لیست ``MentorPoolEntry`` با اعمال overrideهای قبلی.
     """
 
-    normalized = canonicalize_headers(df, header_mode="en") if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    if isinstance(df, pd.DataFrame):
+        resolved = resolve_aliases(df, source="matrix")
+        normalized = canonicalize_headers(resolved, header_mode="en")
+    else:
+        normalized = pd.DataFrame()
     overrides = {str(k).strip(): bool(v) for k, v in (existing_overrides or {}).items() if str(k).strip()}
     entries: list[MentorPoolEntry] = []
 
@@ -92,18 +96,78 @@ def build_mentor_entries_from_dataframe(
         if enabled is None:
             enabled = True
 
+        manager_raw = _first_present(
+            record,
+            (
+                "manager_name",
+                "manager",
+            ),
+        )
+        manager_value = _string_value(manager_raw)
+        if not manager_value:
+            manager_value = "(بدون مدیر)"
+
+        center_name_value = _first_present(
+            record,
+            (
+                "center_name",
+            ),
+        )
+        center_value: str | int | None
+        if _string_value(center_name_value):
+            center_value = _string_value(center_name_value)
+        else:
+            center_id_value = _first_present(
+                record,
+                (
+                    "center",
+                    "center_id",
+                ),
+            )
+            if isinstance(center_id_value, float) and pd.isna(center_id_value):
+                center_value = None
+            else:
+                center_value = center_id_value
+
+        school_name_value = _first_present(
+            record,
+            (
+                "school_name",
+            ),
+        )
+        school_value: str | None
+        if _string_value(school_name_value):
+            school_value = _string_value(school_name_value)
+        else:
+            school_code_value = _first_present(
+                record,
+                (
+                    "school",
+                    "school_code",
+                ),
+            )
+            if isinstance(school_code_value, float) and pd.isna(school_code_value):
+                school_value = None
+            else:
+                school_value = school_code_value if school_code_value is not None else None
+
         entries.append(
             MentorPoolEntry(
                 mentor_id=mentor_id,
                 mentor_name=_string_value(
-                    _first_present(record, ("mentor_name", "name", "full_name"))
+                    _first_present(
+                        record,
+                        (
+                            "mentor_name",
+                            "name",
+                            "full_name",
+                            "mentor",
+                        ),
+                    )
                 ),
-                manager=_string_value(_first_present(record, ("manager", "manager_name"))) or None,
-                center=_string_value(_first_present(record, ("center", "center_id"))) or None,
-                school=_string_value(
-                    _first_present(record, ("school_code", "school", "school_name"))
-                )
-                or None,
+                manager=manager_value,
+                center=center_value,
+                school=school_value,
                 capacity=_first_present(
                     record,
                     (
