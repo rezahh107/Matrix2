@@ -7,26 +7,39 @@ from __future__ import annotations
 """
 
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable
 
 import pandas as pd
 
-from app.core.common.columns import canonicalize_headers
+from app.core.common.columns import canonicalize_headers, resolve_aliases
 
 
 def _validate_manager_column(columns: Iterable[str]) -> None:
     if "manager_name" not in columns:
-        raise ValueError("ستون manager_name در فایل استخر وجود ندارد")
+        raise ValueError("ستون manager_name/مدیر در فایل استخر یافت نشد؛ لطفاً ستون مدیر را اضافه کنید")
 
 
-def extract_manager_names(dataframe: pd.DataFrame) -> List[str]:
-    """استخراج نام‌های منحصربه‌فرد مدیران پس از نرمال‌سازی.
+def extract_manager_names(dataframe: pd.DataFrame) -> list[str]:
+    """استخراج نام‌های منحصربه‌فرد مدیران پس از نرمال‌سازی ستون‌ها.
+
+    نقش:
+        - هدرها را با سینونیم‌های مجاز (از جمله «مدیر») به `manager_name` نگاشت می‌کند.
+        - مقدارهای تهی/فاصله‌دار را حذف و لیست یکتا (به‌ترتیب ورود) بازمی‌گرداند.
 
     پارامترها:
         dataframe: دیتافریم خام استخر.
+
+    خروجی:
+        لیست یکتای نام مدیران پس از trim و حذف تهی.
+
+    مثال کوتاه:
+        >>> df = pd.DataFrame({"مدیر": [" علی ", "زهرا", "علی"]})
+        >>> extract_manager_names(df)
+        ['علی', 'زهرا']
     """
 
-    canonical = canonicalize_headers(dataframe, header_mode="en")
+    resolved = resolve_aliases(dataframe, source="matrix")
+    canonical = canonicalize_headers(resolved, header_mode="en")
     _validate_manager_column(canonical.columns)
     managers = canonical["manager_name"].dropna().astype(str).map(str.strip)
     cleaned = [name for name in managers.tolist() if name]
@@ -36,7 +49,7 @@ def extract_manager_names(dataframe: pd.DataFrame) -> List[str]:
     return unique
 
 
-def load_manager_names_from_pool(pool_path: Path) -> List[str]:
+def load_manager_names_from_pool(pool_path: Path) -> list[str]:
     """خواندن فایل استخر و استخراج لیست مدیران."""
 
     if not pool_path.exists():
