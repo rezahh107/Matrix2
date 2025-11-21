@@ -73,6 +73,11 @@ from app.infra.io_utils import (
     write_xlsx_atomic,
 )
 from app.infra.local_database import LocalDatabase
+from app.infra.reference_schools_repository import (
+    get_school_reference_frames,
+    import_school_crosswalk_from_excel,
+    import_school_report_from_excel,
+)
 from app.infra import history_store
 from app.infra.audit_allocations import audit_allocations, summarize_report
 # --- واردات اصلاح شده از app.core ---
@@ -222,6 +227,57 @@ def _log_history_metrics(
         )
 
     return history_metrics_df
+
+
+def _resolve_reference_frames(
+    *, args: argparse.Namespace, db: LocalDatabase
+) -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame | None,
+    dict[str, str],
+    dict[str, float],
+]:
+    """بارگذاری دیتافریم مدارس و Crosswalk از SQLite یا Excel."""
+
+    db.initialize()
+    schools_df: pd.DataFrame | None = None
+    crosswalk_groups_df: pd.DataFrame | None = None
+    crosswalk_synonyms_df: pd.DataFrame | None = None
+    inputs: dict[str, str] = {}
+    inputs_mtime: dict[str, float] = {}
+
+    if getattr(args, "schools", None):
+        schools_path = Path(args.schools)
+        schools_df = import_school_report_from_excel(schools_path, db)
+        inputs["schools"] = str(schools_path)
+        inputs_mtime["schools"] = schools_path.stat().st_mtime
+    if getattr(args, "crosswalk", None):
+        crosswalk_path = Path(args.crosswalk)
+        crosswalk_groups_df, crosswalk_synonyms_df = import_school_crosswalk_from_excel(
+            crosswalk_path, db
+        )
+        inputs["crosswalk"] = str(crosswalk_path)
+        inputs_mtime["crosswalk"] = crosswalk_path.stat().st_mtime
+
+    if schools_df is None or crosswalk_groups_df is None:
+        schools_db, crosswalk_db, crosswalk_synonyms_db = get_school_reference_frames(db)
+        if schools_df is None:
+            schools_df = schools_db
+            inputs.setdefault("schools", f"sqlite://{db.path}")
+            inputs_mtime.setdefault(
+                "schools", db.path.stat().st_mtime if db.path.exists() else 0.0
+            )
+        if crosswalk_groups_df is None:
+            crosswalk_groups_df = crosswalk_db
+            inputs.setdefault("crosswalk", f"sqlite://{db.path}")
+            inputs_mtime.setdefault(
+                "crosswalk", db.path.stat().st_mtime if db.path.exists() else 0.0
+            )
+        if crosswalk_synonyms_df is None:
+            crosswalk_synonyms_df = crosswalk_synonyms_db
+
+    return schools_df, crosswalk_groups_df, crosswalk_synonyms_df, inputs, inputs_mtime
 
 
 def _qa_validation_output_path(base: Path, *, stem_override: str | None = None) -> Path:
@@ -1119,14 +1175,22 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
     """اجرای فرمان ساخت ماتریس با چاپ پیشرفت و خروجی Excel."""
 
     inspactor = Path(args.inspactor)
-    schools = Path(args.schools)
-    crosswalk = Path(args.crosswalk)
     output = Path(args.output)
+    db = _resolve_local_db(args)
+    if db is None:
+        raise ValueError(
+            "پایگاه دادهٔ محلی غیرفعال است؛ برای استفاده از جداول مرجع مدارس باید فعال باشد."
+        )
 
     progress(0, f"policy {policy.version} loaded")
     insp_df = read_inspactor_workbook(inspactor)
-    schools_df = read_excel_first_sheet(schools)
-    crosswalk_groups_df, crosswalk_synonyms_df = read_crosswalk_workbook(crosswalk)
+    (
+        schools_df,
+        crosswalk_groups_df,
+        crosswalk_synonyms_df,
+        ref_inputs,
+        ref_inputs_mtime,
+    ) = _resolve_reference_frames(args=args, db=db)
 
     governance_cfg: MentorPoolGovernanceConfig = getattr(
         policy, "mentor_pool_governance", _default_governance_config()
@@ -1141,16 +1205,10 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
             manager_overrides=manager_overrides,
         )
 
-    inputs = {
-        "inspactor": str(inspactor),
-        "schools": str(schools),
-        "crosswalk": str(crosswalk),
-    }
-    inputs_mtime = {
-        "inspactor": inspactor.stat().st_mtime,
-        "schools": schools.stat().st_mtime,
-        "crosswalk": crosswalk.stat().st_mtime,
-    }
+    inputs = {"inspactor": str(inspactor)}
+    inputs.update(ref_inputs)
+    inputs_mtime = {"inspactor": inspactor.stat().st_mtime}
+    inputs_mtime.update(ref_inputs_mtime)
 
     min_coverage = _normalize_min_coverage_arg(getattr(args, "min_coverage", None))
     expected_policy_version = getattr(args, "policy_version", None)
@@ -1299,6 +1357,37 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         header_mode=policy.excel.header_mode_write,
     )
     progress(100, "done")
+    return 0
+
+
+def _run_import_schools(
+    args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn
+) -> int:
+    """ورود مرجع مدارس و Crosswalk به SQLite بدون اجرای ماتریس."""
+
+    db = _resolve_local_db(args)
+    if db is None:
+        raise ValueError(
+            "پایگاه دادهٔ محلی غیرفعال است؛ برای وارد کردن دادهٔ مرجع، گزینهٔ disable را حذف کنید."
+        )
+
+    schools_path = Path(args.school_report)
+    crosswalk_path = Path(args.crosswalk)
+
+    progress(5, "reading SchoolReport")
+    schools_df = import_school_report_from_excel(schools_path, db)
+    progress(40, "reading crosswalk")
+    crosswalk_groups_df, crosswalk_synonyms_df = import_school_crosswalk_from_excel(
+        crosswalk_path, db
+    )
+    progress(100, "schools and crosswalk imported")
+    logger.info(
+        "Imported %d schools and %d crosswalk rows into SQLite",
+        len(schools_df),
+        len(crosswalk_groups_df),
+    )
+    if crosswalk_synonyms_df is not None:
+        logger.info("Synonyms rows imported: %d", len(crosswalk_synonyms_df))
     return 0
 
 
@@ -1784,8 +1873,16 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     build_cmd.add_argument("--inspactor", required=True, help="مسیر فایل inspactor")
-    build_cmd.add_argument("--schools", required=True, help="مسیر فایل schools")
-    build_cmd.add_argument("--crosswalk", required=True, help="مسیر فایل crosswalk")
+    build_cmd.add_argument(
+        "--schools",
+        required=False,
+        help="(اختیاری) مسیر SchoolReport برای بروزرسانی مرجع مدارس در SQLite",
+    )
+    build_cmd.add_argument(
+        "--crosswalk",
+        required=False,
+        help="(اختیاری) مسیر Crosswalk برای بروزرسانی مرجع در SQLite",
+    )
     build_cmd.add_argument("--output", required=True, help="مسیر Excel خروجی")
     build_cmd.add_argument(
         "--policy",
@@ -1813,6 +1910,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="JSON object نگاشت mentor_id→enabled برای اجرای جاری ماتریس",
     )
+
+    refresh_cmd = sub.add_parser(
+        "import-schools",
+        help="ورود SchoolReport و Crosswalk به دیتابیس محلی به‌صورت مرجع",
+    )
+    refresh_cmd.add_argument("--school-report", required=True, help="مسیر فایل SchoolReport")
+    refresh_cmd.add_argument("--crosswalk", required=True, help="مسیر فایل Crosswalk")
+    _add_local_db_args(refresh_cmd)
 
     alloc_cmd = sub.add_parser("allocate", help="تخصیص دانش‌آموزان به منتورها")
     alloc_cmd.add_argument("--students", required=True, help="مسیر فایل دانش‌آموزان")
@@ -2046,6 +2151,9 @@ def main(
         if args.command == "build-matrix":
             runner = build_runner or _run_build_matrix
             return runner(args, policy, progress)
+
+        if args.command == "import-schools":
+            return _run_import_schools(args, policy, progress)
 
         if args.command == "allocate":
             runner = allocate_runner or _run_allocate

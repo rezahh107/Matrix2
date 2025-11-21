@@ -20,6 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List
 
+import pandas as pd
+
 _ISO_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
 
 logger = logging.getLogger(__name__)
@@ -253,11 +255,148 @@ class LocalDatabase:
                 count INTEGER NOT NULL,
                 FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS schools (
+                "کد مدرسه" INTEGER,
+                "نام مدرسه" TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS school_crosswalk_groups (
+                "کد مدرسه" INTEGER,
+                "کد جایگزین" TEXT,
+                title TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS school_crosswalk_synonyms (
+                "کد مدرسه" INTEGER,
+                "کد جایگزین" TEXT,
+                alias TEXT
+            );
             """
         )
+
+    # ------------------------------------------------------------------
+    # جدول‌های مرجع مدارس / Crosswalk
+    # ------------------------------------------------------------------
+    def upsert_schools(self, df: pd.DataFrame) -> None:
+        """افزودن/جایگزینی جدول مدارس از DataFrame.
+
+        این تابع دیتافریم ورودی را بدون index در جدول ``schools`` ذخیره
+        می‌کند و در صورت وجود ستون «کد مدرسه»، ایندکس یکتا می‌سازد تا
+        جست‌وجوی مبتنی‌بر کلید اتصال سریع و پایدار بماند.
+        """
+
+        if df is None:
+            raise ValueError("DataFrame مدارس تهی است؛ ورودی معتبر بدهید.")
+        self.initialize()
+        with self.connect() as conn:
+            df.to_sql("schools", conn, if_exists="replace", index=False)
+            if "کد مدرسه" in df.columns:
+                conn.execute(
+                    'CREATE UNIQUE INDEX IF NOT EXISTS idx_schools_code ON schools("کد مدرسه")'
+                )
+            conn.commit()
+
+    def upsert_school_crosswalk(
+        self, groups_df: pd.DataFrame, *, synonyms_df: pd.DataFrame | None = None
+    ) -> None:
+        """ذخیرهٔ Crosswalk مدارس (شیت گروه‌ها و Synonyms).
+
+        - ``groups_df`` در جدول ``school_crosswalk_groups`` ذخیره می‌شود.
+        - اگر ``synonyms_df`` موجود باشد، در ``school_crosswalk_synonyms``
+          ذخیره می‌شود؛ در غیر این صورت جدول Synonyms حذف نمی‌شود تا دادهٔ
+          قبلی باقی بماند.
+        """
+
+        if groups_df is None:
+            raise ValueError("Crosswalk مدارس تهی است؛ دیتافریم معتبر لازم است.")
+        self.initialize()
+        with self.connect() as conn:
+            groups_df.to_sql(
+                "school_crosswalk_groups", conn, if_exists="replace", index=False
+            )
+            if synonyms_df is not None:
+                synonyms_df.to_sql(
+                    "school_crosswalk_synonyms", conn, if_exists="replace", index=False
+                )
+            conn.commit()
+
+    def load_schools(self) -> pd.DataFrame:
+        """بارگذاری جدول مدارس از SQLite با حفظ نوع عددی کلید اتصال.
+
+        Returns
+        -------
+        pd.DataFrame
+            دیتافریم مدارس؛ اگر جدول وجود نداشته باشد خطای خوانا می‌دهد.
+        """
+
+        with self.connect() as conn:
+            if not _table_exists(conn, "schools"):
+                raise RuntimeError(
+                    "جدول مدارس در پایگاه داده یافت نشد؛ ابتدا import-schools را اجرا کنید."
+                )
+            df = pd.read_sql_query("SELECT * FROM schools", conn)
+        return _coerce_int_columns(df, ["کد مدرسه"])
+
+    def load_school_crosswalk(self) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+        """بارگذاری Crosswalk مدارس از SQLite.
+
+        Returns
+        -------
+        tuple[pd.DataFrame, pd.DataFrame | None]
+            دیتافریم گروه‌ها و دیتافریم Synonyms (در صورت موجود بودن) با حفظ
+            نوع Int64 برای ستون‌های کد.
+        """
+
+        with self.connect() as conn:
+            if not _table_exists(conn, "school_crosswalk_groups"):
+                raise RuntimeError(
+                    "جدول Crosswalk مدارس یافت نشد؛ ابتدا import-crosswalk را اجرا کنید."
+                )
+            groups_df = pd.read_sql_query("SELECT * FROM school_crosswalk_groups", conn)
+            synonyms_df = None
+            if _table_exists(conn, "school_crosswalk_synonyms"):
+                synonyms_df = pd.read_sql_query(
+                    "SELECT * FROM school_crosswalk_synonyms", conn
+                )
+        return _coerce_int_columns(groups_df, ["کد مدرسه", "کد جایگزین"]), synonyms_df
 
 
 def _to_iso(dt: datetime) -> str:
     """تبدیل datetime به رشتهٔ ISO8601 با پسوند Z."""
 
     return dt.strftime(_ISO_FORMAT)
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    """بررسی وجود جدول به‌صورت امن و دترمینیستیک."""
+
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    )
+    return cursor.fetchone() is not None
+
+
+def _coerce_int_columns(df: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
+    """تبدیل ستون‌های اعلام‌شده به نوع Int64 بدون تغییر سایر ستون‌ها."""
+
+    if df is None:
+        return pd.DataFrame()
+    coerced = df.copy()
+    for col in columns:
+        if col in coerced.columns:
+            coerced[col] = coerced[col].map(_coerce_int_like).astype("Int64")
+    return coerced
+
+
+def _coerce_int_like(value: object) -> int | None:
+    """تبدیل مقدار به int در صورت امکان؛ در غیر این صورت None."""
+
+    try:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
