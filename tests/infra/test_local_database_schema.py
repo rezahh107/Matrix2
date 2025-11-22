@@ -1,8 +1,5 @@
 # file: tests/infra/test_local_database_schema.py
 import sqlite3
-
-import pandas as pd
-import sqlite3
 from pathlib import Path
 
 import pandas as pd
@@ -33,12 +30,12 @@ def test_schema_version_mismatch_raises(tmp_path):
     db.initialize()
     with db.connect() as conn:
         conn.execute(
-            "UPDATE schema_meta SET schema_version = schema_version - 1 WHERE id = 1"
+            "UPDATE schema_meta SET schema_version = schema_version + 1 WHERE id = 1"
         )
         conn.commit()
     with pytest.raises(SchemaVersionMismatchError) as excinfo:
         db.initialize()
-    assert excinfo.value.actual_version == _SCHEMA_VERSION - 1
+    assert excinfo.value.actual_version == _SCHEMA_VERSION + 1
     assert excinfo.value.expected_version == _SCHEMA_VERSION
 
 
@@ -130,3 +127,49 @@ def test_schema_contains_student_and_mentor_cache_tables(tmp_path: Path) -> None
             "PRAGMA index_list('mentor_pool_cache')"
         ).fetchall()
         assert any("mentor_id" in str(row[1]) for row in idx_mentor)
+
+
+def test_migrate_from_v5_creates_managers_reference(tmp_path: Path) -> None:
+    db = LocalDatabase(tmp_path / "schema_v5.sqlite")
+    with db.connect() as conn:
+        LocalDatabase._ensure_schema_meta_table(conn)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO schema_meta(id, schema_version, policy_version, ssot_version, created_at)
+            VALUES (1, 5, '1.0.3', '1.0.2', '2024-01-01T00:00:00Z')
+            """
+        )
+        conn.commit()
+
+    db.initialize()
+
+    with db.connect() as conn:
+        version = conn.execute(
+            "SELECT schema_version FROM schema_meta WHERE id = 1"
+        ).fetchone()[0]
+        manager_info = conn.execute("PRAGMA table_info(managers_reference)").fetchall()
+        manager_indexes = {row[1] for row in conn.execute("PRAGMA index_list('managers_reference')").fetchall()}
+
+    assert int(version) == _SCHEMA_VERSION
+    manager_cols = [row[1] for row in manager_info]
+    assert "نام مدیر" in manager_cols
+    assert "مرکز گلستان صدرا" in manager_cols
+    assert any("center_manager" in name for name in manager_indexes)
+    assert any("manager" in name for name in manager_indexes)
+
+
+def test_initialize_raises_on_newer_schema(tmp_path: Path) -> None:
+    db = LocalDatabase(tmp_path / "schema_newer.sqlite")
+    with db.connect() as conn:
+        LocalDatabase._ensure_schema_meta_table(conn)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO schema_meta(id, schema_version, policy_version, ssot_version, created_at)
+            VALUES (1, ?, '1.0.3', '1.0.2', '2024-01-01T00:00:00Z')
+            """,
+            (_SCHEMA_VERSION + 1,),
+        )
+        conn.commit()
+
+    with pytest.raises(SchemaVersionMismatchError):
+        db.initialize()
