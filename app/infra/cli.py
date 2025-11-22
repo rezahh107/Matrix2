@@ -254,8 +254,8 @@ def _log_history_metrics(
             int(row["history_already_allocated"]),
             int(row["history_no_history_match"]),
             int(row["history_missing_or_invalid"]),
-            int(row["history_same_mentor"]),
-            float(row["students_total"] or 0.0),
+            int(row["same_history_mentor_true"]),
+            float(row["same_history_mentor_ratio"]),
         )
     return history_metrics_df
 
