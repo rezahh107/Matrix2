@@ -1844,6 +1844,8 @@ def _allocate_and_write(
             ctx=run_ctx,
             history_metrics=history_metrics_df if success else None,
             qa_outcome=qa_outcome,
+            qa_report=qa_report,
+            trace_snapshot=trace_df if success else None,
             db=db,
         )
 

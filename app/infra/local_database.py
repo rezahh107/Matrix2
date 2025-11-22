@@ -20,6 +20,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import io
 from typing import Iterable, List, Sequence
 
 import pandas as pd
@@ -32,7 +33,7 @@ from app.infra.errors import (
 )
 from app.infra.sqlite_config import configure_connection
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _POLICY_VERSION = "1.0.3"
 _SSOT_VERSION = "1.0.2"
 _ISO_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -108,9 +109,20 @@ class LocalDatabase:
 
         with self._open_connection() as conn:
             try:
-                self._ensure_schema(conn)
                 self._ensure_schema_meta_table(conn)
-                self._ensure_schema_meta_row(conn)
+                existing_version = self._get_schema_version(conn)
+                if existing_version is None:
+                    self._ensure_schema(conn)
+                    self._ensure_schema_meta_row(conn, version=_SCHEMA_VERSION)
+                elif existing_version < _SCHEMA_VERSION:
+                    self._migrate_schema(conn, from_version=existing_version)
+                elif existing_version > _SCHEMA_VERSION:
+                    raise SchemaVersionMismatchError(
+                        expected_version=_SCHEMA_VERSION,
+                        actual_version=existing_version,
+                        message="نسخهٔ Schema پایگاه داده از نسخهٔ برنامه جدیدتر است.",
+                    )
+                self._ensure_schema(conn)
                 self._validate_schema_version(conn)
                 conn.commit()
             except SchemaVersionMismatchError:
@@ -237,6 +249,119 @@ class LocalDatabase:
             )
             return cursor.fetchall()
 
+    # ------------------------------------------------------------------
+    # Snapshot های QA/Trace
+    # ------------------------------------------------------------------
+    def insert_trace_snapshot(
+        self,
+        *,
+        run_id: int,
+        trace_df: pd.DataFrame,
+        summary_df: pd.DataFrame | None = None,
+        history_info_df: pd.DataFrame | None = None,
+    ) -> None:
+        """ذخیرهٔ Snapshot تریس تخصیص برای یک اجرا.
+
+        داده‌ها به‌صورت JSON دترمینیستیک ذخیره می‌شوند تا رفتار قابل‌آزمایش
+        باشد و در مرحلهٔ بازیابی بدون تغییر semantics بازسازی شوند.
+        """
+
+        if trace_df is None:
+            raise ValueError("دیتافریم تریس تهی است؛ ورودی معتبر بدهید.")
+        payload = _serialize_dataframe(trace_df)
+        summary_json = _serialize_dataframe(summary_df) if summary_df is not None else None
+        history_json = (
+            _serialize_dataframe(history_info_df) if history_info_df is not None else None
+        )
+        try:
+            with self._open_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO trace_snapshots (
+                        run_id, trace_json, summary_json, history_info_json
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (run_id, payload, summary_json, history_json),
+                )
+                conn.commit()
+        except sqlite3.Error as exc:  # pragma: no cover - مسیر غیرمنتظره
+            raise DatabaseOperationError("ثبت Snapshot تریس با خطا روبه‌رو شد.") from exc
+
+    def fetch_trace_snapshot(
+        self, run_id: int
+    ) -> tuple[pd.DataFrame | None, pd.DataFrame | None, pd.DataFrame | None]:
+        """بازیابی Snapshot تریس برای یک اجرای مشخص."""
+
+        with self._open_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT trace_json, summary_json, history_info_json
+                FROM trace_snapshots WHERE run_id = ?
+                """,
+                (run_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None, None, None
+        trace_df = _safe_deserialize_dataframe(row["trace_json"], label="trace_json")
+        summary_df = _safe_deserialize_dataframe(row["summary_json"], label="summary_json")
+        history_df = _safe_deserialize_dataframe(
+            row["history_info_json"], label="history_info_json"
+        )
+        return trace_df, summary_df, history_df
+
+    def insert_qa_snapshot(
+        self,
+        *,
+        run_id: int,
+        qa_summary_df: pd.DataFrame | None,
+        qa_details_df: pd.DataFrame | None,
+    ) -> None:
+        """ثبت Snapshot QA شامل خلاصه و جزئیات قوانین."""
+
+        summary_json = _serialize_dataframe(qa_summary_df) if qa_summary_df is not None else None
+        details_json = _serialize_dataframe(qa_details_df) if qa_details_df is not None else None
+        if summary_json is None and details_json is None:
+            logger.debug("Skipping QA snapshot insert; both payloads are empty")
+            return
+        try:
+            with self._open_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO qa_snapshots (
+                        run_id, qa_summary_json, qa_details_json
+                    ) VALUES (?, ?, ?)
+                    """,
+                    (run_id, summary_json, details_json),
+                )
+                conn.commit()
+        except sqlite3.Error as exc:  # pragma: no cover - مسیر غیرمنتظره
+            raise DatabaseOperationError("ثبت Snapshot QA با خطا مواجه شد.") from exc
+
+    def fetch_qa_snapshot(
+        self, run_id: int
+    ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+        """بازیابی Snapshot QA برای یک اجرا."""
+
+        with self._open_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT qa_summary_json, qa_details_json
+                FROM qa_snapshots WHERE run_id = ?
+                """,
+                (run_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None, None
+        summary_df = _safe_deserialize_dataframe(
+            row["qa_summary_json"], label="qa_summary_json"
+        )
+        details_df = _safe_deserialize_dataframe(
+            row["qa_details_json"], label="qa_details_json"
+        )
+        return summary_df, details_df
+
     @staticmethod
     def _ensure_schema(conn: sqlite3.Connection) -> None:
         """ساخت جدول‌های runs/run_metrics/qa_summary و مراجع به‌صورت idempotent."""
@@ -278,6 +403,21 @@ class LocalDatabase:
                 violation_code TEXT NOT NULL,
                 severity TEXT NOT NULL,
                 count INTEGER NOT NULL,
+                FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS trace_snapshots (
+                run_id INTEGER PRIMARY KEY,
+                trace_json TEXT NOT NULL,
+                summary_json TEXT,
+                history_info_json TEXT,
+                FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS qa_snapshots (
+                run_id INTEGER PRIMARY KEY,
+                qa_summary_json TEXT,
+                qa_details_json TEXT,
                 FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
             );
 
@@ -359,7 +499,7 @@ class LocalDatabase:
         )
 
     @staticmethod
-    def _ensure_schema_meta_row(conn: sqlite3.Connection) -> None:
+    def _ensure_schema_meta_row(conn: sqlite3.Connection, *, version: int) -> None:
         """تضمین وجود رکورد نسخهٔ Schema با درج اولیه در صورت نبود."""
 
         conn.execute(
@@ -367,30 +507,69 @@ class LocalDatabase:
             INSERT OR IGNORE INTO schema_meta (id, schema_version, policy_version, ssot_version, created_at)
             VALUES (1, ?, ?, ?, ?)
             """,
-            (_SCHEMA_VERSION, _POLICY_VERSION, _SSOT_VERSION, _to_iso(datetime.utcnow())),
+            (version, _POLICY_VERSION, _SSOT_VERSION, _to_iso(datetime.utcnow())),
         )
+
+    @staticmethod
+    def _get_schema_version(conn: sqlite3.Connection) -> int | None:
+        cursor = conn.execute("SELECT schema_version FROM schema_meta WHERE id = 1")
+        row = cursor.fetchone()
+        return int(row[0]) if row is not None else None
 
     @staticmethod
     def _validate_schema_version(conn: sqlite3.Connection) -> None:
         """اعتبارسنجی تطابق نسخهٔ Schema پایگاه داده."""
 
-        cursor = conn.execute(
-            "SELECT schema_version FROM schema_meta WHERE id = 1"
-        )
-        row = cursor.fetchone()
-        if row is None:
+        actual = LocalDatabase._get_schema_version(conn)
+        if actual is None:
             raise SchemaVersionMismatchError(
                 expected_version=_SCHEMA_VERSION,
                 actual_version=-1,
                 message="رکورد نسخهٔ Schema یافت نشد.",
             )
-        actual = int(row[0])
         if actual != _SCHEMA_VERSION:
             raise SchemaVersionMismatchError(
                 expected_version=_SCHEMA_VERSION,
                 actual_version=actual,
                 message="نسخهٔ Schema پایگاه داده با نسخهٔ برنامه هم‌خوان نیست.",
             )
+
+    def _migrate_schema(self, conn: sqlite3.Connection, *, from_version: int) -> None:
+        """مهاجرت نسخهٔ Schema به نسخهٔ جاری."""
+
+        if from_version == 2:
+            self._migrate_v2_to_v3(conn)
+            return
+        raise SchemaVersionMismatchError(
+            expected_version=_SCHEMA_VERSION,
+            actual_version=from_version,
+            message="نسخهٔ Schema پشتیبانی نمی‌شود.",
+        )
+
+    def _migrate_v2_to_v3(self, conn: sqlite3.Connection) -> None:
+        """افزودن جداول Snapshot برای نسخهٔ ۳."""
+
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS trace_snapshots (
+                run_id INTEGER PRIMARY KEY,
+                trace_json TEXT NOT NULL,
+                summary_json TEXT,
+                history_info_json TEXT,
+                FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS qa_snapshots (
+                run_id INTEGER PRIMARY KEY,
+                qa_summary_json TEXT,
+                qa_details_json TEXT,
+                FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+            );
+            """
+        )
+        conn.execute(
+            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (_SCHEMA_VERSION,)
+        )
 
     # ------------------------------------------------------------------
     # جدول‌های مرجع مدارس / Crosswalk
@@ -678,6 +857,31 @@ def _coerce_int_columns(df: pd.DataFrame, columns: Iterable[str]) -> pd.DataFram
         if col in coerced.columns:
             coerced[col] = coerced[col].map(_coerce_int_like).astype("Int64")
     return coerced
+
+
+def _serialize_dataframe(df: pd.DataFrame | None) -> str | None:
+    """سریال‌سازی دترمینیستیک دیتافریم به JSON orient=split."""
+
+    if df is None:
+        return None
+    normalized = df.copy()
+    return normalized.to_json(
+        orient="split", force_ascii=False, date_format="iso", double_precision=15
+    )
+
+
+def _safe_deserialize_dataframe(payload: str | bytes | None, *, label: str) -> pd.DataFrame | None:
+    """بازسازی امن دیتافریم از JSON ذخیره‌شده به‌صورت split."""
+
+    if payload in (None, b"", ""):
+        return None
+    try:
+        if isinstance(payload, bytes):
+            payload = payload.decode("utf-8")
+        return pd.read_json(io.StringIO(payload), orient="split")
+    except Exception:
+        logger.exception("Failed to deserialize DataFrame payload for %s", label)
+        return None
 
 
 def _coerce_int_like(value: object) -> int | None:

@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from app.core.qa.invariants import QaReport
 from app.infra.local_database import LocalDatabase, QaSummaryRow, RunMetricRow, RunRecord
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,8 @@ def log_allocation_run(
     ctx: RunContext,
     history_metrics: pd.DataFrame | None,
     qa_outcome: QaOutcome | None,
+    qa_report: QaReport | None = None,
+    trace_snapshot: pd.DataFrame | None = None,
     db: LocalDatabase | None,
 ) -> None:
     """ثبت کامل اجرای تخصیص/RuleEngine در SQLite.
@@ -203,10 +206,62 @@ def log_allocation_run(
         qa_rows = _build_qa_rows(run_id, qa_outcome)
         if qa_rows:
             db.insert_qa_summary(qa_rows)
+        _maybe_store_snapshots(
+            db=db,
+            run_id=run_id,
+            trace_snapshot=trace_snapshot,
+            qa_report=qa_report,
+        )
     except Exception:
         logger.exception(
             "Failed to log allocation run to local DB (run_uuid=%s)", run_uuid
         )
+
+
+def _maybe_store_snapshots(
+    *,
+    db: LocalDatabase,
+    run_id: int,
+    trace_snapshot: pd.DataFrame | None,
+    qa_report: QaReport | None,
+) -> None:
+    """ذخیرهٔ Snapshot های Trace و QA در صورت موجود بودن."""
+
+    if trace_snapshot is not None:
+        summary_df = trace_snapshot.attrs.get("summary_df")
+        history_info_df = trace_snapshot.attrs.get("history_info_df")
+        db.insert_trace_snapshot(
+            run_id=run_id,
+            trace_df=trace_snapshot,
+            summary_df=summary_df if isinstance(summary_df, pd.DataFrame) else None,
+            history_info_df=(
+                history_info_df if isinstance(history_info_df, pd.DataFrame) else None
+            ),
+        )
+    if qa_report is not None:
+        qa_summary_df, qa_details_df = _extract_qa_frames(qa_report)
+        db.insert_qa_snapshot(
+            run_id=run_id,
+            qa_summary_df=qa_summary_df,
+            qa_details_df=qa_details_df,
+        )
+
+
+def _extract_qa_frames(
+    qa_report: QaReport | None,
+) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """تبدیل گزارش QA به دیتافریم‌های خلاصه و جزئیات."""
+
+    if qa_report is None:
+        return None, None
+    summary_df = qa_report.to_summary_frame()
+    detail_frames: list[pd.DataFrame] = []
+    for result in qa_report.results:
+        detail_frames.append(qa_report.to_details_frame(result.rule_id))
+    details_df = (
+        pd.concat(detail_frames, ignore_index=True) if detail_frames else pd.DataFrame()
+    )
+    return summary_df, details_df
 
 
 def build_run_context(
