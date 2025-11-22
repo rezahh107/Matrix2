@@ -860,12 +860,21 @@ class LocalDatabase:
     def fetch_reference_meta(self, table_name: str) -> tuple[str, str | None, int | None] | None:
         """بازیابی متادیتای کش مرجع (زمان، منبع، شمارش ردیف)."""
 
-        with self._open_connection() as conn:
-            cursor = conn.execute(
-                "SELECT refreshed_at, source, row_count FROM reference_meta WHERE table_name = ?",
-                (table_name,),
-            )
-            row = cursor.fetchone()
+        try:
+            with self._open_connection() as conn:
+                if not _table_exists(conn, "reference_meta"):
+                    return None
+                cursor = conn.execute(
+                    "SELECT refreshed_at, source, row_count FROM reference_meta WHERE table_name = ?",
+                    (table_name,),
+                )
+                row = cursor.fetchone()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise DatabaseOperationError("خواندن متادیتای مرجع با خطا مواجه شد.") from exc
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError("خواندن متادیتای مرجع با خطا مواجه شد.") from exc
         if row is None:
             return None
         return row[0], row[1], row[2]
