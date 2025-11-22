@@ -475,15 +475,20 @@ class LocalDatabase:
 
         temp_table = f"_{table_name}_new"
         try:
-            conn.execute("BEGIN IMMEDIATE")
             df.to_sql(temp_table, conn, if_exists="replace", index=False)
-            conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-            conn.execute(f"ALTER TABLE {temp_table} RENAME TO {table_name}")
-            for stmt in index_statements or []:
-                conn.execute(stmt)
+            conn.execute("SAVEPOINT replace_table")
+            try:
+                conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                conn.execute(f"ALTER TABLE {temp_table} RENAME TO {table_name}")
+                for stmt in index_statements or []:
+                    conn.execute(stmt)
+                conn.execute("RELEASE SAVEPOINT replace_table")
+            except sqlite3.Error:
+                conn.execute("ROLLBACK TO replace_table")
+                raise
         except sqlite3.Error as exc:
             try:
-                conn.rollback()
+                conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
             except sqlite3.Error:
                 pass
             raise DatabaseOperationError("جایگزینی جدول به‌صورت اتمیک با خطا مواجه شد.") from exc
