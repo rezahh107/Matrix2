@@ -111,6 +111,7 @@ def build_mentor_entries_from_dataframe(
             record,
             (
                 "center_name",
+                "مرکز",
             ),
         )
         center_value: str | int | None
