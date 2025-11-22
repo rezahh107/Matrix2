@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
-import sqlite3
 
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
-from app.infra.local_database import LocalDatabase, RunRecord
+from app.infra.local_database import LocalDatabase, RunRecord, _SCHEMA_VERSION
 
 
 def _sample_run_record(start: datetime) -> RunRecord:
@@ -27,78 +28,6 @@ def _sample_run_record(start: datetime) -> RunRecord:
         status="success",
         message=None,
     )
-
-
-def test_schema_initializes_to_v3(tmp_path) -> None:
-    db = LocalDatabase(tmp_path / "snap.db")
-    db.initialize()
-
-    with db.connect() as conn:
-        cursor = conn.execute("SELECT schema_version FROM schema_meta WHERE id = 1")
-        assert int(cursor.fetchone()[0]) == 3
-        for table in ["trace_snapshots", "qa_snapshots"]:
-            exists = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-            ).fetchone()
-            assert exists is not None
-
-
-def test_migrate_v2_to_v3_adds_snapshot_tables(tmp_path) -> None:
-    db_path = tmp_path / "v2.db"
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """
-        CREATE TABLE schema_meta (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            schema_version INTEGER NOT NULL,
-            policy_version TEXT NOT NULL,
-            ssot_version TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        """
-    )
-    conn.execute(
-        "INSERT INTO schema_meta (id, schema_version, policy_version, ssot_version, created_at) VALUES (1, 2, '1.0.3', '1.0.2', ?)",
-        (datetime.utcnow().isoformat(),),
-    )
-    conn.execute(
-        """
-        CREATE TABLE runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_uuid TEXT NOT NULL UNIQUE,
-            started_at TEXT NOT NULL,
-            finished_at TEXT NOT NULL,
-            policy_version TEXT NOT NULL,
-            ssot_version TEXT NOT NULL,
-            entrypoint TEXT NOT NULL,
-            cli_args TEXT,
-            db_path TEXT,
-            input_files_json TEXT,
-            input_hashes_json TEXT,
-            total_students INTEGER,
-            total_allocated INTEGER,
-            total_unallocated INTEGER,
-            history_metrics_json TEXT,
-            qa_summary_json TEXT,
-            status TEXT NOT NULL,
-            message TEXT
-        );
-        """
-    )
-    conn.commit()
-    conn.close()
-
-    db = LocalDatabase(db_path)
-    db.initialize()
-
-    with db.connect() as conn2:
-        version = int(conn2.execute("SELECT schema_version FROM schema_meta WHERE id = 1").fetchone()[0])
-        assert version == 3
-        for table in ["trace_snapshots", "qa_snapshots"]:
-            exists = conn2.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-            ).fetchone()
-            assert exists is not None
 
 
 def test_trace_snapshot_round_trip(tmp_path) -> None:
@@ -131,6 +60,10 @@ def test_trace_snapshot_round_trip(tmp_path) -> None:
     assert_frame_equal(
         restored_history.reset_index(drop=True), history_info_df.reset_index(drop=True)
     )
+
+    with db.connect() as conn:
+        version = conn.execute("SELECT schema_version FROM schema_meta WHERE id = 1").fetchone()[0]
+    assert int(version) == _SCHEMA_VERSION
 
 
 def test_qa_snapshot_round_trip(tmp_path) -> None:

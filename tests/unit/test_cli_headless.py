@@ -10,10 +10,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from app.core.policy_loader import load_policy
 from app.infra import cli
 from app.infra.io_utils import ALT_CODE_COLUMN
-from app.core.policy_loader import load_policy
-
+from tests.conftest import JOIN_KEYS_6
 
 _HAS_OPENPYXL = importlib.util.find_spec("openpyxl") is not None
 
@@ -34,14 +34,7 @@ def policy_file(tmp_path: Path) -> Path:
         "school_lookup_mismatch_threshold": 0.0,
         "join_key_duplicate_threshold": 0,
         "alias_rule": {"normal": "postal_or_fallback_mentor_id", "school": "mentor_id"},
-        "join_keys": [
-            "کدرشته",
-            "جنسیت",
-            "دانش آموز فارغ",
-            "مرکز گلستان صدرا",
-            "مالی حکمت بنیاد",
-            "کد مدرسه",
-        ],
+        "join_keys": JOIN_KEYS_6,
         "gender_codes": {
             "male": {"value": 1, "counter_code": "357"},
             "female": {"value": 0, "counter_code": "373"},
@@ -272,9 +265,17 @@ def test_cli_propagates_coverage_error_for_ui(policy_file: Path) -> None:
 def test_run_build_matrix_raises_on_duplicate_threshold_exceeded(
     tmp_path: Path,
     policy_file: Path,
+    mentor_pool_with_duplicates: pd.DataFrame,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     policy = load_policy(policy_file)
+    schools_stub = pd.DataFrame({"کد مدرسه": pd.Series([101], dtype="Int64")})
+    crosswalk_stub = pd.DataFrame(
+        {
+            "کد مدرسه": pd.Series([101], dtype="Int64"),
+            ALT_CODE_COLUMN: pd.Series([101], dtype="Int64"),
+        }
+    )
     insp = tmp_path / "insp.xlsx"
     schools = tmp_path / "schools.xlsx"
     crosswalk = tmp_path / "cross.xlsx"
@@ -290,12 +291,21 @@ def test_run_build_matrix_raises_on_duplicate_threshold_exceeded(
         min_coverage=None,
     )
 
-    monkeypatch.setattr(cli, "read_excel_first_sheet", lambda _: pd.DataFrame())
-    monkeypatch.setattr(cli, "read_inspactor_workbook", lambda *_: pd.DataFrame())
     monkeypatch.setattr(
         cli,
-        "read_crosswalk_workbook",
-        lambda _path: (pd.DataFrame(), pd.DataFrame()),
+        "_resolve_mentor_pool_frame",
+        lambda *_, **__: (mentor_pool_with_duplicates, {"inspactor": str(insp)}, {"inspactor": insp.stat().st_mtime}),
+    )
+    monkeypatch.setattr(cli, "import_school_report_from_excel", lambda *_args, **_kwargs: schools_stub)
+    monkeypatch.setattr(
+        cli,
+        "import_school_crosswalk_from_excel",
+        lambda *_args, **_kwargs: (crosswalk_stub, pd.DataFrame()),
+    )
+    monkeypatch.setattr(
+        cli,
+        "get_school_reference_frames",
+        lambda *_args, **_kwargs: (schools_stub, crosswalk_stub, pd.DataFrame()),
     )
 
     def fake_build_matrix(*_args, **_kwargs):  # type: ignore[no-untyped-def]
@@ -321,14 +331,24 @@ def test_run_build_matrix_raises_on_duplicate_threshold_exceeded(
         cli._run_build_matrix(args, policy, lambda *_args: None)
 
     assert getattr(excinfo.value, "is_join_key_duplicate_threshold_error", False)
+    assert "آستانهٔ مجاز" in str(excinfo.value)
+    assert "rows=3" in str(excinfo.value) or "ردیف" in str(excinfo.value)
 
 
 def test_run_build_matrix_verifies_policy_version(
     tmp_path: Path,
     policy_file: Path,
+    mentor_pool_empty: pd.DataFrame,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     policy = load_policy(policy_file)
+    schools_stub = pd.DataFrame({"کد مدرسه": pd.Series([], dtype="Int64")})
+    crosswalk_stub = pd.DataFrame(
+        {
+            "کد مدرسه": pd.Series([], dtype="Int64"),
+            ALT_CODE_COLUMN: pd.Series([], dtype="Int64"),
+        }
+    )
     insp = tmp_path / "insp.xlsx"
     schools = tmp_path / "schools.xlsx"
     crosswalk = tmp_path / "cross.xlsx"
@@ -345,12 +365,21 @@ def test_run_build_matrix_verifies_policy_version(
         policy_version="sha256:deadbeef",
     )
 
-    monkeypatch.setattr(cli, "read_excel_first_sheet", lambda *_: pd.DataFrame())
-    monkeypatch.setattr(cli, "read_inspactor_workbook", lambda *_: pd.DataFrame())
     monkeypatch.setattr(
         cli,
-        "read_crosswalk_workbook",
-        lambda _path: (pd.DataFrame(), pd.DataFrame()),
+        "_resolve_mentor_pool_frame",
+        lambda *_, **__: (mentor_pool_empty, {"inspactor": str(insp)}, {"inspactor": insp.stat().st_mtime}),
+    )
+    monkeypatch.setattr(cli, "import_school_report_from_excel", lambda *_args, **_kwargs: schools_stub)
+    monkeypatch.setattr(
+        cli,
+        "import_school_crosswalk_from_excel",
+        lambda *_args, **_kwargs: (crosswalk_stub, pd.DataFrame()),
+    )
+    monkeypatch.setattr(
+        cli,
+        "get_school_reference_frames",
+        lambda *_args, **_kwargs: (schools_stub, crosswalk_stub, pd.DataFrame()),
     )
     monkeypatch.setattr(cli, "build_matrix", lambda *_args, **_kwargs: pytest.fail("should not build"))
 
@@ -366,7 +395,7 @@ def test_allocate_command_passes_through(policy_file: Path) -> None:
         observed["pool"] = args.pool
         observed["capacity"] = args.capacity_column
         observed["academic_year"] = args.academic_year
-        progress(10, "alloc")
+        progress(5, "alloc")
         return 0
 
     exit_code = cli.main(
@@ -465,10 +494,12 @@ def test_inject_student_ids_ui_mode_disables_prompt(
     monkeypatch: pytest.MonkeyPatch, policy_file: Path
 ) -> None:
     policy = load_policy(policy_file)
-    students_df = pd.DataFrame({
-        "national_id": ["1", "2"],
-        "gender": [1, 1],
-    })
+    students_df = pd.DataFrame(
+        {
+            "national_id": ["1", "2"],
+            "gender": [1, 1],
+        }
+    )
     args = argparse.Namespace(
         counter_duplicate_strategy=None,
         academic_year=1402,
