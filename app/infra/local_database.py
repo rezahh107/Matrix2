@@ -32,8 +32,10 @@ from app.infra.errors import (
     SchemaVersionMismatchError,
 )
 from app.infra.sqlite_config import configure_connection
+from app.infra.sqlite_types import coerce_int_columns as _sqlite_coerce_int_columns
+from app.infra.sqlite_types import coerce_int_like as _sqlite_coerce_int_like
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _POLICY_VERSION = "1.0.3"
 _SSOT_VERSION = "1.0.2"
 _ISO_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -421,6 +423,13 @@ class LocalDatabase:
                 FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS reference_meta (
+                table_name TEXT PRIMARY KEY,
+                refreshed_at TEXT NOT NULL,
+                source TEXT,
+                row_count INTEGER
+            );
+
             CREATE TABLE IF NOT EXISTS schools (
                 "کد مدرسه" INTEGER,
                 "نام مدرسه" TEXT
@@ -540,6 +549,9 @@ class LocalDatabase:
         if from_version == 2:
             self._migrate_v2_to_v3(conn)
             return
+        if from_version == 3:
+            self._migrate_v3_to_v4(conn)
+            return
         raise SchemaVersionMismatchError(
             expected_version=_SCHEMA_VERSION,
             actual_version=from_version,
@@ -564,6 +576,23 @@ class LocalDatabase:
                 qa_summary_json TEXT,
                 qa_details_json TEXT,
                 FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+            );
+            """
+        )
+        conn.execute(
+            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (_SCHEMA_VERSION,)
+        )
+
+    def _migrate_v3_to_v4(self, conn: sqlite3.Connection) -> None:
+        """افزودن جدول متادیتای کش مراجع برای نسخهٔ ۴."""
+
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS reference_meta (
+                table_name TEXT PRIMARY KEY,
+                refreshed_at TEXT NOT NULL,
+                source TEXT,
+                row_count INTEGER
             );
             """
         )
@@ -596,6 +625,12 @@ class LocalDatabase:
                         if "کد مدرسه" in df.columns
                         else []
                     ),
+                )
+                self.record_reference_meta(
+                    table_name="schools",
+                    source=None,
+                    row_count=int(df.shape[0]),
+                    conn=conn,
                 )
         except sqlite3.Error as exc:
             raise DatabaseOperationError("ذخیرهٔ مدارس در SQLite ناکام ماند.") from exc
@@ -794,6 +829,47 @@ class LocalDatabase:
         except sqlite3.Error as exc:
             raise DatabaseOperationError("خواندن کش استخر منتورها با خطا مواجه شد.") from exc
 
+    def record_reference_meta(
+        self,
+        *,
+        table_name: str,
+        source: str | None,
+        row_count: int | None,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
+        """ثبت زمان به‌روزرسانی کش مرجع برای مصرف مخازن اشتراکی."""
+
+        needs_close = False
+        target_conn = conn
+        if target_conn is None:
+            target_conn = self._open_connection()
+            needs_close = True
+        try:
+            target_conn.execute(
+                """
+                INSERT OR REPLACE INTO reference_meta(table_name, refreshed_at, source, row_count)
+                VALUES (?, ?, ?, ?)
+                """,
+                (table_name, _to_iso(datetime.utcnow()), source, row_count),
+            )
+            target_conn.commit()
+        finally:
+            if needs_close:
+                target_conn.close()
+
+    def fetch_reference_meta(self, table_name: str) -> tuple[str, str | None, int | None] | None:
+        """بازیابی متادیتای کش مرجع (زمان، منبع، شمارش ردیف)."""
+
+        with self._open_connection() as conn:
+            cursor = conn.execute(
+                "SELECT refreshed_at, source, row_count FROM reference_meta WHERE table_name = ?",
+                (table_name,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return row[0], row[1], row[2]
+
     @staticmethod
     def _replace_table_atomic(
         conn: sqlite3.Connection,
@@ -850,13 +926,7 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
 def _coerce_int_columns(df: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
     """تبدیل ستون‌های اعلام‌شده به نوع Int64 بدون تغییر سایر ستون‌ها."""
 
-    if df is None:
-        return pd.DataFrame()
-    coerced = df.copy()
-    for col in columns:
-        if col in coerced.columns:
-            coerced[col] = coerced[col].map(_coerce_int_like).astype("Int64")
-    return coerced
+    return _sqlite_coerce_int_columns(df, list(columns))
 
 
 def _serialize_dataframe(df: pd.DataFrame | None) -> str | None:
@@ -887,14 +957,7 @@ def _safe_deserialize_dataframe(payload: str | bytes | None, *, label: str) -> p
 def _coerce_int_like(value: object) -> int | None:
     """تبدیل مقدار به int در صورت امکان؛ در غیر این صورت None."""
 
-    try:
-        if value is None:
-            return None
-        if isinstance(value, str) and not value.strip():
-            return None
-        return int(float(value))
-    except (TypeError, ValueError):
-        return None
+    return _sqlite_coerce_int_like(value)
 
 
 def _normalize_index_name(name: str) -> str:
@@ -909,19 +972,31 @@ def _build_index_statements(
     unique_candidates: Sequence[str] = (),
     join_keys: Sequence[str] = (),
 ) -> list[str]:
+    """تولید ایندکس‌های پایدار برای کلیدهای طبیعی و ۶ کلید اتصال Policy.
+
+    این تابع در تمام کش‌های مرجع استفاده می‌شود تا یکتا بودن شناسه‌های
+    طبیعی (student_id, mentor_id, کد مدرسه) و ایندکس‌گذاری join_keys بر اساس
+    Policy/SSoT در یک مکان متمرکز باشد.
+    """
+
     statements: list[str] = []
+    seen: set[str] = set()
     for column in unique_candidates:
         if column in df.columns:
             idx = _normalize_index_name(f"idx_{table_name}_{column}_uniq")
-            statements.append(
-                f'CREATE UNIQUE INDEX IF NOT EXISTS {idx} ON {table_name}("{column}")'
-            )
+            if idx not in seen:
+                statements.append(
+                    f'CREATE UNIQUE INDEX IF NOT EXISTS {idx} ON {table_name}("{column}")'
+                )
+                seen.add(idx)
     for column in join_keys:
         if column in df.columns:
             idx = _normalize_index_name(f"idx_{table_name}_{column}")
-            statements.append(
-                f'CREATE INDEX IF NOT EXISTS {idx} ON {table_name}("{column}")'
-            )
+            if idx not in seen:
+                statements.append(
+                    f'CREATE INDEX IF NOT EXISTS {idx} ON {table_name}("{column}")'
+                )
+                seen.add(idx)
     return statements
 
 
