@@ -39,6 +39,8 @@ from app.core.allocation.mentor_pool import (
 )
 from app.core.canonical_frames import (
     canonicalize_allocation_frames,
+    canonicalize_pool_frame,
+    canonicalize_students_frame,
     sanitize_pool_for_allocation as _sanitize_pool_for_allocation,
 )
 from app.core.build_matrix import BuildConfig, build_matrix
@@ -51,6 +53,7 @@ from app.infra.excel.export_allocations import (
     collect_trace_debug_sheets,
     load_sabt_export_profile,
 )
+from app.infra.errors import ReferenceDataMissingError
 from app.infra.excel.export_qa_validation import (
     QaValidationContext,
     export_qa_validation,
@@ -77,6 +80,14 @@ from app.infra.reference_schools_repository import (
     get_school_reference_frames,
     import_school_crosswalk_from_excel,
     import_school_report_from_excel,
+)
+from app.infra.reference_students_repository import (
+    import_student_report_from_excel,
+    load_students_from_cache,
+)
+from app.infra.reference_mentors_repository import (
+    import_mentor_pool_from_excel,
+    load_mentor_pool_from_cache,
 )
 from app.infra import history_store
 from app.infra.audit_allocations import audit_allocations, summarize_report
@@ -278,6 +289,73 @@ def _resolve_reference_frames(
             crosswalk_synonyms_df = crosswalk_synonyms_db
 
     return schools_df, crosswalk_groups_df, crosswalk_synonyms_df, inputs, inputs_mtime
+
+
+def _resolve_students_frame(
+    args: argparse.Namespace, policy: PolicyConfig, *, db: LocalDatabase | None
+) -> tuple[pd.DataFrame, dict[str, str], dict[str, float]]:
+    """بارگذاری دیتافریم دانش‌آموزان از مسیر فایل یا کش SQLite."""
+
+    if getattr(args, "students", None):
+        students_path = Path(args.students)
+        if db:
+            df = import_student_report_from_excel(
+                students_path, db=db, policy=policy
+            )
+        else:
+            df = canonicalize_students_frame(
+                read_excel_first_sheet(students_path), policy=policy
+            )
+        inputs = {"students": str(students_path)}
+        inputs_mtime = {"students": students_path.stat().st_mtime}
+        return df, inputs, inputs_mtime
+
+    if db is None:
+        raise ValueError(
+            "برای استفاده از کش دانش‌آموز باید --local-db فعال باشد یا مسیر فایل را مشخص کنید."
+        )
+    df = load_students_from_cache(db=db, policy=policy)
+    inputs = {"students": f"sqlite://{db.path}"}
+    inputs_mtime = {"students": db.path.stat().st_mtime if db.path.exists() else 0.0}
+    return df, inputs, inputs_mtime
+
+
+def _resolve_mentor_pool_frame(
+    args: argparse.Namespace,
+    policy: PolicyConfig,
+    *,
+    db: LocalDatabase | None,
+    pool_arg: str = "inspactor",
+    pool_source: str = "inspactor",
+) -> tuple[pd.DataFrame, dict[str, str], dict[str, float]]:
+    """بارگذاری استخر منتورها از مسیر فایل یا کش SQLite."""
+
+    path_text = getattr(args, pool_arg, None)
+    if path_text:
+        pool_path = Path(path_text)
+        if db:
+            df = import_mentor_pool_from_excel(
+                pool_path, db=db, policy=policy, pool_source=pool_source
+            )
+        else:
+            df = canonicalize_pool_frame(
+                read_inspactor_workbook(pool_path),
+                policy=policy,
+                sanitize_pool=False,
+                pool_source=pool_source,
+            )
+        inputs = {pool_arg: str(pool_path)}
+        inputs_mtime = {pool_arg: pool_path.stat().st_mtime}
+        return df, inputs, inputs_mtime
+
+    if db is None:
+        raise ValueError(
+            "برای استفاده از کش استخر منتورها باید --local-db فعال باشد یا مسیر فایل را مشخص کنید."
+        )
+    df = load_mentor_pool_from_cache(db=db, policy=policy)
+    inputs = {pool_arg: f"sqlite://{db.path}"}
+    inputs_mtime = {pool_arg: db.path.stat().st_mtime if db.path.exists() else 0.0}
+    return df, inputs, inputs_mtime
 
 
 def _qa_validation_output_path(base: Path, *, stem_override: str | None = None) -> Path:
@@ -1174,7 +1252,6 @@ def _inject_student_ids(
 def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn) -> int:
     """اجرای فرمان ساخت ماتریس با چاپ پیشرفت و خروجی Excel."""
 
-    inspactor = Path(args.inspactor)
     output = Path(args.output)
     db = _resolve_local_db(args)
     if db is None:
@@ -1183,7 +1260,9 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
         )
 
     progress(0, f"policy {policy.version} loaded")
-    insp_df = read_inspactor_workbook(inspactor)
+    insp_df, pool_inputs, pool_inputs_mtime = _resolve_mentor_pool_frame(
+        args, policy, db=db, pool_arg="inspactor", pool_source="inspactor"
+    )
     (
         schools_df,
         crosswalk_groups_df,
@@ -1205,10 +1284,8 @@ def _run_build_matrix(args: argparse.Namespace, policy: PolicyConfig, progress: 
             manager_overrides=manager_overrides,
         )
 
-    inputs = {"inspactor": str(inspactor)}
-    inputs.update(ref_inputs)
-    inputs_mtime = {"inspactor": inspactor.stat().st_mtime}
-    inputs_mtime.update(ref_inputs_mtime)
+    inputs = {**pool_inputs, **ref_inputs}
+    inputs_mtime = {**pool_inputs_mtime, **ref_inputs_mtime}
 
     min_coverage = _normalize_min_coverage_arg(getattr(args, "min_coverage", None))
     expected_policy_version = getattr(args, "policy_version", None)
@@ -1774,18 +1851,17 @@ def _allocate_and_write(
 def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn) -> int:
     """اجرای فرمان تخصیص دانش‌آموزان با خروجی Excel."""
 
-    students_path = Path(args.students)
-    pool_path = Path(args.pool)
     output = Path(args.output)
     policy_path = Path(args.policy)
     capacity_column = args.capacity_column or policy.columns.remaining_capacity
 
-    reader_students = _detect_reader(students_path)
-    reader_pool = _detect_reader(pool_path)
+    db = _resolve_local_db(args)
 
     progress(0, "loading inputs")
-    students_df = reader_students(students_path)
-    pool_df = reader_pool(pool_path)
+    students_df, student_inputs, _ = _resolve_students_frame(args, policy, db=db)
+    pool_df, pool_inputs, _ = _resolve_mentor_pool_frame(
+        args, policy, db=db, pool_arg="pool", pool_source="inspactor"
+    )
 
     students_base, pool_base = _prepare_allocation_frames(
         students_df,
@@ -1797,7 +1873,6 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
 
     pool_base = _apply_mentor_pool_overrides(pool_base, policy, args)
 
-    db = _resolve_local_db(args)
     return _allocate_and_write(
         students_base,
         pool_base,
@@ -1808,8 +1883,8 @@ def _run_allocate(args: argparse.Namespace, policy: PolicyConfig, progress: Prog
         capacity_column=capacity_column,
         db=db,
         command_name="allocate",
-        input_students_path=students_path,
-        input_pool_path=pool_path,
+        input_students_path=(Path(args.students) if getattr(args, "students", None) else (db.path if db else None)),
+        input_pool_path=(Path(args.pool) if getattr(args, "pool", None) else (db.path if db else None)),
         policy_path=policy_path,
     )
 
@@ -1872,7 +1947,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "در شیت invalid_mentors ثبت می‌کند."
         ),
     )
-    build_cmd.add_argument("--inspactor", required=True, help="مسیر فایل inspactor")
+    build_cmd.add_argument("--inspactor", required=False, help="(اختیاری) مسیر فایل inspactor برای بروزرسانی کش")
     build_cmd.add_argument(
         "--schools",
         required=False,
@@ -1919,9 +1994,23 @@ def _build_parser() -> argparse.ArgumentParser:
     refresh_cmd.add_argument("--crosswalk", required=True, help="مسیر فایل Crosswalk")
     _add_local_db_args(refresh_cmd)
 
+    import_students_cmd = sub.add_parser(
+        "import-students",
+        help="ورود StudentReport و ذخیرهٔ کش دانش‌آموزان در SQLite",
+    )
+    import_students_cmd.add_argument("--students", required=True, help="مسیر فایل StudentReport (Excel/CSV)")
+    _add_local_db_args(import_students_cmd)
+
+    import_mentors_cmd = sub.add_parser(
+        "import-mentors",
+        help="ورود Inspactor/MentorPool و ذخیرهٔ کش منتورها در SQLite",
+    )
+    import_mentors_cmd.add_argument("--inspactor", required=True, help="مسیر فایل Inspactor")
+    _add_local_db_args(import_mentors_cmd)
+
     alloc_cmd = sub.add_parser("allocate", help="تخصیص دانش‌آموزان به منتورها")
-    alloc_cmd.add_argument("--students", required=True, help="مسیر فایل دانش‌آموزان")
-    alloc_cmd.add_argument("--pool", required=True, help="مسیر استخر منتورها")
+    alloc_cmd.add_argument("--students", required=False, help="مسیر فایل دانش‌آموزان؛ در صورت عدم ارائه از کش SQLite خوانده می‌شود")
+    alloc_cmd.add_argument("--pool", required=False, help="مسیر استخر منتورها؛ در صورت عدم ارائه از کش SQLite خوانده می‌شود")
     alloc_cmd.add_argument("--output", required=True, help="مسیر Excel خروجی تخصیص")
     alloc_cmd.add_argument(
         "--capacity-column",
@@ -2155,6 +2244,24 @@ def main(
         if args.command == "import-schools":
             return _run_import_schools(args, policy, progress)
 
+        if args.command == "import-students":
+            db = _resolve_local_db(args)
+            if db is None:
+                raise ValueError("برای import-students باید --local-db مشخص شود.")
+            import_student_report_from_excel(Path(args.students), db=db, policy=policy)
+            print("students cache imported")
+            return 0
+
+        if args.command == "import-mentors":
+            db = _resolve_local_db(args)
+            if db is None:
+                raise ValueError("برای import-mentors باید --local-db مشخص شود.")
+            import_mentor_pool_from_excel(
+                Path(args.inspactor), db=db, policy=policy, pool_source="inspactor"
+            )
+            print("mentor pool cache imported")
+            return 0
+
         if args.command == "allocate":
             runner = allocate_runner or _run_allocate
             return runner(args, policy, progress)
@@ -2164,6 +2271,11 @@ def main(
             return runner(args, policy, progress)
 
         raise RuntimeError(f"Unsupported command: {args.command}")
+    except ReferenceDataMissingError as exc:
+        if ui_overrides is not None:
+            raise
+        print(f"❌ {exc}", file=sys.stderr)
+        return 2
     except ValueError as exc:
         if ui_overrides is not None:
             raise

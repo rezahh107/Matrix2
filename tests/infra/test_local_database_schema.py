@@ -2,6 +2,10 @@
 import sqlite3
 
 import pandas as pd
+import sqlite3
+from pathlib import Path
+
+import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 
@@ -74,3 +78,55 @@ def test_atomic_schools_import_rolls_back_on_failure(tmp_path, monkeypatch):
 
     restored = db.load_schools()
     assert_frame_equal(restored.sort_values(by="کد مدرسه").reset_index(drop=True), initial)
+
+
+def test_schema_contains_student_and_mentor_cache_tables(tmp_path: Path) -> None:
+    db = LocalDatabase(tmp_path / "schema_cache.sqlite")
+    db.initialize()
+
+    with db.connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "students_cache" in tables
+        assert "mentor_pool_cache" in tables
+
+        student_info = conn.execute("PRAGMA table_info(students_cache)").fetchall()
+        student_cols = [row[1] for row in student_info]
+        for col in [
+            "student_id",
+            "کدرشته",
+            "جنسیت",
+            "دانش آموز فارغ",
+            "مرکز گلستان صدرا",
+            "مالی حکمت بنیاد",
+            "کد مدرسه",
+        ]:
+            assert col in student_cols
+
+        mentor_info = conn.execute("PRAGMA table_info(mentor_pool_cache)").fetchall()
+        mentor_cols = [row[1] for row in mentor_info]
+        for col in [
+            "mentor_id",
+            "کد کارمندی پشتیبان",
+            "کدرشته",
+            "جنسیت",
+            "دانش آموز فارغ",
+            "مرکز گلستان صدرا",
+            "مالی حکمت بنیاد",
+            "کد مدرسه",
+        ]:
+            assert col in mentor_cols
+
+        idx_student = conn.execute(
+            "PRAGMA index_list('students_cache')"
+        ).fetchall()
+        assert any("student_id" in str(row[1]) for row in idx_student)
+
+        idx_mentor = conn.execute(
+            "PRAGMA index_list('mentor_pool_cache')"
+        ).fetchall()
+        assert any("mentor_id" in str(row[1]) for row in idx_mentor)
