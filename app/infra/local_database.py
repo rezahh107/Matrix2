@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Iterable, List, Sequence
 
 import pandas as pd
+from pandas.api.types import is_integer_dtype
 
 from app.infra.errors import (
     DatabaseOperationError,
@@ -31,7 +32,7 @@ from app.infra.errors import (
 )
 from app.infra.sqlite_config import configure_connection
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _POLICY_VERSION = "1.0.3"
 _SSOT_VERSION = "1.0.2"
 _ISO_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -296,6 +297,48 @@ class LocalDatabase:
                 "کد جایگزین" TEXT,
                 alias TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS students_cache (
+                student_id TEXT,
+                "کد ملی" TEXT,
+                "کدرشته" INTEGER,
+                "گروه آزمایشی" TEXT,
+                "جنسیت" INTEGER,
+                "دانش آموز فارغ" INTEGER,
+                "مرکز گلستان صدرا" INTEGER,
+                "مالی حکمت بنیاد" INTEGER,
+                "کد مدرسه" INTEGER,
+                school_code_raw TEXT,
+                school_code_norm INTEGER,
+                school_status_resolved INTEGER
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_students_cache_student_id
+            ON students_cache(student_id);
+
+            CREATE INDEX IF NOT EXISTS idx_students_cache_join_keys
+            ON students_cache("کدرشته", "جنسیت", "دانش آموز فارغ", "مرکز گلستان صدرا", "مالی حکمت بنیاد", "کد مدرسه");
+
+            CREATE TABLE IF NOT EXISTS mentor_pool_cache (
+                mentor_id TEXT,
+                "کد کارمندی پشتیبان" TEXT,
+                "کدرشته" INTEGER,
+                "گروه آزمایشی" TEXT,
+                "جنسیت" INTEGER,
+                "دانش آموز فارغ" INTEGER,
+                "مرکز گلستان صدرا" INTEGER,
+                "مالی حکمت بنیاد" INTEGER,
+                "کد مدرسه" INTEGER,
+                remaining_capacity REAL,
+                allocations_new INTEGER,
+                occupancy_ratio REAL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_mentor_pool_cache_mentor_id
+            ON mentor_pool_cache(mentor_id);
+
+            CREATE INDEX IF NOT EXISTS idx_mentor_pool_cache_join_keys
+            ON mentor_pool_cache("کدرشته", "جنسیت", "دانش آموز فارغ", "مرکز گلستان صدرا", "مالی حکمت بنیاد", "کد مدرسه");
             """
         )
 
@@ -454,8 +497,123 @@ class LocalDatabase:
                     message="جدول Crosswalk مدارس یافت نشد؛ ابتدا import-crosswalk را اجرا کنید.",
                 ) from exc
             raise DatabaseOperationError("خواندن Crosswalk مدارس با خطا مواجه شد.") from exc
+
+    # ------------------------------------------------------------------
+    # کش گزارش دانش‌آموز و استخر منتورها
+    # ------------------------------------------------------------------
+    def upsert_students_cache(
+        self, df: pd.DataFrame, *, join_keys: Sequence[str]
+    ) -> None:
+        """جایگزینی دیتافریم دانش‌آموزان در جدول ``students_cache``.
+
+        دیتافریم ورودی باید پیش‌تر بر اساس Policy نرمال شده باشد؛ این تابع تنها
+        ذخیره‌سازی اتمیک و ساخت ایندکس روی شناسه و کلیدهای اتصال را بر عهده دارد.
+        """
+
+        if df is None:
+            raise ValueError("DataFrame دانش‌آموزان تهی است؛ ورودی معتبر بدهید.")
+        self.initialize()
+        _validate_join_keys(df, join_keys)
+        index_statements = _build_index_statements(
+            table_name="students_cache",
+            df=df,
+            unique_candidates=("student_id",),
+            join_keys=join_keys,
+        )
+        try:
+            with self._open_connection() as conn:
+                self._replace_table_atomic(
+                    conn,
+                    table_name="students_cache",
+                    df=df,
+                    index_statements=index_statements,
+                )
         except sqlite3.Error as exc:
-            raise DatabaseOperationError("خواندن Crosswalk مدارس با خطا مواجه شد.") from exc
+            raise DatabaseOperationError(
+                "ذخیرهٔ کش دانش‌آموزان در SQLite ناکام ماند."
+            ) from exc
+
+    def load_students_cache(self, *, join_keys: Sequence[str]) -> pd.DataFrame:
+        """خواندن دیتافریم دانش‌آموزان از کش SQLite با حفظ نوع کلیدها."""
+
+        try:
+            with self._open_connection() as conn:
+                if not _table_exists(conn, "students_cache"):
+                    raise ReferenceDataMissingError(
+                        table="students_cache",
+                        message="کش دانش‌آموز یافت نشد؛ ابتدا import-students را اجرا کنید.",
+                    )
+                df = pd.read_sql_query("SELECT * FROM students_cache", conn)
+                if df.empty:
+                    raise ReferenceDataMissingError(
+                        table="students_cache",
+                        message="کش دانش‌آموز خالی است؛ ابتدا import-students را اجرا کنید.",
+                    )
+            return _coerce_int_columns(df, join_keys)
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                raise ReferenceDataMissingError(
+                    table="students_cache",
+                    message="کش دانش‌آموز یافت نشد؛ ابتدا import-students را اجرا کنید.",
+                ) from exc
+            raise DatabaseOperationError("خواندن کش دانش‌آموزان با خطا مواجه شد.") from exc
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError("خواندن کش دانش‌آموزان با خطا مواجه شد.") from exc
+
+    def upsert_mentor_pool_cache(
+        self, df: pd.DataFrame, *, join_keys: Sequence[str]
+    ) -> None:
+        """جایگزینی دیتافریم استخر منتورها در جدول ``mentor_pool_cache``."""
+
+        if df is None:
+            raise ValueError("DataFrame استخر منتورها تهی است؛ ورودی معتبر بدهید.")
+        self.initialize()
+        _validate_join_keys(df, join_keys)
+        index_statements = _build_index_statements(
+            table_name="mentor_pool_cache",
+            df=df,
+            unique_candidates=("mentor_id", "کد کارمندی پشتیبان"),
+            join_keys=join_keys,
+        )
+        try:
+            with self._open_connection() as conn:
+                self._replace_table_atomic(
+                    conn,
+                    table_name="mentor_pool_cache",
+                    df=df,
+                    index_statements=index_statements,
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(
+                "ذخیرهٔ کش استخر منتورها در SQLite ناکام ماند."
+            ) from exc
+
+    def load_mentor_pool_cache(self, *, join_keys: Sequence[str]) -> pd.DataFrame:
+        """خواندن دیتافریم استخر منتورها از کش SQLite با حفظ نوع کلیدها."""
+
+        try:
+            with self._open_connection() as conn:
+                if not _table_exists(conn, "mentor_pool_cache"):
+                    raise ReferenceDataMissingError(
+                        table="mentor_pool_cache",
+                        message="کش استخر منتورها یافت نشد؛ ابتدا import-mentors را اجرا کنید.",
+                    )
+                df = pd.read_sql_query("SELECT * FROM mentor_pool_cache", conn)
+                if df.empty:
+                    raise ReferenceDataMissingError(
+                        table="mentor_pool_cache",
+                        message="کش استخر منتورها خالی است؛ ابتدا import-mentors را اجرا کنید.",
+                    )
+            return _coerce_int_columns(df, join_keys)
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                raise ReferenceDataMissingError(
+                    table="mentor_pool_cache",
+                    message="کش استخر منتورها یافت نشد؛ ابتدا import-mentors را اجرا کنید.",
+                ) from exc
+            raise DatabaseOperationError("خواندن کش استخر منتورها با خطا مواجه شد.") from exc
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError("خواندن کش استخر منتورها با خطا مواجه شد.") from exc
 
     @staticmethod
     def _replace_table_atomic(
@@ -533,3 +691,46 @@ def _coerce_int_like(value: object) -> int | None:
         return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_index_name(name: str) -> str:
+    safe = name.replace(" ", "_")
+    return "".join(ch for ch in safe if ch.isalnum() or ch == "_")
+
+
+def _build_index_statements(
+    *,
+    table_name: str,
+    df: pd.DataFrame,
+    unique_candidates: Sequence[str] = (),
+    join_keys: Sequence[str] = (),
+) -> list[str]:
+    statements: list[str] = []
+    for column in unique_candidates:
+        if column in df.columns:
+            idx = _normalize_index_name(f"idx_{table_name}_{column}_uniq")
+            statements.append(
+                f'CREATE UNIQUE INDEX IF NOT EXISTS {idx} ON {table_name}("{column}")'
+            )
+    for column in join_keys:
+        if column in df.columns:
+            idx = _normalize_index_name(f"idx_{table_name}_{column}")
+            statements.append(
+                f'CREATE INDEX IF NOT EXISTS {idx} ON {table_name}("{column}")'
+            )
+    return statements
+
+
+def _validate_join_keys(df: pd.DataFrame, join_keys: Sequence[str]) -> None:
+    """تضمین می‌کند کلیدهای اتصال پیش از ذخیره از نوع عددی باشند."""
+
+    missing = [col for col in join_keys if col not in df.columns]
+    if missing:
+        raise ValueError(f"ستون‌های کلید اتصال وجود ندارند: {missing}")
+    for col in join_keys:
+        series = df[col]
+        if not is_integer_dtype(series):
+            try:
+                df[col] = series.astype("Int64")
+            except Exception as exc:  # pragma: no cover - مسیر خطا
+                raise ValueError(f"ستون {col} باید عددی باشد.") from exc
