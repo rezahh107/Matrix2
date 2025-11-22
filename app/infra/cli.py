@@ -81,6 +81,7 @@ from app.infra.reference_schools_repository import (
     import_school_crosswalk_from_excel,
     import_school_report_from_excel,
 )
+from app.infra.reference_managers_repository import import_managers_from_excel
 from app.infra.reference_students_repository import (
     import_student_report_from_excel,
     load_students_from_cache,
@@ -2099,6 +2100,15 @@ def _build_parser() -> argparse.ArgumentParser:
     import_mentors_cmd.add_argument("--inspactor", required=True, help="مسیر فایل Inspactor")
     _add_local_db_args(import_mentors_cmd)
 
+    import_managers_cmd = sub.add_parser(
+        "import-managers",
+        help="ورود ManagerReport و ذخیرهٔ کش مدیران مراکز در SQLite",
+    )
+    import_managers_cmd.add_argument(
+        "--manager-report", required=True, help="مسیر فایل ManagerReport"
+    )
+    _add_local_db_args(import_managers_cmd)
+
     forms_cmd = sub.add_parser(
         "sync-forms",
         help="دریافت ورودی‌های فرم WordPress و ذخیره در کش forms_entries",
@@ -2382,6 +2392,14 @@ def main(
                 Path(args.inspactor), db=db, policy=policy, pool_source="inspactor"
             )
             print("mentor pool cache imported")
+            return 0
+
+        if args.command == "import-managers":
+            db = _resolve_local_db(args)
+            if db is None:
+                raise ValueError("برای import-managers باید --local-db مشخص شود.")
+            import_managers_from_excel(Path(args.manager_report), db=db)
+            print("managers cache imported")
             return 0
 
         if args.command == "sync-forms":
