@@ -35,7 +35,7 @@ from app.infra.sqlite_config import configure_connection
 from app.infra.sqlite_types import coerce_int_columns as _sqlite_coerce_int_columns
 from app.infra.sqlite_types import coerce_int_like as _sqlite_coerce_int_like
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 _POLICY_VERSION = "1.0.3"
 _SSOT_VERSION = "1.0.2"
 _ISO_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -453,6 +453,11 @@ class LocalDatabase:
                 alias TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS managers_reference (
+                "نام مدیر" TEXT,
+                "مرکز گلستان صدرا" INTEGER
+            );
+
             CREATE TABLE IF NOT EXISTS students_cache (
                 student_id TEXT,
                 "کد ملی" TEXT,
@@ -577,6 +582,10 @@ class LocalDatabase:
                 self._migrate_v4_to_v5(conn)
                 version = 5
                 continue
+            if version == 5:
+                self._migrate_v5_to_v6(conn)
+                version = 6
+                continue
             raise SchemaVersionMismatchError(
                 expected_version=_SCHEMA_VERSION,
                 actual_version=version,
@@ -643,7 +652,22 @@ class LocalDatabase:
             """
         )
         conn.execute(
-            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (5,)
+            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (5,),
+        )
+
+    def _migrate_v5_to_v6(self, conn: sqlite3.Connection) -> None:
+        """افزودن جدول مرجع مدیران برای نسخهٔ ۶."""
+
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS managers_reference (
+                "نام مدیر" TEXT,
+                "مرکز گلستان صدرا" INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (6,),
         )
 
     # ------------------------------------------------------------------

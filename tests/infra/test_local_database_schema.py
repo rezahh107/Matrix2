@@ -33,12 +33,12 @@ def test_schema_version_mismatch_raises(tmp_path):
     db.initialize()
     with db.connect() as conn:
         conn.execute(
-            "UPDATE schema_meta SET schema_version = schema_version - 1 WHERE id = 1"
+            "UPDATE schema_meta SET schema_version = schema_version + 1 WHERE id = 1"
         )
         conn.commit()
     with pytest.raises(SchemaVersionMismatchError) as excinfo:
         db.initialize()
-    assert excinfo.value.actual_version == _SCHEMA_VERSION - 1
+    assert excinfo.value.actual_version == _SCHEMA_VERSION + 1
     assert excinfo.value.expected_version == _SCHEMA_VERSION
 
 
