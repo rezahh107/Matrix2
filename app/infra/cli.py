@@ -76,6 +76,10 @@ from app.infra.io_utils import (
     write_xlsx_atomic,
 )
 from app.infra.local_database import LocalDatabase
+from app.infra.exporter_archive_repository import (
+    ExporterArchiveConfig,
+    ExporterArchiveRepository,
+)
 from app.infra.reference_schools_repository import (
     get_school_reference_frames,
     import_school_crosswalk_from_excel,
@@ -141,6 +145,22 @@ def _add_local_db_args(parser: argparse.ArgumentParser) -> None:
         "--disable-local-db",
         action="store_true",
         help="غیرفعال‌سازی ثبت تاریخچه در SQLite",
+    )
+
+
+def _add_exporter_archive_args(parser: argparse.ArgumentParser) -> None:
+    """آرگومان‌های اختیاری بایگانی خروجی ImportToSabt."""
+
+    parser.add_argument(
+        "--archive-exporter",
+        action="store_true",
+        help="در صورت تولید فایل Sabt خروجی را در SQLite بایگانی کن",
+    )
+    parser.add_argument(
+        "--archive-row-limit",
+        type=int,
+        default=500,
+        help="حداکثر تعداد ردیفی که به‌صورت کامل در Snapshot ذخیره می‌شود",
     )
 
 
@@ -881,6 +901,8 @@ def _maybe_export_import_to_sabt(
     mentors_df: pd.DataFrame,
     logs_df: pd.DataFrame,
     student_ids: pd.Series,
+    db: LocalDatabase | None,
+    run_uuid: str | None,
 ) -> None:
     """تولید فایل ImportToSabt در صورت مشخص شدن مسیر خروجی."""
 
@@ -926,6 +948,24 @@ def _maybe_export_import_to_sabt(
         template_path,
         sabt_output,
     )
+    if db is not None and getattr(args, "archive_exporter", False):
+        archive_cfg = ExporterArchiveConfig(
+            enabled=True, row_limit=int(getattr(args, "archive_row_limit", 500))
+        )
+        repo = ExporterArchiveRepository(db=db)
+        metadata = {
+            "export_path": sabt_output,
+            "config_path": cfg_path,
+            "template_path": template_path,
+        }
+        repo.archive_snapshot(
+            rows_df=df_sheet2,
+            exporter_version=str(exporter_cfg.get("version") or ""),
+            run_uuid=run_uuid,
+            run_id=None,
+            metadata=metadata,
+            config=archive_cfg,
+        )
 
 
 def _compose_duplicate_display_name(row: pd.Series) -> str:
@@ -1675,6 +1715,8 @@ def _allocate_and_write(
             mentors_df=pool_base,
             logs_df=logs_df,
             student_ids=student_ids,
+            db=db,
+            run_uuid=run_uuid,
         )
 
         if sabt_allocations_df is not None:
@@ -2016,6 +2058,37 @@ def _run_sync_forms(args: argparse.Namespace, policy: PolicyConfig, progress: Pr
     return 0
 
 
+def _run_exporter_archive(args: argparse.Namespace, *, db: LocalDatabase) -> int:
+    """اجرای فرمان‌های لیست/مقایسه Snapshot های ImportToSabt."""
+
+    db.initialize()
+    repo = ExporterArchiveRepository(db=db)
+    if args.action == "list":
+        rows = repo.list_snapshots()
+        for row in rows:
+            print(
+                f"id={row.get('id')} name={row.get('exporter_name')} created_at={row.get('created_at')} "
+                f"rows={row.get('row_count')} limit={row.get('row_limit')} truncated={bool(row.get('is_truncated'))} "
+                f"hash={str(row.get('row_hash', ''))[:12]}"
+            )
+        if not rows:
+            print("no exporter snapshots found")
+        return 0
+
+    if args.action == "compare":
+        if args.snapshot_a is None or args.snapshot_b is None:
+            raise ValueError("برای compare باید --a و --b مشخص شود.")
+        try:
+            result = repo.compare_snapshots(args.snapshot_a, args.snapshot_b)
+        except ValueError as exc:
+            print(str(exc))
+            return 1
+        print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
+        return 0
+
+    raise RuntimeError(f"Unsupported exporter-archive action: {args.action}")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """ایجاد پارسر دستورات با زیرفرمان‌های build، allocate و rule-engine."""
     parser = argparse.ArgumentParser(description="Eligibility Matrix CLI")
@@ -2220,6 +2293,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=str(_DEFAULT_ALLOC_PROFILE_PATH),
         help="مسیر فایل پروفایل Sabt (Sheet1) برای خروجی تخصیص",
     )
+    _add_exporter_archive_args(alloc_cmd)
     alloc_cmd.add_argument(
         "--determinism-check",
         action="store_true",
@@ -2334,6 +2408,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="نحوهٔ مدیریت student_id تکراری هنگام تولید شمارنده",
     )
     _add_local_db_args(rule_cmd)
+    _add_exporter_archive_args(rule_cmd)
+
+    archive_cmd = sub.add_parser(
+        "exporter-archive",
+        help="مدیریت Snapshot های خروجی ImportToSabt در SQLite",
+    )
+    archive_cmd.add_argument(
+        "action",
+        choices=("list", "compare"),
+        help="عملیات روی بایگانی (لیست یا مقایسه)",
+    )
+    archive_cmd.add_argument(
+        "--a",
+        type=int,
+        dest="snapshot_a",
+        help="شناسه Snapshot مبدا برای مقایسه",
+    )
+    archive_cmd.add_argument(
+        "--b",
+        type=int,
+        dest="snapshot_b",
+        help="شناسه Snapshot مقصد برای مقایسه",
+    )
+    _add_local_db_args(archive_cmd)
     return parser
 
 
@@ -2406,6 +2504,12 @@ def main(
             import_managers_from_excel(report_path, db=db)
             print("managers cache imported")
             return 0
+
+        if args.command == "exporter-archive":
+            db = _resolve_local_db(args)
+            if db is None:
+                raise ValueError("برای exporter-archive باید --local-db مشخص شود.")
+            return _run_exporter_archive(args, db=db)
 
         if args.command == "sync-forms":
             return _run_sync_forms(args, policy, progress)

@@ -15,12 +15,13 @@ Schema به‌صورت دترمینیستیک ساخته می‌شود و نسخ
 """
 from __future__ import annotations
 
+import io
+import json
 import logging
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-import io
 from typing import Iterable, List, Sequence
 
 import pandas as pd
@@ -35,7 +36,7 @@ from app.infra.sqlite_config import configure_connection
 from app.infra.sqlite_types import coerce_int_columns as _sqlite_coerce_int_columns
 from app.infra.sqlite_types import coerce_int_like as _sqlite_coerce_int_like
 
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 7
 _POLICY_VERSION = "1.0.3"
 _SSOT_VERSION = "1.0.2"
 _ISO_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -370,6 +371,86 @@ class LocalDatabase:
         )
         return summary_df, details_df
 
+    # ------------------------------------------------------------------
+    # Snapshot بایگانی خروجی Exporter
+    # ------------------------------------------------------------------
+    def insert_exporter_snapshot(
+        self,
+        *,
+        exporter_name: str,
+        exporter_version: str | None,
+        run_uuid: str | None,
+        run_id: int | None,
+        rows_df: pd.DataFrame,
+        metadata_json: str | None,
+        row_hash: str,
+        columns_json: str,
+        rows_json: str | None,
+        row_limit: int,
+        is_truncated: bool,
+    ) -> int:
+        """درج Snapshot خروجی Exporter در جدول ``exporter_snapshots``."""
+
+        if rows_df is None:
+            raise ValueError("دیتافریم خروجی Exporter تهی است؛ ورودی معتبر بدهید.")
+        try:
+            with self._open_connection() as conn:
+                LocalDatabase._ensure_exporter_archive_schema(conn)
+                cursor = conn.execute(
+                    """
+                    INSERT INTO exporter_snapshots (
+                        exporter_name, exporter_version, run_uuid, run_id,
+                        created_at, row_count, row_hash, columns_json,
+                        rows_json, metadata_json, row_limit, is_truncated
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        exporter_name,
+                        exporter_version,
+                        run_uuid,
+                        run_id,
+                        _to_iso(datetime.utcnow()),
+                        int(rows_df.shape[0]),
+                        row_hash,
+                        columns_json,
+                        rows_json,
+                        metadata_json,
+                        int(row_limit),
+                        1 if is_truncated else 0,
+                    ),
+                )
+                conn.commit()
+                return int(cursor.lastrowid)
+        except sqlite3.Error as exc:  # pragma: no cover - مسیر غیرمنتظره
+            raise DatabaseOperationError("ثبت Snapshot خروجی Exporter ناکام ماند.") from exc
+
+    def list_exporter_snapshots(self) -> list[sqlite3.Row]:
+        """لیست Snapshot های موجود به‌ترتیب جدیدترین زمان."""
+
+        with self._open_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """
+                SELECT * FROM exporter_snapshots
+                ORDER BY datetime(created_at) DESC, id DESC
+                """
+            )
+            return cursor.fetchall()
+
+    def fetch_exporter_snapshot(self, snapshot_id: int) -> tuple[sqlite3.Row | None, pd.DataFrame | None]:
+        """بازیابی Snapshot خروجی Exporter بر اساس شناسه."""
+
+        with self._open_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                "SELECT * FROM exporter_snapshots WHERE id = ?", (snapshot_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None, None
+        rows_df = _deserialize_exporter_rows(row)
+        return row, rows_df
+
     @staticmethod
     def _ensure_schema(conn: sqlite3.Connection) -> None:
         """ساخت جدول‌های runs/run_metrics/qa_summary و مراجع به‌صورت idempotent."""
@@ -427,6 +508,23 @@ class LocalDatabase:
                 qa_summary_json TEXT,
                 qa_details_json TEXT,
                 FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS exporter_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                exporter_name TEXT NOT NULL,
+                exporter_version TEXT,
+                run_uuid TEXT,
+                run_id INTEGER,
+                created_at TEXT NOT NULL,
+                row_count INTEGER NOT NULL,
+                row_hash TEXT NOT NULL,
+                columns_json TEXT NOT NULL,
+                rows_json TEXT,
+                metadata_json TEXT,
+                row_limit INTEGER NOT NULL DEFAULT -1,
+                is_truncated INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE SET NULL
             );
 
             CREATE TABLE IF NOT EXISTS reference_meta (
@@ -529,6 +627,43 @@ class LocalDatabase:
         )
 
     @staticmethod
+    def _ensure_exporter_archive_schema(conn: sqlite3.Connection) -> None:
+        """ایجاد جدول بایگانی خروجی Exporter به‌شکل پایدار."""
+
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS exporter_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                exporter_name TEXT NOT NULL,
+                exporter_version TEXT,
+                run_uuid TEXT,
+                run_id INTEGER,
+                created_at TEXT NOT NULL,
+                row_count INTEGER NOT NULL,
+                row_hash TEXT NOT NULL,
+                columns_json TEXT NOT NULL,
+                rows_json TEXT,
+                metadata_json TEXT,
+                row_limit INTEGER NOT NULL DEFAULT -1,
+                is_truncated INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE SET NULL
+            );
+            """
+        )
+        _ensure_column_exists(
+            conn,
+            table="exporter_snapshots",
+            column="row_limit",
+            definition="INTEGER NOT NULL DEFAULT -1",
+        )
+        _ensure_column_exists(
+            conn,
+            table="exporter_snapshots",
+            column="is_truncated",
+            definition="INTEGER NOT NULL DEFAULT 0",
+        )
+
+    @staticmethod
     def _ensure_schema_meta_table(conn: sqlite3.Connection) -> None:
         """ایجاد جدول متادیتای نسخه در صورت نبود."""
 
@@ -600,6 +735,10 @@ class LocalDatabase:
             if version == 5:
                 self._migrate_v5_to_v6(conn)
                 version = 6
+                continue
+            if version == 6:
+                self._migrate_v6_to_v7(conn)
+                version = 7
                 continue
             raise SchemaVersionMismatchError(
                 expected_version=_SCHEMA_VERSION,
@@ -676,6 +815,14 @@ class LocalDatabase:
         LocalDatabase._ensure_managers_reference_schema(conn)
         conn.execute(
             "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (6,),
+        )
+
+    def _migrate_v6_to_v7(self, conn: sqlite3.Connection) -> None:
+        """افزودن جدول بایگانی خروجی Exporter برای نسخهٔ ۷."""
+
+        LocalDatabase._ensure_exporter_archive_schema(conn)
+        conn.execute(
+            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (7,),
         )
 
     # ------------------------------------------------------------------
@@ -1147,6 +1294,24 @@ def _safe_deserialize_dataframe(payload: str | bytes | None, *, label: str) -> p
         return None
 
 
+def _deserialize_exporter_rows(row: sqlite3.Row) -> pd.DataFrame | None:
+    """بازسازی Snapshot خروجی Exporter بر اساس payload ذخیره‌شده."""
+
+    payload = row["rows_json"]
+    if payload in (None, b"", ""):
+        return None
+    try:
+        if isinstance(payload, bytes):
+            payload = payload.decode("utf-8")
+        parsed = json.loads(payload)
+        columns = parsed.get("columns") or json.loads(row["columns_json"])
+        rows = parsed.get("rows") or []
+        return pd.DataFrame(rows, columns=columns)
+    except Exception:
+        logger.exception("Failed to deserialize exporter snapshot rows")
+        return None
+
+
 def _coerce_int_like(value: object) -> int | None:
     """تبدیل مقدار به int در صورت امکان؛ در غیر این صورت None."""
 
@@ -1156,6 +1321,18 @@ def _coerce_int_like(value: object) -> int | None:
 def _normalize_index_name(name: str) -> str:
     safe = name.replace(" ", "_")
     return "".join(ch for ch in safe if ch.isalnum() or ch == "_")
+
+
+def _ensure_column_exists(
+    conn: sqlite3.Connection, *, table: str, column: str, definition: str
+) -> None:
+    """افزودن ستون جدید به‌صورت idempotent در صورت نبود."""
+
+    cursor = conn.execute(f"PRAGMA table_info({table})")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    if column in existing_columns:
+        return
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _build_index_statements(
