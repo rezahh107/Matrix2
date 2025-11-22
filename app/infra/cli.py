@@ -53,7 +53,7 @@ from app.infra.excel.export_allocations import (
     collect_trace_debug_sheets,
     load_sabt_export_profile,
 )
-from app.infra.errors import ReferenceDataMissingError
+from app.infra.errors import ReferenceDataMissingError, SchemaVersionMismatchError
 from app.infra.excel.export_qa_validation import (
     QaValidationContext,
     export_qa_validation,
@@ -81,6 +81,7 @@ from app.infra.reference_schools_repository import (
     import_school_crosswalk_from_excel,
     import_school_report_from_excel,
 )
+from app.infra.reference_managers_repository import import_managers_from_excel
 from app.infra.reference_students_repository import (
     import_student_report_from_excel,
     load_students_from_cache,
@@ -2099,6 +2100,17 @@ def _build_parser() -> argparse.ArgumentParser:
     import_mentors_cmd.add_argument("--inspactor", required=True, help="مسیر فایل Inspactor")
     _add_local_db_args(import_mentors_cmd)
 
+    import_managers_cmd = sub.add_parser(
+        "import-managers",
+        help="ورود ManagerReport و ذخیرهٔ کش مدیران مراکز در SQLite (idempotent)",
+    )
+    import_managers_cmd.add_argument(
+        "--manager-report",
+        required=True,
+        help="مسیر فایل ManagerReport (Excel) برای ثبت کش مراکز",
+    )
+    _add_local_db_args(import_managers_cmd)
+
     forms_cmd = sub.add_parser(
         "sync-forms",
         help="دریافت ورودی‌های فرم WordPress و ذخیره در کش forms_entries",
@@ -2384,6 +2396,17 @@ def main(
             print("mentor pool cache imported")
             return 0
 
+        if args.command == "import-managers":
+            db = _resolve_local_db(args)
+            if db is None:
+                raise ValueError("برای import-managers باید --local-db مشخص شود.")
+            report_path = Path(args.manager_report)
+            if not report_path.exists():
+                raise ValueError("فایل ManagerReport یافت نشد؛ مسیر ورودی را بررسی کنید.")
+            import_managers_from_excel(report_path, db=db)
+            print("managers cache imported")
+            return 0
+
         if args.command == "sync-forms":
             return _run_sync_forms(args, policy, progress)
 
@@ -2400,6 +2423,11 @@ def main(
         if ui_overrides is not None:
             raise
         print(f"❌ {exc}", file=sys.stderr)
+        return 2
+    except SchemaVersionMismatchError as exc:
+        if ui_overrides is not None:
+            raise
+        print(f"❌ نسخهٔ پایگاه داده ناسازگار است: {exc}", file=sys.stderr)
         return 2
     except ValueError as exc:
         if ui_overrides is not None:

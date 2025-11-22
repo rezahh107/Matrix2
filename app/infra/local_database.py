@@ -35,7 +35,7 @@ from app.infra.sqlite_config import configure_connection
 from app.infra.sqlite_types import coerce_int_columns as _sqlite_coerce_int_columns
 from app.infra.sqlite_types import coerce_int_like as _sqlite_coerce_int_like
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 _POLICY_VERSION = "1.0.3"
 _SSOT_VERSION = "1.0.2"
 _ISO_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -507,6 +507,26 @@ class LocalDatabase:
             ON mentor_pool_cache("کدرشته", "جنسیت", "دانش آموز فارغ", "مرکز گلستان صدرا", "مالی حکمت بنیاد", "کد مدرسه");
             """
         )
+        LocalDatabase._ensure_managers_reference_schema(conn)
+
+    @staticmethod
+    def _ensure_managers_reference_schema(conn: sqlite3.Connection) -> None:
+        """ایجاد جدول و ایندکس‌های مرجع مدیران به‌شکل پایدار."""
+
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS managers_reference (
+                "نام مدیر" TEXT,
+                "مرکز گلستان صدرا" INTEGER
+            );
+            """
+        )
+        conn.execute(
+            'CREATE INDEX IF NOT EXISTS idx_managers_reference_manager ON managers_reference("نام مدیر")'
+        )
+        conn.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_managers_reference_center_manager ON managers_reference("مرکز گلستان صدرا", "نام مدیر")'
+        )
 
     @staticmethod
     def _ensure_schema_meta_table(conn: sqlite3.Connection) -> None:
@@ -577,6 +597,10 @@ class LocalDatabase:
                 self._migrate_v4_to_v5(conn)
                 version = 5
                 continue
+            if version == 5:
+                self._migrate_v5_to_v6(conn)
+                version = 6
+                continue
             raise SchemaVersionMismatchError(
                 expected_version=_SCHEMA_VERSION,
                 actual_version=version,
@@ -643,7 +667,15 @@ class LocalDatabase:
             """
         )
         conn.execute(
-            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (5,)
+            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (5,),
+        )
+
+    def _migrate_v5_to_v6(self, conn: sqlite3.Connection) -> None:
+        """افزودن جدول مرجع مدیران برای نسخهٔ ۶."""
+
+        LocalDatabase._ensure_managers_reference_schema(conn)
+        conn.execute(
+            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (6,),
         )
 
     # ------------------------------------------------------------------
@@ -1158,6 +1190,25 @@ def _build_index_statements(
                     f'CREATE INDEX IF NOT EXISTS {idx} ON {table_name}("{column}")'
                 )
                 seen.add(idx)
+    if table_name == "managers_reference":
+        manager_col = "نام مدیر"
+        center_col = "مرکز گلستان صدرا"
+        if manager_col in df.columns:
+            idx_manager = _normalize_index_name("idx_managers_reference_manager")
+            if idx_manager not in seen:
+                statements.append(
+                    f'CREATE INDEX IF NOT EXISTS {idx_manager} ON {table_name}("{manager_col}")'
+                )
+                seen.add(idx_manager)
+        if manager_col in df.columns and center_col in df.columns:
+            idx_composite = _normalize_index_name(
+                "idx_managers_reference_center_manager"
+            )
+            if idx_composite not in seen:
+                statements.append(
+                    f'CREATE UNIQUE INDEX IF NOT EXISTS {idx_composite} ON {table_name}("{center_col}", "{manager_col}")'
+                )
+                seen.add(idx_composite)
     return statements
 
 
