@@ -85,6 +85,7 @@ from app.infra.reference_students_repository import (
     import_student_report_from_excel,
     load_students_from_cache,
 )
+from app.infra.forms_repository import FormsRepository, WordPressFormsClient
 from app.infra.reference_mentors_repository import (
     import_mentor_pool_from_excel,
     load_mentor_pool_from_cache,
@@ -160,6 +161,22 @@ def _resolve_local_db(args: argparse.Namespace) -> LocalDatabase | None:
         return None
 
 
+def _resolve_forms_client(args: argparse.Namespace) -> WordPressFormsClient:
+    """برگشت کلاینت WordPress تزریق‌شده یا خطای خوانا در صورت نبود."""
+
+    overrides = getattr(args, "_ui_overrides", {}) or {}
+    client = overrides.get("forms_client")
+    if client is not None:
+        return client
+    raise ReferenceDataMissingError(
+        table="forms_entries",
+        message=(
+            "کلاینت WordPress تعریف نشده است؛ در محیط عملیاتی یک پیاده‌سازی "
+            "WordPressFormsClient تزریق کنید یا cache-only را برای استفادهٔ آفلاین فعال کنید."
+        ),
+    )
+
+
 def _print_audit_summary(report: Dict[str, Dict[str, Any]]) -> None:
     """چاپ خلاصهٔ گزارش ممیزی تخصیص."""
 
@@ -180,6 +197,14 @@ def _print_metrics(report: Dict[str, Dict[str, Any]]) -> None:
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
+def _parse_since(value: str | None) -> datetime | None:
+    """تبدیل ورودی متنی به datetime آگاه از timezone."""
+
+    if not value:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
 def _empty_history_metrics_df() -> pd.DataFrame:
     """دیتافریم خالی با ستون‌های KPI تاریخچه."""
 
@@ -194,11 +219,7 @@ def _log_history_metrics(
     policy: PolicyConfig,
     history_metrics_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """ثبت خلاصهٔ KPI تاریخچه به‌صورت لاگ برای هر کانال تخصیص.
-
-    در صورت نبود دادهٔ تاریخچه یا ستون‌های لازم، پیام واضحی چاپ می‌شود و از
-    شکست جلوگیری می‌شود. دیتافریم محاسبه‌شده برای استفاده مجدد بازگردانده می‌شود.
-    """
+    """ثبت خلاصهٔ KPI تاریخچه به‌صورت لاگ برای هر کانال تخصیص."""
 
     if history_metrics_df is None:
         if summary_df is None or summary_df.empty:
@@ -233,11 +254,17 @@ def _log_history_metrics(
             int(row["history_already_allocated"]),
             int(row["history_no_history_match"]),
             int(row["history_missing_or_invalid"]),
-            int(row["same_history_mentor_true"]),
-            float(row["same_history_mentor_ratio"]),
+            int(row["history_same_mentor"]),
+            float(row["students_total"] or 0.0),
         )
-
     return history_metrics_df
+
+def _load_forms_repository(args: argparse.Namespace, db: LocalDatabase) -> FormsRepository:
+    """ساخت FormsRepository با توجه به حالت online/offline."""
+
+    cache_only = bool(getattr(args, "cache_only", False))
+    client = None if cache_only else _resolve_forms_client(args)
+    return FormsRepository(client=client, db=db)
 
 
 def _resolve_reference_frames(
@@ -1935,6 +1962,59 @@ def _run_rule_engine(
     )
 
 
+def _import_students_from_forms_cache(
+    *, db: LocalDatabase, policy: PolicyConfig
+) -> pd.DataFrame:
+    """بارگذاری forms_entries و ذخیره در کش دانش‌آموزان برای Core."""
+
+    repo = FormsRepository(client=None, db=db)
+    entries = repo.load_entries()
+    if entries.empty:
+        raise ReferenceDataMissingError(
+            table="forms_entries",
+            message="کش forms_entries خالی است؛ ابتدا sync-forms را اجرا کنید.",
+        )
+    normalized = entries.copy()
+    for key in policy.join_keys:
+        if key not in normalized.columns:
+            raise ReferenceDataMissingError(
+                table="forms_entries",
+                message=f"ستون مورد انتظار {key!r} در forms_entries یافت نشد.",
+            )
+        normalized[key] = pd.to_numeric(normalized[key], errors="coerce").astype("Int64")
+    db.upsert_students_cache(normalized, join_keys=policy.join_keys)
+    return normalized
+
+
+def _run_sync_forms(args: argparse.Namespace, policy: PolicyConfig, progress: ProgressFn) -> int:
+    """همگام‌سازی ورودی‌های فرم WordPress با کش SQLite."""
+
+    db = _resolve_local_db(args)
+    if db is None:
+        raise ValueError("برای sync-forms باید --local-db مشخص شود.")
+
+    cache_only = bool(getattr(args, "cache_only", False))
+    repo = _load_forms_repository(args, db)
+    if cache_only:
+        try:
+            cached = repo.load_entries()
+        except ReferenceDataMissingError:
+            print("no cached forms entries found")
+            return 0
+        if cached.empty:
+            print("no cached forms entries found")
+            return 0
+        print(f"cached forms entries: {len(cached)} rows")
+        return 0
+
+    since_dt = _parse_since(getattr(args, "since", None))
+    result = repo.sync_from_wordpress(since=since_dt)
+    print(
+        f"forms synced: fetched={result.fetched_count}, persisted={result.persisted_count}"
+    )
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """ایجاد پارسر دستورات با زیرفرمان‌های build، allocate و rule-engine."""
     parser = argparse.ArgumentParser(description="Eligibility Matrix CLI")
@@ -2000,7 +2080,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "import-students",
         help="ورود StudentReport و ذخیرهٔ کش دانش‌آموزان در SQLite",
     )
-    import_students_cmd.add_argument("--students", required=True, help="مسیر فایل StudentReport (Excel/CSV)")
+    import_students_cmd.add_argument(
+        "--students",
+        required=False,
+        help="مسیر فایل StudentReport (Excel/CSV) یا استفاده از کش forms_entries",
+    )
+    import_students_cmd.add_argument(
+        "--from-forms-cache",
+        action="store_true",
+        help="نصب کش دانش‌آموزان از جدول forms_entries بدون نیاز به فایل ورودی",
+    )
     _add_local_db_args(import_students_cmd)
 
     import_mentors_cmd = sub.add_parser(
@@ -2009,6 +2098,28 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     import_mentors_cmd.add_argument("--inspactor", required=True, help="مسیر فایل Inspactor")
     _add_local_db_args(import_mentors_cmd)
+
+    forms_cmd = sub.add_parser(
+        "sync-forms",
+        help="دریافت ورودی‌های فرم WordPress و ذخیره در کش forms_entries",
+        description="همگام‌سازی فرم‌ها با امکان استفادهٔ offline از کش SQLite.",
+    )
+    forms_cmd.add_argument(
+        "--since",
+        required=False,
+        help="(اختیاری) زمان شروع به‌صورت ISO8601 برای دریافت افزایشی",
+    )
+    forms_cmd.add_argument(
+        "--cache-only",
+        action="store_true",
+        help="بدون دانلود؛ فقط محتویات کش forms_entries را بارگذاری و گزارش می‌کند",
+    )
+    forms_cmd.add_argument(
+        "--policy",
+        default=str(_DEFAULT_POLICY_PATH),
+        help="مسیر فایل policy.json جهت تطبیق نسخهٔ Policy/SSoT",
+    )
+    _add_local_db_args(forms_cmd)
 
     alloc_cmd = sub.add_parser("allocate", help="تخصیص دانش‌آموزان به منتورها")
     alloc_cmd.add_argument("--students", required=False, help="مسیر فایل دانش‌آموزان؛ در صورت عدم ارائه از کش SQLite خوانده می‌شود")
@@ -2233,6 +2344,9 @@ def main(
     args._ui_overrides = ui_overrides or {}
     args._ui_mode = ui_overrides is not None
 
+    if not hasattr(args, "policy"):
+        args.policy = str(_DEFAULT_POLICY_PATH)
+
     policy_path = Path(args.policy)
     policy = load_policy(policy_path)
 
@@ -2250,8 +2364,14 @@ def main(
             db = _resolve_local_db(args)
             if db is None:
                 raise ValueError("برای import-students باید --local-db مشخص شود.")
-            import_student_report_from_excel(Path(args.students), db=db, policy=policy)
-            print("students cache imported")
+            if getattr(args, "from_forms_cache", False):
+                _import_students_from_forms_cache(db=db, policy=policy)
+                print("students cache imported from forms_entries")
+            elif args.students:
+                import_student_report_from_excel(Path(args.students), db=db, policy=policy)
+                print("students cache imported")
+            else:
+                raise ValueError("یا --students بدهید یا --from-forms-cache را فعال کنید.")
             return 0
 
         if args.command == "import-mentors":
@@ -2263,6 +2383,9 @@ def main(
             )
             print("mentor pool cache imported")
             return 0
+
+        if args.command == "sync-forms":
+            return _run_sync_forms(args, policy, progress)
 
         if args.command == "allocate":
             runner = allocate_runner or _run_allocate

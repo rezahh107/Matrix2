@@ -35,7 +35,7 @@ from app.infra.sqlite_config import configure_connection
 from app.infra.sqlite_types import coerce_int_columns as _sqlite_coerce_int_columns
 from app.infra.sqlite_types import coerce_int_like as _sqlite_coerce_int_like
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 _POLICY_VERSION = "1.0.3"
 _SSOT_VERSION = "1.0.2"
 _ISO_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -116,6 +116,12 @@ class LocalDatabase:
                 if existing_version is None:
                     self._ensure_schema(conn)
                     self._ensure_schema_meta_row(conn, version=_SCHEMA_VERSION)
+                elif existing_version < 2:
+                    raise SchemaVersionMismatchError(
+                        expected_version=_SCHEMA_VERSION,
+                        actual_version=existing_version,
+                        message="نسخهٔ Schema بسیار قدیمی است و پشتیبانی نمی‌شود؛ پایگاه داده را بازسازی کنید.",
+                    )
                 elif existing_version < _SCHEMA_VERSION:
                     self._migrate_schema(conn, from_version=existing_version)
                 elif existing_version > _SCHEMA_VERSION:
@@ -483,6 +489,17 @@ class LocalDatabase:
                 occupancy_ratio REAL
             );
 
+            CREATE TABLE IF NOT EXISTS forms_entries (
+                entry_id TEXT,
+                form_id TEXT,
+                received_at TEXT,
+                normalized_at TEXT,
+                PRIMARY KEY(entry_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_forms_entries_form_id
+            ON forms_entries(form_id);
+
             CREATE INDEX IF NOT EXISTS idx_mentor_pool_cache_mentor_id
             ON mentor_pool_cache(mentor_id);
 
@@ -546,17 +563,25 @@ class LocalDatabase:
     def _migrate_schema(self, conn: sqlite3.Connection, *, from_version: int) -> None:
         """مهاجرت نسخهٔ Schema به نسخهٔ جاری."""
 
-        if from_version == 2:
-            self._migrate_v2_to_v3(conn)
-            return
-        if from_version == 3:
-            self._migrate_v3_to_v4(conn)
-            return
-        raise SchemaVersionMismatchError(
-            expected_version=_SCHEMA_VERSION,
-            actual_version=from_version,
-            message="نسخهٔ Schema پشتیبانی نمی‌شود.",
-        )
+        version = from_version
+        while version < _SCHEMA_VERSION:
+            if version == 2:
+                self._migrate_v2_to_v3(conn)
+                version = 3
+                continue
+            if version == 3:
+                self._migrate_v3_to_v4(conn)
+                version = 4
+                continue
+            if version == 4:
+                self._migrate_v4_to_v5(conn)
+                version = 5
+                continue
+            raise SchemaVersionMismatchError(
+                expected_version=_SCHEMA_VERSION,
+                actual_version=version,
+                message="نسخهٔ Schema پشتیبانی نمی‌شود.",
+            )
 
     def _migrate_v2_to_v3(self, conn: sqlite3.Connection) -> None:
         """افزودن جداول Snapshot برای نسخهٔ ۳."""
@@ -580,7 +605,7 @@ class LocalDatabase:
             """
         )
         conn.execute(
-            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (_SCHEMA_VERSION,)
+            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (3,)
         )
 
     def _migrate_v3_to_v4(self, conn: sqlite3.Connection) -> None:
@@ -597,7 +622,28 @@ class LocalDatabase:
             """
         )
         conn.execute(
-            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (_SCHEMA_VERSION,)
+            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (4,)
+        )
+
+    def _migrate_v4_to_v5(self, conn: sqlite3.Connection) -> None:
+        """افزودن جدول کش ورودی‌های فرم برای نسخهٔ ۵."""
+
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS forms_entries (
+                entry_id TEXT,
+                form_id TEXT,
+                received_at TEXT,
+                normalized_at TEXT,
+                PRIMARY KEY(entry_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_forms_entries_form_id
+            ON forms_entries(form_id);
+            """
+        )
+        conn.execute(
+            "UPDATE schema_meta SET schema_version = ? WHERE id = 1", (5,)
         )
 
     # ------------------------------------------------------------------
@@ -829,6 +875,76 @@ class LocalDatabase:
         except sqlite3.Error as exc:
             raise DatabaseOperationError("خواندن کش استخر منتورها با خطا مواجه شد.") from exc
 
+    # ------------------------------------------------------------------
+    # ورودی‌های فرم وردپرس / Gravity Forms
+    # ------------------------------------------------------------------
+    def upsert_forms_entries(
+        self,
+        df: pd.DataFrame,
+        *,
+        source: str | None = None,
+    ) -> None:
+        """ذخیرهٔ دیتافریم نرمال‌شدهٔ ورودی‌های فرم در جدول ``forms_entries``.
+
+        ورودی باید شامل ستون ``entry_id`` باشد. ستون‌های زمان (received_at و
+        normalized_at) به‌صورت ISO8601 ذخیره می‌شوند تا بازسازی دترمینیستیک
+        آسان شود.
+        """
+
+        if df is None:
+            raise ValueError("DataFrame ورودی‌های فرم تهی است؛ ورودی معتبر بدهید.")
+        if "entry_id" not in df.columns:
+            raise ValueError("ستون entry_id برای ذخیرهٔ کش فرم ضروری است.")
+
+        normalized = _normalize_forms_timestamps(df)
+        normalized = normalized.dropna(subset=["entry_id"])\
+            .drop_duplicates(subset=["entry_id"], keep="last")\
+            .sort_values(by=["received_at", "entry_id"], kind="stable")\
+            .reset_index(drop=True)
+
+        self.initialize()
+        index_statements = _build_index_statements(
+            table_name="forms_entries",
+            df=normalized,
+            unique_candidates=("entry_id",),
+            join_keys=(),
+        )
+        try:
+            with self._open_connection() as conn:
+                self._replace_table_atomic(
+                    conn,
+                    table_name="forms_entries",
+                    df=normalized,
+                    index_statements=index_statements,
+                )
+                self.record_reference_meta(
+                    table_name="forms_entries",
+                    source=source,
+                    row_count=int(normalized.shape[0]),
+                    conn=conn,
+                )
+        except sqlite3.Error as exc:  # pragma: no cover - مسیر غیرمنتظره
+            raise DatabaseOperationError("ثبت کش ورودی‌های فرم با خطا مواجه شد.") from exc
+
+    def load_forms_entries(self) -> pd.DataFrame:
+        """بازیابی کش ورودی‌های فرم به‌صورت DataFrame."""
+
+        with self._open_connection() as conn:
+            if not _table_exists(conn, "forms_entries"):
+                raise ReferenceDataMissingError(
+                    table="forms_entries",
+                    message="جدول forms_entries در پایگاه داده یافت نشد؛ ابتدا sync-forms را اجرا کنید.",
+                )
+            df = pd.read_sql_query(
+                "SELECT * FROM forms_entries ORDER BY received_at ASC, entry_id ASC", conn
+            )
+        if df.empty:
+            return df
+        restored = _restore_timestamp_columns(
+            df, columns=("received_at", "normalized_at")
+        )
+        return restored
+
     def record_reference_meta(
         self,
         *,
@@ -927,6 +1043,51 @@ def _coerce_int_columns(df: pd.DataFrame, columns: Iterable[str]) -> pd.DataFram
     """تبدیل ستون‌های اعلام‌شده به نوع Int64 بدون تغییر سایر ستون‌ها."""
 
     return _sqlite_coerce_int_columns(df, list(columns))
+
+
+def _normalize_timestamp_columns(
+    df: pd.DataFrame, *, columns: Iterable[str]
+) -> pd.DataFrame:
+    """تبدیل ستون‌های زمانی به datetime و ذخیره به‌صورت ISO8601."""
+
+    normalized = df.copy()
+    for col in columns:
+        if col in normalized.columns:
+            series = pd.to_datetime(normalized[col], errors="coerce", utc=True)
+            normalized[col] = series.dt.strftime(_ISO_FORMAT)
+    return normalized
+
+
+def _restore_timestamp_columns(
+    df: pd.DataFrame, *, columns: Iterable[str]
+) -> pd.DataFrame:
+    """بازگردانی ستون‌های زمانی به نوع datetime با timezone آگاه."""
+
+    restored = df.copy()
+    for col in columns:
+        if col in restored.columns:
+            restored[col] = pd.to_datetime(restored[col], errors="coerce", utc=True)
+    return restored
+
+
+def _normalize_forms_timestamps(df: pd.DataFrame) -> pd.DataFrame:
+    """نرمال‌سازی ستون‌های زمانی forms_entries به یک گذر ثابت.
+
+    دریافت دیتافریم شامل ``received_at`` و ``normalized_at`` (در صورت عدم وجود
+    normalized_at در ورودی، مقدار UTC فعلی اضافه می‌شود)، تبدیل همهٔ مقادیر به
+    datetime آگاه از timezone، و سپس سریال‌سازی ISO8601 با پسوند ``Z``.
+    """
+
+    normalized = df.copy()
+    if "normalized_at" not in normalized.columns:
+        normalized["normalized_at"] = datetime.utcnow()
+    for col in ("received_at", "normalized_at"):
+        if col in normalized.columns:
+            normalized[col] = (
+                pd.to_datetime(normalized[col], errors="coerce", utc=True)
+                .dt.strftime(_ISO_FORMAT)
+            )
+    return normalized
 
 
 def _serialize_dataframe(df: pd.DataFrame | None) -> str | None:
