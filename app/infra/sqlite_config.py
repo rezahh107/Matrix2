@@ -22,7 +22,8 @@ def _set_pragma(conn: sqlite3.Connection, name: str, value: str) -> None:
     >>> conn = sqlite3.connect(":memory:")
     >>> _set_pragma(conn, "foreign_keys", "ON")
     """
-
+    if name not in {"foreign_keys", "journal_mode", "synchronous"}:
+        raise ValueError(f"Unsupported PRAGMA: {name}")
     conn.execute(f"PRAGMA {name} = {value};")
 
 
