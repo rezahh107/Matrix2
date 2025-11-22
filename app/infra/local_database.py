@@ -319,19 +319,13 @@ class LocalDatabase:
     def _ensure_schema_meta_row(conn: sqlite3.Connection) -> None:
         """تضمین وجود رکورد نسخهٔ Schema با درج اولیه در صورت نبود."""
 
-        cursor = conn.execute("SELECT schema_version FROM schema_meta WHERE id = 1")
-        rows = cursor.fetchall()
-        if not rows:
-            conn.execute(
-                """
-                INSERT INTO schema_meta (id, schema_version, policy_version, ssot_version, created_at)
-                VALUES (1, ?, ?, ?, ?)
-                """,
-                (_SCHEMA_VERSION, _POLICY_VERSION, _SSOT_VERSION, _to_iso(datetime.utcnow())),
-            )
-            return
-        if len(rows) > 1:
-            conn.execute("DELETE FROM schema_meta WHERE id != 1")
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO schema_meta (id, schema_version, policy_version, ssot_version, created_at)
+            VALUES (1, ?, ?, ?, ?)
+            """,
+            (_SCHEMA_VERSION, _POLICY_VERSION, _SSOT_VERSION, _to_iso(datetime.utcnow())),
+        )
 
     @staticmethod
     def _validate_schema_version(conn: sqlite3.Connection) -> None:
@@ -474,16 +468,28 @@ class LocalDatabase:
         """جایگزینی اتمیک یک جدول با الگوی temp→swap در یک تراکنش."""
 
         temp_table = f"_{table_name}_new"
+        backup_table = f"_{table_name}_backup"
         try:
-            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
+            conn.execute(f"DROP TABLE IF EXISTS {backup_table}")
             df.to_sql(temp_table, conn, if_exists="replace", index=False)
-            conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+
+            conn.execute("BEGIN IMMEDIATE")
+            if _table_exists(conn, table_name):
+                conn.execute(f"ALTER TABLE {table_name} RENAME TO {backup_table}")
             conn.execute(f"ALTER TABLE {temp_table} RENAME TO {table_name}")
             for stmt in index_statements or []:
                 conn.execute(stmt)
+            conn.execute(f"DROP TABLE IF EXISTS {backup_table}")
+            conn.commit()
         except sqlite3.Error as exc:
             try:
                 conn.rollback()
+            except sqlite3.Error:
+                pass
+            try:
+                conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
+                conn.execute(f"DROP TABLE IF EXISTS {backup_table}")
             except sqlite3.Error:
                 pass
             raise DatabaseOperationError("جایگزینی جدول به‌صورت اتمیک با خطا مواجه شد.") from exc
