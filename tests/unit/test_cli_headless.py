@@ -9,6 +9,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 import pytest
+from pandas.testing import assert_frame_equal
 
 from app.core.policy_loader import load_policy
 from app.infra import cli
@@ -289,9 +290,14 @@ def test_run_build_matrix_raises_on_duplicate_threshold_exceeded(
         crosswalk=str(crosswalk),
         output=str(output),
         min_coverage=None,
+        local_db_path=str(tmp_path / "local.db"),
     )
 
-    monkeypatch.setattr(cli, "import_mentor_pool_from_excel", lambda *_args, **_kwargs: mentor_pool_with_duplicates)
+    monkeypatch.setattr(
+        cli,
+        "import_mentor_pool_from_excel",
+        lambda *_args, **_kwargs: mentor_pool_with_duplicates,
+    )
     monkeypatch.setattr(cli, "import_school_report_from_excel", lambda *_args, **_kwargs: schools_stub)
     monkeypatch.setattr(
         cli,
@@ -304,19 +310,30 @@ def test_run_build_matrix_raises_on_duplicate_threshold_exceeded(
         lambda *_args, **_kwargs: (schools_stub, crosswalk_stub, pd.DataFrame()),
     )
 
-    def fake_build_matrix(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+    def fake_build_matrix(
+        insp_df: pd.DataFrame,
+        schools_df: pd.DataFrame,
+        crosswalk_groups_df: pd.DataFrame,
+        *,
+        crosswalk_synonyms_df: pd.DataFrame,
+        cfg,
+        progress,
+    ):  # type: ignore[no-untyped-def]
+        assert_frame_equal(insp_df.reset_index(drop=True), mentor_pool_with_duplicates.reset_index(drop=True))
+        assert_frame_equal(schools_df.reset_index(drop=True), schools_stub.reset_index(drop=True))
+        assert_frame_equal(crosswalk_groups_df.reset_index(drop=True), crosswalk_stub.reset_index(drop=True))
         validation = pd.DataFrame(
             [
                 {
-                    "join_key_duplicate_rows": 3,
+                    "join_key_duplicate_rows": len(insp_df),
                     "join_key_duplicate_threshold": 0,
-                    "warning_type": pd.NA,
-                    "warning_message": pd.NA,
+                    "warning_type": "duplicate",
+                    "warning_message": "join-key duplicates detected",
                     "warning_payload": pd.NA,
                 }
             ]
         )
-        duplicates = pd.DataFrame({"کد کارمندی پشتیبان": ["E1", "E2", "E3"]})
+        duplicates = insp_df.iloc[:2].copy()
         empties = pd.DataFrame()
         return (empties, validation, empties, empties, empties, empties, duplicates, empties)
 
@@ -327,7 +344,9 @@ def test_run_build_matrix_raises_on_duplicate_threshold_exceeded(
         cli._run_build_matrix(args, policy, lambda *_args: None)
 
     assert getattr(excinfo.value, "is_join_key_duplicate_threshold_error", False)
-    assert "آستانهٔ مجاز" in str(excinfo.value)
+    message = str(excinfo.value)
+    assert "آستانهٔ مجاز" in message
+    assert "(" in message and ")" in message
 
 
 def test_run_build_matrix_verifies_policy_version(
@@ -358,6 +377,7 @@ def test_run_build_matrix_verifies_policy_version(
         output=str(output),
         min_coverage=None,
         policy_version="sha256:deadbeef",
+        local_db_path=str(tmp_path / "local.db"),
     )
 
     monkeypatch.setattr(cli, "import_mentor_pool_from_excel", lambda *_args, **_kwargs: mentor_pool_empty)
@@ -372,10 +392,18 @@ def test_run_build_matrix_verifies_policy_version(
         "get_school_reference_frames",
         lambda *_args, **_kwargs: (schools_stub, crosswalk_stub, pd.DataFrame()),
     )
-    monkeypatch.setattr(cli, "build_matrix", lambda *_args, **_kwargs: pytest.fail("should not build"))
+    called: dict[str, bool] = {"build": False}
+
+    def _build_matrix_guard(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        called["build"] = True
+        raise AssertionError("build_matrix should not be invoked on version mismatch")
+
+    monkeypatch.setattr(cli, "build_matrix", _build_matrix_guard)
 
     with pytest.raises(ValueError, match="policy version mismatch"):
         cli._run_build_matrix(args, policy, lambda *_args: None)
+
+    assert not called["build"]
 
 
 def test_allocate_command_passes_through(policy_file: Path) -> None:

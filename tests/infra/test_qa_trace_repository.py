@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
-from app.infra.local_database import LocalDatabase, RunRecord
+from app.infra.local_database import LocalDatabase, RunRecord, _SCHEMA_VERSION
 
 
 def _sample_run_record(start: datetime) -> RunRecord:
@@ -59,6 +59,13 @@ def test_trace_snapshot_round_trip(tmp_path) -> None:
         restored_history.reset_index(drop=True), history_info_df.reset_index(drop=True)
     )
 
+    with db.connect() as conn:
+        version = conn.execute("SELECT schema_version FROM schema_meta WHERE id = 1").fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM trace_snapshots WHERE run_id = ?", (run_id,)).fetchone()[0]
+
+    assert int(version) == _SCHEMA_VERSION
+    assert count == 1
+
 
 def test_qa_snapshot_round_trip(tmp_path) -> None:
     db = LocalDatabase(tmp_path / "snap.db")
@@ -97,6 +104,13 @@ def test_qa_snapshot_round_trip(tmp_path) -> None:
     assert restored_summary is not None and restored_details is not None
     assert_frame_equal(restored_summary.reset_index(drop=True), qa_summary_df.reset_index(drop=True))
     assert_frame_equal(restored_details.reset_index(drop=True), qa_details_df.reset_index(drop=True))
+
+    with db.connect() as conn:
+        version = conn.execute("SELECT schema_version FROM schema_meta WHERE id = 1").fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM qa_snapshots WHERE run_id = ?", (run_id,)).fetchone()[0]
+
+    assert int(version) == _SCHEMA_VERSION
+    assert count == 1
 
 
 def test_fetch_returns_none_for_missing_rows(tmp_path) -> None:

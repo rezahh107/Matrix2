@@ -5,7 +5,7 @@ import sqlite3
 import pandas as pd
 
 from app.infra.forms_repository import FormsRepository
-from app.infra.local_database import LocalDatabase
+from app.infra.local_database import LocalDatabase, _SCHEMA_VERSION
 
 
 class _FakeFormsClient:
@@ -37,6 +37,7 @@ def _sample_entries():
 
 def test_forms_repository_sync_and_load(tmp_path: Path):
     db = LocalDatabase(tmp_path / "forms.sqlite")
+    db.initialize()
     client = _FakeFormsClient(_sample_entries())
     repo = FormsRepository(client=client, db=db)
 
@@ -50,13 +51,17 @@ def test_forms_repository_sync_and_load(tmp_path: Path):
     assert list(cached["entry_id"]) == ["11", "12"]
     assert isinstance(cached["received_at"].dtype, pd.DatetimeTZDtype)
 
-    meta = db.fetch_reference_meta("forms_entries")
-    assert meta is not None
-    assert meta[2] == 2
+    with sqlite3.connect(db.path) as conn:
+        version = conn.execute("SELECT schema_version FROM schema_meta WHERE id = 1").fetchone()[0]
+        row_count = conn.execute("SELECT COUNT(*) FROM forms_entries").fetchone()[0]
+
+    assert int(version) == _SCHEMA_VERSION
+    assert row_count == 2
 
 
 def test_forms_repository_idempotent_sync(tmp_path: Path):
     db = LocalDatabase(tmp_path / "forms.sqlite")
+    db.initialize()
     client = _FakeFormsClient(_sample_entries())
     repo = FormsRepository(client=client, db=db)
 
@@ -76,6 +81,7 @@ def test_forms_repository_timestamp_roundtrip_and_privacy_hook(tmp_path: Path):
         return df.drop(columns=["form_id"], errors="ignore")
 
     db = LocalDatabase(tmp_path / "forms.sqlite")
+    db.initialize()
     client = _FakeFormsClient(_sample_entries())
     repo = FormsRepository(client=client, db=db, privacy_hook=_privacy)
 
@@ -88,4 +94,7 @@ def test_forms_repository_timestamp_roundtrip_and_privacy_hook(tmp_path: Path):
 
     with sqlite3.connect(db.path) as conn:
         raw = conn.execute("SELECT received_at FROM forms_entries ORDER BY entry_id").fetchall()
+        version = conn.execute("SELECT schema_version FROM schema_meta WHERE id = 1").fetchone()[0]
+
     assert raw[0][0].endswith("Z")
+    assert int(version) == _SCHEMA_VERSION
